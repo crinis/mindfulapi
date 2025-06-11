@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="gefe"> <!-- Wrong lang attribute - content is in English but lang is set to invalid language code -->
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Auto-refreshing content (potential issue) -->
+    <meta http-equiv="refresh" content="30">
+    <title>Example Page with Multiple Accessibility Issues</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        header {
+            background-color: #f4f4f4;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .content {
+            background-color: #fff;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .low-contrast {
+            color: #ccc;
+            background-color: #fff;
+        }
+        .hidden-content {
+            position: absolute;
+            left: -9999px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Welcome to Our Website</h1>
+        <!-- Missing alt text for image -->
+        <img src="logo.png" width="100" height="50">
+        
+        <nav>
+            <ul>
+                <!-- Empty link content -->
+                <li><a href="#home"></a></li>
+                <!-- Link with no href -->
+                <li><a>About Us</a></li>
+                <li><a href="#services">Services</a></li>
+                <li><a href="#contact">Contact</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main class="content">
+        <h2>About Our Company</h2>
+        
+        <!-- Image without alt text -->
+        <img src="company-photo.jpg" width="300" height="200">
+        
+        <p>
+            This is an example HTML page that demonstrates multiple accessibility issues. 
+            The content is written in English, but the HTML lang attribute is incorrectly 
+            set to "gefe" (invalid language code) in the opening html tag.
+        </p>
+        
+        <!-- Low contrast text -->
+        <p class="low-contrast">
+            This text has poor contrast and may be difficult to read for users with visual impairments.
+        </p>
+        
+        <p>
+            This page contains various accessibility violations that can cause problems for:
+        </p>
+        
+        <ul>
+            <li>Screen readers that may not work properly with unlabeled content</li>
+            <li>Keyboard users who cannot navigate properly</li>
+            <li>Users with visual impairments who need proper contrast</li>
+            <li>Users who rely on alternative text for images</li>
+        </ul>
+
+        <!-- Form with accessibility issues -->
+        <h3>Contact Form</h3>
+        <form>
+            <!-- Input without label -->
+            <input type="text" placeholder="Enter your name">
+            
+            <!-- Input with incorrect label association -->
+            <label for="wrong-id">Email Address:</label>
+            <input type="email" id="email-field" required>
+            
+            <!-- Select without label -->
+            <select>
+                <option value="">Choose a topic</option>
+                <option value="general">General Inquiry</option>
+                <option value="support">Support</option>
+            </select>
+            
+            <!-- Textarea without label -->
+            <textarea placeholder="Your message"></textarea>
+            
+            <!-- Button with no accessible name -->
+            <button type="submit"></button>
+        </form>
+
+        <h3>Our Services</h3>
+        <p>
+            We provide comprehensive web accessibility testing services to help 
+            organizations ensure their websites are accessible to all users, 
+            including those with disabilities.
+        </p>
+        
+        <!-- Image with empty alt attribute but has title (violation) -->
+        <img src="services.jpg" alt="" title="Our services include testing and consulting" width="250" height="150">
+
+        <blockquote>
+            "Accessibility is not a feature to add on, but a core principle to build in."
+        </blockquote>
+        
+        <!-- Skipped heading level (h2 to h4) -->
+        <h4>Why Choose Us?</h4>
+        <p>We have years of experience in accessibility testing.</p>
+
+        <h3>Contact Information</h3>
+        <p>
+            Email: contact@example.com<br>
+            Phone: (555) 123-4567<br>
+            Address: 123 Main Street, City, State 12345
+        </p>
+        
+        <!-- Data table without proper headers -->
+        <table border="1">
+            <tr>
+                <td>Service</td>
+                <td>Price</td>
+                <td>Duration</td>
+            </tr>
+            <tr>
+                <td>Basic Audit</td>
+                <td>$500</td>
+                <td>1 week</td>
+            </tr>
+            <tr>
+                <td>Full Audit</td>
+                <td>$1500</td>
+                <td>3 weeks</td>
+            </tr>
+        </table>
+        
+        <!-- Iframe without title -->
+        <iframe src="https://example.com/map" width="400" height="300"></iframe>
+        
+        <!-- Hidden content that should be visible -->
+        <div class="hidden-content">
+            <p>This important information is hidden from screen readers and users.</p>
+        </div>
+        
+        <!-- Mouse-only interactions -->
+        <div onmouseover="showTooltip()" onmouseout="hideTooltip()">
+            Hover over me for information (not keyboard accessible)
+        </div>
+        
+        <!-- Clickable div without keyboard support -->
+        <div onclick="handleClick()" style="cursor: pointer; background: #eee; padding: 10px; margin: 10px 0;">
+            Click me (but I'm not keyboard accessible)
+        </div>
+    </main>
+
+    <footer>
+        <p>&copy; 2025 Example Company. All rights reserved.</p>
+    </footer>
+
+    <script>
+        function showTooltip() {
+            console.log('Tooltip shown');
+        }
+        
+        function hideTooltip() {
+            console.log('Tooltip hidden');
+        }
+        
+        function handleClick() {
+            alert('Div clicked!');
+        }
+    </script>
+</body>
+</html>

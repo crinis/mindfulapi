@@ -1,0 +1,18 @@
+meta {
+  name: Create Scan
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://localhost:3000/scans
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "url": "http://localhost:8080",
+    "language": "en"
+  }
+}

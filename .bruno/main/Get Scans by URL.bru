@@ -1,0 +1,11 @@
+meta {
+  name: Get Scans by URL
+  type: http
+  seq: 5
+}
+
+get {
+  url: http://localhost:3000/scans/by-url?url=http://localhost:8080&language=en
+  body: none
+  auth: inherit
+}
