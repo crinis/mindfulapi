@@ -5,7 +5,11 @@ meta {
 }
 
 get {
-  url: http://localhost:3000/scans/1
+  url: http://localhost:3000/scans/17
   body: none
-  auth: inherit
+  auth: bearer
+}
+
+auth:bearer {
+  token: changeme
 }

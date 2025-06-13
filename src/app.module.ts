@@ -4,6 +4,7 @@ import { ScanModule } from './modules/scan.module';
 import { QueueModule } from './modules/queue.module';
 import { Scan } from './entities/scan.entity';
 import { Issue } from './entities/issue.entity';
+import { authProvider } from './guards/auth-provider';
 
 /**
  * Root application module that configures database connection and imports feature modules.
@@ -27,5 +28,6 @@ import { Issue } from './entities/issue.entity';
     QueueModule, // Background job processing for accessibility scans
     ScanModule, // Core scan management functionality
   ],
+  providers: [authProvider],
 })
 export class AppModule {}

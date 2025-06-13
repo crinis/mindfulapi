@@ -1,3 +1,4 @@
+require('dotenv').config();
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
@@ -6,10 +7,10 @@ import { join } from 'path';
 
 /**
  * Bootstrap function that initializes and configures the NestJS application.
- * 
+ *
  * Sets up global validation pipes, static file serving for screenshots,
  * and starts the HTTP server on the configured port.
- * 
+ *
  * @throws {Error} When application fails to start properly
  */
 async function bootstrap() {
