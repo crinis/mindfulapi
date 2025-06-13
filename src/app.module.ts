@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScanModule } from './modules/scan.module';
 import { QueueModule } from './modules/queue.module';
+import { CleanupModule } from './modules/cleanup.module';
 import { Scan } from './entities/scan.entity';
 import { Issue } from './entities/issue.entity';
 import { authProvider } from './guards/auth-provider';
@@ -27,6 +28,7 @@ import { authProvider } from './guards/auth-provider';
     }),
     QueueModule, // Background job processing for accessibility scans
     ScanModule, // Core scan management functionality
+    CleanupModule, // Automated cleanup of old scans and screenshots
   ],
   providers: [authProvider],
 })

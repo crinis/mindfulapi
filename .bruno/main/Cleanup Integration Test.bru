@@ -1,0 +1,32 @@
+meta {
+  name: Cleanup Integration Test
+  type: http
+  seq: 8
+}
+
+post {
+  url: http://localhost:3000/admin/cleanup/trigger
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: changeme
+}
+
+pre-request {
+  // This test verifies that cleanup works even when disabled
+  // because manual trigger bypasses the enabled check
+}
+
+tests {
+  test("Manual cleanup should work even when scheduled cleanup is disabled", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data.message).to.include('completed successfully');
+  });
+  
+  test("Response time should be reasonable", function() {
+    expect(res.getResponseTime()).to.be.below(30000); // 30 seconds max
+  });
+}

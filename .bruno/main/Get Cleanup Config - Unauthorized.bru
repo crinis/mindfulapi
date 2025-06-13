@@ -1,0 +1,21 @@
+meta {
+  name: Get Cleanup Config - Unauthorized
+  type: http
+  seq: 7
+}
+
+get {
+  url: http://localhost:3000/admin/cleanup/config
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: invalid-token
+}
+
+tests {
+  test("Should return 401 Unauthorized", function() {
+    expect(res.getStatus()).to.equal(401);
+  });
+}

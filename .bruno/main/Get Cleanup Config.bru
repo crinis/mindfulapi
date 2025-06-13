@@ -1,0 +1,44 @@
+meta {
+  name: Get Cleanup Config
+  type: http
+  seq: 5
+}
+
+get {
+  url: http://localhost:3000/admin/cleanup/config
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: changeme
+}
+
+tests {
+  test("Should return 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("Should return cleanup configuration", function() {
+    const data = res.getBody();
+    expect(data).to.have.property('enabled');
+    expect(data).to.have.property('retentionDays');
+    expect(data).to.have.property('screenshotDir');
+    expect(data).to.have.property('interval');
+    expect(data).to.have.property('batchSize');
+    expect(data).to.have.property('concurrencyLimit');
+  });
+  
+  test("Should have valid configuration values", function() {
+    const data = res.getBody();
+    expect(data.enabled).to.be.a('boolean');
+    expect(data.retentionDays).to.be.a('number');
+    expect(data.retentionDays).to.be.at.least(0);
+    expect(data.screenshotDir).to.be.a('string');
+    expect(data.interval).to.be.a('string');
+    expect(data.batchSize).to.be.a('number');
+    expect(data.batchSize).to.be.at.least(1);
+    expect(data.concurrencyLimit).to.be.a('number');
+    expect(data.concurrencyLimit).to.be.at.least(1);
+  });
+}
