@@ -1,0 +1,54 @@
+meta {
+  name: Create Scan - HTMLCS With Rule IDs
+  type: http
+  seq: 31
+}
+
+post {
+  url: http://localhost:3000/scans
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: changeme
+}
+
+body:json {
+  {
+    "url": "https://example.com",
+    "scannerType": "htmlcs",
+    "ruleIds": ["WCAG2AA.Principle1.Guideline1_1.1_1_1.H37", "WCAG2AA.Principle4.Guideline4_1.4_1_2.H91.A.Empty"]
+  }
+}
+
+tests {
+  test("Should return 201 Created", function() {
+    expect(res.getStatus()).to.equal(201);
+  });
+  
+  test("Should create scan with HTMLCS rule IDs", function() {
+    const scan = res.getBody();
+    expect(scan).to.have.property('id');
+    expect(scan).to.have.property('url');
+    expect(scan).to.have.property('status');
+    expect(scan).to.have.property('scannerType');
+    expect(scan.status).to.equal('pending');
+    expect(scan.url).to.equal('https://example.com');
+    expect(scan.scannerType).to.equal('htmlcs');
+  });
+  
+  test("Should have proper scan structure", function() {
+    const scan = res.getBody();
+    expect(scan).to.have.property('violations');
+    expect(scan).to.have.property('totalIssueCount');
+    expect(scan).to.have.property('createdAt');
+    expect(scan).to.have.property('updatedAt');
+    expect(scan.violations).to.be.an('array');
+    expect(scan.totalIssueCount).to.equal(0); // Initially empty
+  });
+  
+  test("Should respond within reasonable time", function() {
+    expect(res.getResponseTime()).to.be.lessThan(2000);
+  });
+}

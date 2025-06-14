@@ -1,0 +1,63 @@
+meta {
+  name: Get Rules - Default Scanner
+  type: http
+  seq: 32
+}
+
+get {
+  url: http://localhost:3000/rules
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: changeme
+}
+
+tests {
+  test("Should return 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("Should return array of rules", function() {
+    expect(res.getBody()).to.be.an('array');
+    expect(res.getBody().length).to.be.greaterThan(0);
+  });
+  
+  test("Should return HTMLCS rules by default", function() {
+    const rules = res.getBody();
+    // HTMLCS rules typically have WCAG technique-style IDs
+    const hasHtmlcsRules = rules.some(rule => 
+      rule.id.includes('WCAG') || rule.id.includes('Principle')
+    );
+    expect(hasHtmlcsRules).to.be.true;
+  });
+  
+  test("Each rule should have required properties", function() {
+    const rules = res.getBody();
+    rules.forEach(rule => {
+      expect(rule).to.have.property('id');
+      expect(rule).to.have.property('description');
+      expect(rule).to.have.property('impact');
+      expect(rule).to.have.property('urls');
+      expect(rule.urls).to.be.an('array');
+    });
+  });
+  
+  test("Should have WCAG technique URLs", function() {
+    const rules = res.getBody();
+    const hasWcagUrls = rules.some(rule => 
+      rule.urls.some(url => url.includes('w3.org/WAI/WCAG'))
+    );
+    expect(hasWcagUrls).to.be.true;
+  });
+  
+  test("Should respond within reasonable time", function() {
+    expect(res.getResponseTime()).to.be.lessThan(5000);
+  });
+  
+  test("Should return large rule set", function() {
+    const rules = res.getBody();
+    expect(rules.length).to.be.greaterThan(100); // HTMLCS has ~231 rules
+  });
+}

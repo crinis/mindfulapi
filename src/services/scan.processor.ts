@@ -73,16 +73,16 @@ export class ScanProcessor extends WorkerHost {
    * @throws {Error} Re-throws scan errors to trigger BullMQ retry mechanism
    */
   async process(job: Job<ScanJobData>): Promise<void> {
-    const { scanId, url, rootElement, scannerType } = job.data;
+    const { scanId, url, rootElement, scannerType, ruleIds } = job.data;
 
-    this.logger.log(`Processing scan ${scanId} for URL: ${url} using ${scannerType} scanner${rootElement ? ` (rootElement: ${rootElement})` : ''}`);
+    this.logger.log(`Processing scan ${scanId} for URL: ${url} using ${scannerType} scanner${rootElement ? ` (rootElement: ${rootElement})` : ''}${ruleIds ? ` (ruleIds: ${ruleIds.join(', ')})` : ''}`);
 
     try {
       // Update scan status to RUNNING
       await this.updateScanStatus(scanId, ScanStatus.RUNNING);
 
       // Perform accessibility scanning process with the specified scanner
-      await this.performAccessibilityScan(scanId, url, rootElement, scannerType);
+      await this.performAccessibilityScan(scanId, url, rootElement, scannerType, ruleIds);
 
       // Update scan status to COMPLETED
       await this.updateScanStatus(scanId, ScanStatus.COMPLETED);
@@ -116,6 +116,7 @@ export class ScanProcessor extends WorkerHost {
    * @param url - Target URL to scan for accessibility issues
    * @param rootElement - Optional CSS selector to limit scanning scope
    * @param scannerType - Type of accessibility scanner to use
+   * @param ruleIds - Specific accessibility rule IDs to execute during scanning
    * @throws {Error} When browser automation, scanning, or data persistence fails
    */
   private async performAccessibilityScan(
@@ -123,6 +124,7 @@ export class ScanProcessor extends WorkerHost {
     url: string,
     rootElement?: string,
     scannerType?: ScannerType,
+    ruleIds?: string[],
   ): Promise<void> {
     try {
       // Get the browser instance
@@ -131,13 +133,17 @@ export class ScanProcessor extends WorkerHost {
       // Get the appropriate scanner for the specified type
       const scanner = this.scannerFactory.getScanner(scannerType);
 
-      // Build scan options, only including rootElement if provided
+      // Build scan options, only including rootElement and ruleIds if provided
       const scanOptions: any = {
         timeout: 30000, // 30 second timeout
       };
       
       if (rootElement) {
         scanOptions.rootElement = rootElement;
+      }
+
+      if (ruleIds && ruleIds.length > 0) {
+        scanOptions.ruleIds = ruleIds;
       }
 
       // Run accessibility scan using the specified scanner

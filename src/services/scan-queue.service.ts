@@ -21,6 +21,8 @@ export interface ScanJobData {
   rootElement?: string;
   /** Accessibility scanner type to use for the scan */
   scannerType?: ScannerType;
+  /** Specific accessibility rule IDs to execute during scanning */
+  ruleIds?: string[];
 }
 
 /**
@@ -63,6 +65,7 @@ export class ScanQueueService {
    * @param language - Language preference for accessibility rule descriptions
    * @param rootElement - CSS selector defining the root element scope for scanning
    * @param scannerType - Accessibility scanner type to use for the scan
+   * @param ruleIds - Specific accessibility rule IDs to execute during scanning
    */
   async addScanJob(
     scanId: number,
@@ -70,6 +73,7 @@ export class ScanQueueService {
     language: Language,
     rootElement?: string,
     scannerType?: ScannerType,
+    ruleIds?: string[],
   ): Promise<void> {
     await this.scanQueue.add(
       'process-scan',
@@ -79,6 +83,7 @@ export class ScanQueueService {
         language,
         rootElement,
         scannerType: scannerType || ScannerType.HTMLCS,
+        ruleIds,
       },
       {
         delay: 1000, // Small delay to ensure database transaction is committed

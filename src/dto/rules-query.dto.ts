@@ -13,13 +13,14 @@ export class RulesQueryDto {
    * Scanner type to retrieve rules for.
    * 
    * Determines which accessibility testing engine's rules will be returned.
-   * This parameter is required to ensure the correct rule set is provided.
+   * If not specified, defaults to 'htmlcs' (HTML_CodeSniffer) scanner rules.
    * 
-   * @example "htmlcs" for HTML_CodeSniffer rules
+   * @example "htmlcs" for HTML_CodeSniffer rules (default)
    * @example "axe" for Axe accessibility scanner rules
    */
+  @IsOptional()
   @IsEnum(ScannerType)
-  scannerType: ScannerType;
+  scannerType?: ScannerType;
 
   /**
    * Language preference for rule descriptions.

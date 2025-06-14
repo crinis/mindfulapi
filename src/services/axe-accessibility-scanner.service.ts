@@ -72,10 +72,13 @@ export class AxeAccessibilityScanner extends BaseAccessibilityScanner implements
         // Run the accessibility scan
         const results = await this.runKayleScan(kayleOptions, url);
 
+        // Filter issues by rule IDs if specified
+        const filteredIssues = this.filterIssuesByRules(results.issues, options?.ruleIds);
+
         // Take custom screenshots for each issue
         const issuesWithScreenshots = await this.takeScreenshots(
           page,
-          results.issues,
+          filteredIssues,
           screenshotDir,
         );
 

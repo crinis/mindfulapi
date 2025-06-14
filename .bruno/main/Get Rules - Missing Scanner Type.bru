@@ -1,5 +1,5 @@
 meta {
-  name: Get Rules - Missing Scanner Type
+  name: Get Rules - Missing Scanner Type (Now Defaults)
   type: http
   seq: 24
 }
@@ -15,16 +15,29 @@ auth:bearer {
 }
 
 tests {
-  test("Should return 400 Bad Request", function() {
-    expect(res.getStatus()).to.equal(400);
+  test("Should return 200 OK (scannerType now optional)", function() {
+    expect(res.getStatus()).to.equal(200);
   });
   
-  test("Should return validation error for missing scannerType", function() {
-    const body = res.getBody();
-    expect(body).to.have.property('message');
-    expect(body).to.have.property('error');
-    expect(body).to.have.property('statusCode');
-    expect(body.statusCode).to.equal(400);
-    expect(body.error).to.equal('Bad Request');
+  test("Should return default HTMLCS rules when scannerType not specified", function() {
+    const rules = res.getBody();
+    expect(rules).to.be.an('array');
+    expect(rules.length).to.be.greaterThan(0);
+    
+    // HTMLCS rules typically have WCAG technique-style IDs
+    const hasHtmlcsRules = rules.some(rule => 
+      rule.id.includes('WCAG') || rule.id.includes('Principle')
+    );
+    expect(hasHtmlcsRules).to.be.true;
+  });
+  
+  test("Should have proper rule structure", function() {
+    const rules = res.getBody();
+    rules.forEach(rule => {
+      expect(rule).to.have.property('id');
+      expect(rule).to.have.property('description');
+      expect(rule).to.have.property('impact');
+      expect(rule).to.have.property('urls');
+    });
   });
 }

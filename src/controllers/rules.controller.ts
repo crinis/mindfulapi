@@ -25,7 +25,8 @@ export class RulesController {
    * 
    * Returns a comprehensive list of accessibility rules supported by
    * the specified scanner, including rule IDs, descriptions, impact levels,
-   * and help URLs for remediation guidance.
+   * and help URLs for remediation guidance. If no scanner type is specified,
+   * defaults to HTMLCS (HTML_CodeSniffer) rules.
    * 
    * This endpoint is useful for:
    * - Discovering available rules for a scanner
@@ -41,6 +42,7 @@ export class RulesController {
    * @example
    * GET /rules?scannerType=axe
    * GET /rules?scannerType=htmlcs&language=es
+   * GET /rules (defaults to htmlcs scanner)
    */
   @Get()
   async getRules(@Query() query: RulesQueryDto): Promise<RuleResponseDto[]> {

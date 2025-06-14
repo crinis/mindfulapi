@@ -1,0 +1,54 @@
+meta {
+  name: Create Scan - With Rule IDs
+  type: http
+  seq: 30
+}
+
+post {
+  url: http://localhost:3000/scans
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: changeme
+}
+
+body:json {
+  {
+    "url": "https://example.com",
+    "scannerType": "axe",
+    "ruleIds": ["color-contrast", "alt-text", "link-name"]
+  }
+}
+
+tests {
+  test("Should return 201 Created", function() {
+    expect(res.getStatus()).to.equal(201);
+  });
+  
+  test("Should create scan with rule IDs", function() {
+    const scan = res.getBody();
+    expect(scan).to.have.property('id');
+    expect(scan).to.have.property('url');
+    expect(scan).to.have.property('status');
+    expect(scan).to.have.property('scannerType');
+    expect(scan.status).to.equal('pending');
+    expect(scan.url).to.equal('https://example.com');
+    expect(scan.scannerType).to.equal('axe');
+  });
+  
+  test("Should have proper scan structure", function() {
+    const scan = res.getBody();
+    expect(scan).to.have.property('violations');
+    expect(scan).to.have.property('totalIssueCount');
+    expect(scan).to.have.property('createdAt');
+    expect(scan).to.have.property('updatedAt');
+    expect(scan.violations).to.be.an('array');
+    expect(scan.totalIssueCount).to.equal(0); // Initially empty
+  });
+  
+  test("Should respond within reasonable time", function() {
+    expect(res.getResponseTime()).to.be.lessThan(2000);
+  });
+}

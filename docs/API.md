@@ -47,6 +47,7 @@ Creates a new accessibility scan and queues it for asynchronous processing.
 | `language` | string | No | Language preference for accessibility rule descriptions. Defaults to "en" if not specified. |
 | `rootElement` | string | No | CSS selector to limit scanning scope to a specific page element. If not specified, the entire page will be scanned. |
 | `scannerType` | string | No | Accessibility scanner type to use ('htmlcs' or 'axe'). Defaults to "htmlcs" if not specified. |
+| `ruleIds` | array[string] | No | Specific accessibility rule IDs to execute during scanning. Only the specified rules will be run and their results stored. If not specified, all available rules for the scanner will be executed. |
 
 ### Response
 
@@ -56,7 +57,9 @@ Creates a new accessibility scan and queues it for asynchronous processing.
 {
   "id": 1,
   "url": "https://example.com",
+  "language": "en",
   "rootElement": "main",
+  "scannerType": "htmlcs",
   "status": "pending",
   "violations": [],
   "totalIssueCount": 0,
@@ -88,6 +91,17 @@ curl -X POST http://localhost:3000/scans \
   }'
 ```
 
+**Scan with Axe scanner:**
+```bash
+curl -X POST http://localhost:3000/scans \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer changeme" \
+  -d '{
+    "url": "https://example.com",
+    "scannerType": "axe"
+  }'
+```
+
 **Scan with limited scope:**
 ```bash
 curl -X POST http://localhost:3000/scans \
@@ -97,6 +111,44 @@ curl -X POST http://localhost:3000/scans \
     "url": "https://example.com",
     "language": "en",
     "rootElement": "main"
+  }'
+```
+
+**Scan with specific Axe rules:**
+```bash
+curl -X POST http://localhost:3000/scans \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer changeme" \
+  -d '{
+    "url": "https://example.com",
+    "scannerType": "axe",
+    "ruleIds": ["color-contrast", "alt-text", "link-name"]
+  }'
+```
+
+**Scan with specific HTMLCS rules:**
+```bash
+curl -X POST http://localhost:3000/scans \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer changeme" \
+  -d '{
+    "url": "https://example.com",
+    "scannerType": "htmlcs",
+    "ruleIds": ["WCAG2AA.Principle1.Guideline1_1.1_1_1.H37", "WCAG2AA.Principle4.Guideline4_1.4_1_2.H91.A.Empty"]
+  }'
+```
+
+**Comprehensive scan with all options:**
+```bash
+curl -X POST http://localhost:3000/scans \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer changeme" \
+  -d '{
+    "url": "https://example.com",
+    "language": "es",
+    "rootElement": "main",
+    "scannerType": "axe",
+    "ruleIds": ["color-contrast", "alt-text"]
   }'
 ```
 
@@ -117,6 +169,8 @@ Retrieves all accessibility scans ordered by creation date (newest first).
   {
     "id": 2,
     "url": "https://example.com",
+    "language": "en",
+    "scannerType": "htmlcs",
     "status": "completed",
     "violations": [
       {
@@ -175,6 +229,8 @@ Retrieves a specific scan by its unique identifier with complete violation detai
 {
   "id": 1,
   "url": "https://example.com",
+  "language": "en",
+  "scannerType": "htmlcs",
   "status": "completed",
   "violations": [
     {
@@ -251,6 +307,8 @@ Returns an array of scans for the specified URL, ordered by creation date (newes
   {
     "id": 3,
     "url": "https://example.com",
+    "language": "en",
+    "scannerType": "htmlcs",
     "status": "completed",
     "violations": [...],
     "totalIssueCount": 5,
@@ -260,6 +318,8 @@ Returns an array of scans for the specified URL, ordered by creation date (newes
   {
     "id": 1,
     "url": "https://example.com",
+    "language": "en",
+    "scannerType": "htmlcs",
     "status": "completed",
     "violations": [...],
     "totalIssueCount": 8,
@@ -353,6 +413,126 @@ curl -X GET http://localhost:3000/admin/cleanup/config \
 
 ---
 
+# Rules Discovery Endpoints
+
+The rules discovery endpoints allow clients to retrieve information about available accessibility rules for different scanner types.
+
+## Get Rules for Scanner Type
+
+**GET** `/rules`
+
+Retrieves all available accessibility rules for a specific scanner type with optional language preferences.
+
+### Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scannerType` | string | No | Scanner type to retrieve rules for ('htmlcs' or 'axe'). Defaults to 'htmlcs' if not specified. |
+| `language` | string | No | Language preference for rule descriptions. Defaults to "en" if not specified. |
+
+### Response
+
+**Status:** `200 OK`
+
+```json
+[
+  {
+    "id": "color-contrast",
+    "description": "Ensures the contrast between foreground and background colors meets WCAG AA standard",
+    "impact": "error",
+    "urls": ["https://dequeuniversity.com/rules/axe/4.6/color-contrast"]
+  },
+  {
+    "id": "alt-text",
+    "description": "Ensures img elements have alternate text or a role of none or presentation",
+    "impact": "error", 
+    "urls": ["https://dequeuniversity.com/rules/axe/4.6/alt-text"]
+  }
+]
+```
+
+### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique identifier for the accessibility rule |
+| `description` | string | Human-readable description of what the rule checks |
+| `impact` | string | Severity level: "error", "warning", or "notice" |
+| `urls` | array | Array of help URLs providing remediation guidance |
+
+### Example Usage
+
+**Get default HTMLCS rules in English:**
+```bash
+curl -X GET "http://localhost:3000/rules" \
+  -H "Authorization: Bearer changeme"
+```
+
+**Get Axe rules in English:**
+```bash
+curl -X GET "http://localhost:3000/rules?scannerType=axe" \
+  -H "Authorization: Bearer changeme"
+```
+
+**Get HTMLCS rules in Spanish:**
+```bash
+curl -X GET "http://localhost:3000/rules?scannerType=htmlcs&language=es" \
+  -H "Authorization: Bearer changeme"
+```
+
+**Get Axe rules in French:**
+```bash
+curl -X GET "http://localhost:3000/rules?scannerType=axe&language=fr" \
+  -H "Authorization: Bearer changeme"
+```
+
+### Scanner Types
+
+| Scanner | Description | Rule Count (Approx) | Help URL Pattern |
+|---------|-------------|---------------------|------------------|
+| `htmlcs` | HTML_CodeSniffer accessibility scanner | ~231 rules | W3C WCAG Techniques |
+| `axe` | Axe accessibility scanner | ~96 rules | Deque University |
+
+### Supported Languages
+
+The API supports the following language codes for rule descriptions:
+
+| Code | Language | Code | Language |
+|------|----------|------|----------|
+| `en` | English (default) | `es` | Spanish |
+| `fr` | French | `it` | Italian |
+| `de` | German | `nl` | Dutch |
+| `ar` | Arabic | `ja` | Japanese |
+| `ko` | Korean | `pl` | Polish |
+| `zh_CN` | Chinese (Simplified) | `zh_TW` | Chinese (Traditional) |
+| `da` | Danish | `eu` | Basque |
+| `he` | Hebrew | `no_NB` | Norwegian (Bokmål) |
+| `pt_BR` | Portuguese (Brazil) | | |
+
+### Error Responses
+
+**Status:** `400 Bad Request`
+
+```json
+{
+  "message": ["scannerType must be one of the following values: htmlcs, axe"],
+  "error": "Bad Request",
+  "statusCode": 400
+}
+```
+
+**Status:** `401 Unauthorized`
+
+```json
+{
+  "message": "Invalid or missing authentication token",
+  "error": "Unauthorized",
+  "statusCode": 401
+}
+```
+
+---
+
 # Data Models
 
 ## Scan Status
@@ -375,6 +555,22 @@ Accessibility issues are categorized by impact level:
 | `error` | Must fix - prevents accessibility (WCAG violations) |
 | `warning` | Should investigate - potential accessibility barrier |
 | `notice` | Consider addressing - accessibility best practice |
+
+## Scanner Types
+
+The API supports two accessibility scanning engines:
+
+| Scanner | Description | Strengths | Rule Count |
+|---------|-------------|-----------|------------|
+| `htmlcs` | HTML_CodeSniffer accessibility scanner (default) | Comprehensive WCAG coverage, detailed technique guidance | ~231 rules |
+| `axe` | Axe accessibility scanner | Fast, accurate, industry standard | ~96 rules |
+
+### Scanner Differences
+
+- **HTMLCS**: Provides extensive WCAG technique URLs from W3.org, ideal for learning and compliance
+- **Axe**: Offers focused, actionable rules with Deque University documentation, preferred for speed and accuracy
+- **Help URLs**: HTMLCS uses W3C WCAG technique URLs, Axe uses Deque University documentation
+- **Rule Coverage**: HTMLCS has broader rule coverage, Axe focuses on high-confidence violations
 
 ## Rule Response Structure
 
@@ -425,6 +621,51 @@ Individual issues within a violation:
   "screenshotUrl": "http://localhost:3000/screenshots/issue-1.png"
 }
 ```
+
+## Scan Response Structure
+
+Complete scan response with all metadata fields:
+
+```json
+{
+  "id": 1,
+  "url": "https://example.com",
+  "language": "en",
+  "rootElement": "main",
+  "scannerType": "htmlcs",
+  "status": "completed",
+  "violations": [
+    {
+      "rule": {
+        "id": "WCAG2AA.Principle1.Guideline1_1.1_1_1.H37",
+        "description": "Img element missing an alt attribute",
+        "impact": "error",
+        "urls": ["https://www.w3.org/WAI/WCAG21/Techniques/html/H37"]
+      },
+      "issueCount": 2,
+      "issues": [...]
+    }
+  ],
+  "totalIssueCount": 2,
+  "createdAt": "2025-06-14T10:30:00.000Z",
+  "updatedAt": "2025-06-14T10:35:00.000Z"
+}
+```
+
+### Scan Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | number | Unique scan identifier |
+| `url` | string | Target URL that was scanned |
+| `language` | string | Language preference used for rule descriptions |
+| `rootElement` | string (optional) | CSS selector used to limit scan scope |
+| `scannerType` | string | Scanner type used: "htmlcs" or "axe" |
+| `status` | string | Current scan status: "pending", "running", "completed", or "failed" |
+| `violations` | array | Array of grouped accessibility violations |
+| `totalIssueCount` | number | Total number of accessibility issues found |
+| `createdAt` | string (ISO 8601) | Timestamp when scan was created |
+| `updatedAt` | string (ISO 8601) | Timestamp when scan was last updated |
 
 ---
 
@@ -488,6 +729,13 @@ Individual issues within a violation:
 3. **Retrieve Results**: Once completed, parse violations array
 4. **Track History**: Use `/scans/by-url` for historical analysis
 
+## Rules Discovery Workflow
+
+1. **Discover Available Rules**: GET `/rules?scannerType=axe` to see all available rules
+2. **Compare Scanner Types**: Check rule differences between HTMLCS and Axe
+3. **Multilingual Support**: Use `language` parameter for localized rule descriptions
+4. **Build Interfaces**: Use rule metadata to create filtering and reporting tools
+
 ## Monitoring and Maintenance
 
 1. **Check Configuration**: GET `/admin/cleanup/config`
@@ -503,14 +751,22 @@ const API_BASE = 'http://localhost:3000';
 const AUTH_TOKEN = 'changeme';
 
 // Create a new scan
-const createScan = async (url) => {
+const createScan = async (url, scannerType = 'htmlcs') => {
   const response = await fetch(`${API_BASE}/scans`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${AUTH_TOKEN}`
     },
-    body: JSON.stringify({ url, language: 'en' })
+    body: JSON.stringify({ url, language: 'en', scannerType })
+  });
+  return response.json();
+};
+
+// Get available rules for a scanner
+const getRules = async (scannerType, language = 'en') => {
+  const response = await fetch(`${API_BASE}/rules?scannerType=${scannerType}&language=${language}`, {
+    headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
   });
   return response.json();
 };
@@ -540,11 +796,18 @@ API_BASE = 'http://localhost:3000'
 AUTH_TOKEN = 'changeme'
 HEADERS = {'Authorization': f'Bearer {AUTH_TOKEN}'}
 
-def create_scan(url):
+def create_scan(url, scanner_type='htmlcs'):
     response = requests.post(
         f'{API_BASE}/scans',
-        json={'url': url, 'language': 'en'},
+        json={'url': url, 'language': 'en', 'scannerType': scanner_type},
         headers={**HEADERS, 'Content-Type': 'application/json'}
+    )
+    return response.json()
+
+def get_rules(scanner_type, language='en'):
+    response = requests.get(
+        f'{API_BASE}/rules?scannerType={scanner_type}&language={language}',
+        headers=HEADERS
     )
     return response.json()
 

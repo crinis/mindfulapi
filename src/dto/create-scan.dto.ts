@@ -1,4 +1,4 @@
-import { IsString, IsUrl, IsOptional, IsEnum } from 'class-validator';
+import { IsString, IsUrl, IsOptional, IsEnum, IsArray } from 'class-validator';
 import { Language } from '../types/language.types';
 import { ScannerType } from '../enums/scanner-type.enum';
 
@@ -69,4 +69,24 @@ export class CreateScanDto {
   @IsOptional()
   @IsEnum(ScannerType)
   scannerType?: ScannerType;
+
+  /**
+   * Specific accessibility rule IDs to execute during scanning.
+   * 
+   * When provided, only the specified rules will be run and their results
+   * stored in the database. This allows targeted accessibility testing for
+   * specific requirements or compliance checks. If not specified, all
+   * available rules for the scanner will be executed.
+   * 
+   * Rule IDs must match the format expected by the selected scanner:
+   * - HTMLCS: "WCAG2AA.Principle1.Guideline1_1.1_1_1.H37"
+   * - Axe: "color-contrast", "alt-text", etc.
+   * 
+   * @example ["color-contrast", "alt-text"] for Axe scanner
+   * @example ["WCAG2AA.Principle1.Guideline1_1.1_1_1.H37"] for HTMLCS scanner
+   */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  ruleIds?: string[];
 }

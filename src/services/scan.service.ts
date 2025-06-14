@@ -69,6 +69,7 @@ export class ScanService {
       language,
       createScanDto.rootElement,
       scannerType,
+      createScanDto.ruleIds,
     );
 
     return this.findOne(savedScan.id, baseUrl);

@@ -282,6 +282,36 @@ export abstract class BaseAccessibilityScanner {
   }
 
   /**
+   * Filters Kayle issues based on provided rule IDs.
+   * 
+   * When ruleIds are specified in ScanOptions, this method filters the scan results
+   * to only include issues for those specific rules. If no ruleIds are provided,
+   * all issues are returned unchanged.
+   * 
+   * @param kayleIssues - Array of Kayle issues from the scan
+   * @param ruleIds - Optional array of rule IDs to filter by
+   * @returns Filtered array of Kayle issues
+   */
+  protected filterIssuesByRules(
+    kayleIssues: KayleIssue[],
+    ruleIds?: string[],
+  ): KayleIssue[] {
+    if (!ruleIds || ruleIds.length === 0) {
+      return kayleIssues;
+    }
+
+    const filteredIssues = kayleIssues.filter((issue) =>
+      ruleIds.includes(issue.code),
+    );
+
+    this.logger.log(
+      `Filtered ${kayleIssues.length} issues down to ${filteredIssues.length} issues based on ${ruleIds.length} specified rule IDs: ${ruleIds.join(', ')}`,
+    );
+
+    return filteredIssues;
+  }
+
+  /**
    * Runs Kayle with the provided configuration and handles results.
    * 
    * @param kayleOptions - Complete Kayle configuration
