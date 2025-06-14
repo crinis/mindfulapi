@@ -7,7 +7,7 @@ import { HtmlcsAccessibilityScanner } from '../services/htmlcs-accessibility-sca
 import { AxeAccessibilityScanner } from '../services/axe-accessibility-scanner.service';
 import { BaseAccessibilityScanner } from '../services/base-accessibility-scanner.service';
 import { AccessibilityScannerFactory } from '../services/accessibility-scanner-factory.service';
-import { RuleService } from '../services/rule.service';
+import { HtmlcsRuleService } from '../services/htmlcs-rule.service';
 import { AxeRuleService } from '../services/axe-rule.service';
 import { RuleServiceFactory } from '../services/rule-service-factory.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -73,7 +73,7 @@ import { Issue } from '../entities/issue.entity';
     HtmlcsAccessibilityScanner,
     AxeAccessibilityScanner,
     AccessibilityScannerFactory,
-    RuleService,
+    HtmlcsRuleService,
     AxeRuleService,
     RuleServiceFactory,
   ],

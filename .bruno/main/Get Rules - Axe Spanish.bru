@@ -1,0 +1,47 @@
+meta {
+  name: Get Rules - Axe Spanish
+  type: http
+  seq: 22
+}
+
+get {
+  url: http://localhost:3000/rules?scannerType=axe&language=es
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: changeme
+}
+
+tests {
+  test("Should return 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("Should return array of rules", function() {
+    expect(res.getBody()).to.be.an('array');
+    expect(res.getBody().length).to.be.greaterThan(0);
+  });
+  
+  test("Should have Spanish descriptions", function() {
+    const rules = res.getBody();
+    // Check for common Spanish words in descriptions
+    const hasSpanishContent = rules.some(rule => 
+      rule.description.includes('Garantiza') || 
+      rule.description.includes('elementos') ||
+      rule.description.includes('atributo')
+    );
+    expect(hasSpanishContent).to.be.true;
+  });
+  
+  test("Should have same number of rules as English", function() {
+    expect(res.getBody().length).to.be.approximately(96, 5);
+  });
+  
+  test("Should still have Axe help URLs", function() {
+    const rules = res.getBody();
+    const firstRule = rules[0];
+    expect(firstRule.urls[0]).to.contain('dequeuniversity.com');
+  });
+}

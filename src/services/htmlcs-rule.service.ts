@@ -3,10 +3,10 @@ import { Issue as KayleIssue } from 'kayle';
 import { IRuleService } from '../interfaces/rule-service.interface';
 
 /**
- * Service for generating accessibility rule help URLs and managing rule metadata.
+ * HTMLCS-specific rule service for generating WCAG technique help URLs.
  * 
  * This service provides algorithmic generation of WCAG technique documentation URLs
- * based on accessibility rule identifiers. Rather than maintaining static mappings,
+ * based on HTMLCS accessibility rule identifiers. Rather than maintaining static mappings,
  * it intelligently parses rule IDs to extract technique identifiers and constructs
  * appropriate documentation URLs for each technique type.
  * 
@@ -32,7 +32,7 @@ import { IRuleService } from '../interfaces/rule-service.interface';
  * with multiple technique identifiers and nested sub-rule structures.
  */
 @Injectable()
-export class RuleService implements IRuleService {
+export class HtmlcsRuleService implements IRuleService {
   constructor() {
     // No initialization needed - service is now purely algorithmic
   }

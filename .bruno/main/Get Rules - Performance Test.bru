@@ -1,0 +1,46 @@
+meta {
+  name: Get Rules - Performance Test
+  type: http
+  seq: 27
+}
+
+get {
+  url: http://localhost:3000/rules?scannerType=htmlcs
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: changeme
+}
+
+tests {
+  test("Should return 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("Should respond within reasonable time", function() {
+    expect(res.getResponseTime()).to.be.lessThan(5000); // 5 seconds
+  });
+  
+  test("Should return large rule set efficiently", function() {
+    const rules = res.getBody();
+    expect(rules.length).to.be.greaterThan(200);
+    // Test that all rules are properly structured
+    rules.forEach((rule, index) => {
+      if (index < 10) { // Test first 10 rules for performance
+        expect(rule).to.have.property('id');
+        expect(rule).to.have.property('description');
+        expect(rule.id).to.be.a('string');
+        expect(rule.description).to.be.a('string');
+      }
+    });
+  });
+  
+  test("Should have consistent rule ordering", function() {
+    const rules = res.getBody();
+    for (let i = 1; i < Math.min(10, rules.length); i++) {
+      expect(rules[i].id.localeCompare(rules[i-1].id)).to.be.greaterThan(-1);
+    }
+  });
+}

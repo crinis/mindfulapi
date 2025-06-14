@@ -1,0 +1,49 @@
+meta {
+  name: Get Rules - Multiple Languages
+  type: http
+  seq: 26
+}
+
+get {
+  url: http://localhost:3000/rules?scannerType=axe&language=fr
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: changeme
+}
+
+tests {
+  test("Should return 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("Should return array of rules", function() {
+    expect(res.getBody()).to.be.an('array');
+    expect(res.getBody().length).to.be.greaterThan(0);
+  });
+  
+  test("Should have French descriptions", function() {
+    const rules = res.getBody();
+    // Check for common French words in descriptions
+    const hasFrenchContent = rules.some(rule => 
+      rule.description.includes('Vérifie') || 
+      rule.description.includes('Assure') ||
+      rule.description.includes('éléments') ||
+      rule.description.includes('attribut')
+    );
+    expect(hasFrenchContent).to.be.true;
+  });
+  
+  test("Should have same structure as English rules", function() {
+    const rules = res.getBody();
+    rules.forEach(rule => {
+      expect(rule).to.have.property('id');
+      expect(rule).to.have.property('description');
+      expect(rule).to.have.property('impact');
+      expect(rule).to.have.property('urls');
+      expect(rule.urls).to.be.an('array');
+    });
+  });
+}

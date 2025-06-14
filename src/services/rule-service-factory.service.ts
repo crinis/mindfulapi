@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { IRuleService } from '../interfaces/rule-service.interface';
-import { RuleService } from './rule.service';
+import { HtmlcsRuleService } from './htmlcs-rule.service';
 import { AxeRuleService } from './axe-rule.service';
 import { ScannerType, DEFAULT_SCANNER_TYPE } from '../enums/scanner-type.enum';
 
@@ -15,7 +15,7 @@ import { ScannerType, DEFAULT_SCANNER_TYPE } from '../enums/scanner-type.enum';
 @Injectable()
 export class RuleServiceFactory {
   constructor(
-    private readonly htmlcsRuleService: RuleService,
+    private readonly htmlcsRuleService: HtmlcsRuleService,
     private readonly axeRuleService: AxeRuleService,
   ) {}
 

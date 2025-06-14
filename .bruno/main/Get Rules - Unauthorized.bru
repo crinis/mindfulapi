@@ -1,0 +1,31 @@
+meta {
+  name: Get Rules - Unauthorized
+  type: http
+  seq: 25
+}
+
+get {
+  url: http://localhost:3000/rules?scannerType=axe
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: invalid-token
+}
+
+tests {
+  test("Should return 401 Unauthorized", function() {
+    expect(res.getStatus()).to.equal(401);
+  });
+  
+  test("Should return authentication error", function() {
+    const body = res.getBody();
+    expect(body).to.have.property('message');
+    expect(body).to.have.property('error');
+    expect(body).to.have.property('statusCode');
+    expect(body.statusCode).to.equal(401);
+    expect(body.error).to.equal('Unauthorized');
+    expect(body.message).to.equal('Invalid or missing authentication token');
+  });
+}
