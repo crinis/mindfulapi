@@ -69,10 +69,7 @@ export class HtmlcsAccessibilityScanner extends BaseAccessibilityScanner impleme
       try {
         // Create base Kayle configuration and add HTMLCS-specific rules
         const kayleOptions: RunnerConfig = {
-          ...this.createBaseKayleConfig(page, browser, url, options),
-          rules: [
-            'WCAG2AA.Principle2.Guideline2_4.2_4_1.H64.1'
-          ]
+          ...this.createBaseKayleConfig(page, browser, url, options)
         };
 
         // Run the accessibility scan
