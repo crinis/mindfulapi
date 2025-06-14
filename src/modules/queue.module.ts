@@ -4,6 +4,12 @@ import { ScanProcessor } from '../services/scan.processor';
 import { ScanQueueService } from '../services/scan-queue.service';
 import { BrowserService } from '../services/browser.service';
 import { HtmlcsAccessibilityScanner } from '../services/htmlcs-accessibility-scanner.service';
+import { AxeAccessibilityScanner } from '../services/axe-accessibility-scanner.service';
+import { BaseAccessibilityScanner } from '../services/base-accessibility-scanner.service';
+import { AccessibilityScannerFactory } from '../services/accessibility-scanner-factory.service';
+import { RuleService } from '../services/rule.service';
+import { AxeRuleService } from '../services/axe-rule.service';
+import { RuleServiceFactory } from '../services/rule-service-factory.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
@@ -65,6 +71,11 @@ import { Issue } from '../entities/issue.entity';
     ScanQueueService,
     BrowserService,
     HtmlcsAccessibilityScanner,
+    AxeAccessibilityScanner,
+    AccessibilityScannerFactory,
+    RuleService,
+    AxeRuleService,
+    RuleServiceFactory,
   ],
   exports: [ScanQueueService],
 })

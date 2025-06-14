@@ -1,5 +1,6 @@
-import { IsString, IsUrl, IsOptional } from 'class-validator';
+import { IsString, IsUrl, IsOptional, IsEnum } from 'class-validator';
 import { Language } from '../types/language.types';
+import { ScannerType } from '../enums/scanner-type.enum';
 
 /**
  * Data Transfer Object for creating new accessibility scans.
@@ -55,4 +56,18 @@ export class CreateScanDto {
   @IsOptional()
   @IsString()
   rootElement?: string;
+
+  /**
+   * Accessibility scanner type to use for the scan.
+   * 
+   * Determines which accessibility testing engine will be used to analyze
+   * the page. Different scanners may have different rule sets and provide
+   * different types of help information.
+   * 
+   * @example "htmlcs" for HTML_CodeSniffer (default)
+   * @example "axe" for Axe accessibility scanner
+   */
+  @IsOptional()
+  @IsEnum(ScannerType)
+  scannerType?: ScannerType;
 }

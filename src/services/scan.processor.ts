@@ -6,9 +6,11 @@ import { Job } from 'bullmq';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 import { ScanStatus } from '../enums/scan-status.enum';
+import { ScannerType } from '../enums/scanner-type.enum';
 import { ScanJobData } from './scan-queue.service';
 import { BrowserService } from './browser.service';
-import { HtmlcsAccessibilityScanner } from './htmlcs-accessibility-scanner.service';
+import { AccessibilityScannerFactory } from './accessibility-scanner-factory.service';
+import { RuleServiceFactory } from './rule-service-factory.service';
 
 /**
  * Background job processor for asynchronous accessibility scan execution.
@@ -43,7 +45,8 @@ export class ScanProcessor extends WorkerHost {
     @InjectRepository(Issue)
     private readonly issueRepository: Repository<Issue>,
     private readonly browserService: BrowserService,
-    private readonly htmlcsScanner: HtmlcsAccessibilityScanner,
+    private readonly scannerFactory: AccessibilityScannerFactory,
+    private readonly ruleServiceFactory: RuleServiceFactory,
   ) {
     super();
   }
@@ -70,16 +73,16 @@ export class ScanProcessor extends WorkerHost {
    * @throws {Error} Re-throws scan errors to trigger BullMQ retry mechanism
    */
   async process(job: Job<ScanJobData>): Promise<void> {
-    const { scanId, url, rootElement } = job.data;
+    const { scanId, url, rootElement, scannerType } = job.data;
 
-    this.logger.log(`Processing scan ${scanId} for URL: ${url}${rootElement ? ` (rootElement: ${rootElement})` : ''}`);
+    this.logger.log(`Processing scan ${scanId} for URL: ${url} using ${scannerType} scanner${rootElement ? ` (rootElement: ${rootElement})` : ''}`);
 
     try {
       // Update scan status to RUNNING
       await this.updateScanStatus(scanId, ScanStatus.RUNNING);
 
-      // Simulate accessibility scanning process
-      await this.performAccessibilityScan(scanId, url, rootElement);
+      // Perform accessibility scanning process with the specified scanner
+      await this.performAccessibilityScan(scanId, url, rootElement, scannerType);
 
       // Update scan status to COMPLETED
       await this.updateScanStatus(scanId, ScanStatus.COMPLETED);
@@ -96,11 +99,12 @@ export class ScanProcessor extends WorkerHost {
   }
 
   /**
-   * Executes the actual accessibility scan using browser automation and HTML_CodeSniffer.
+   * Executes the actual accessibility scan using browser automation and the specified scanner.
    * 
    * This method coordinates the technical scanning process by:
    * - Obtaining a browser instance from the browser service
-   * - Running HTML_CodeSniffer analysis through the scanner service
+   * - Getting the appropriate scanner based on scannerType
+   * - Running accessibility analysis through the scanner service
    * - Processing scan results into database-ready format
    * - Persisting accessibility issues with proper relationships
    * 
@@ -111,16 +115,21 @@ export class ScanProcessor extends WorkerHost {
    * @param scanId - Unique identifier of the scan being processed
    * @param url - Target URL to scan for accessibility issues
    * @param rootElement - Optional CSS selector to limit scanning scope
+   * @param scannerType - Type of accessibility scanner to use
    * @throws {Error} When browser automation, scanning, or data persistence fails
    */
   private async performAccessibilityScan(
     scanId: number,
     url: string,
     rootElement?: string,
+    scannerType?: ScannerType,
   ): Promise<void> {
     try {
       // Get the browser instance
       const browser = await this.browserService.getBrowser();
+
+      // Get the appropriate scanner for the specified type
+      const scanner = this.scannerFactory.getScanner(scannerType);
 
       // Build scan options, only including rootElement if provided
       const scanOptions: any = {
@@ -131,14 +140,14 @@ export class ScanProcessor extends WorkerHost {
         scanOptions.rootElement = rootElement;
       }
 
-      // Run accessibility scan using HTMLCS scanner
-      const partialIssues = await this.htmlcsScanner.scan(url, browser, scanOptions);
+      // Run accessibility scan using the specified scanner
+      const partialIssues = await scanner.scan(url, browser, scanOptions);
 
       // Save issues to database
       await this.saveIssues(scanId, partialIssues);
 
       this.logger.log(
-        `Saved ${partialIssues.length} accessibility issues for scan ${scanId}`,
+        `Saved ${partialIssues.length} accessibility issues for scan ${scanId} using ${scannerType} scanner`,
       );
     } catch (error) {
       this.logger.error(`Accessibility scan failed for scan ${scanId}:`, error);

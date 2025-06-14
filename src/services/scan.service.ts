@@ -5,8 +5,9 @@ import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 import { CreateScanDto } from '../dto/create-scan.dto';
 import { ScanStatus } from '../enums/scan-status.enum';
+import { ScannerType, DEFAULT_SCANNER_TYPE } from '../enums/scanner-type.enum';
 import { ScanQueueService } from './scan-queue.service';
-import { RuleService } from './rule.service';
+import { RuleServiceFactory } from './rule-service-factory.service';
 import { ScanResponseDto } from '../dto/scan-response.dto';
 import { DEFAULT_LANGUAGE } from '../types/language.types';
 
@@ -32,7 +33,7 @@ export class ScanService {
     @InjectRepository(Scan)
     private readonly scanRepository: Repository<Scan>,
     private readonly scanQueueService: ScanQueueService,
-    private readonly ruleService: RuleService,
+    private readonly ruleServiceFactory: RuleServiceFactory,
   ) {}
 
   /**
@@ -52,6 +53,7 @@ export class ScanService {
       url: createScanDto.url,
       language: createScanDto.language || DEFAULT_LANGUAGE,
       rootElement: createScanDto.rootElement, // Only set if provided, no default
+      scannerType: createScanDto.scannerType || DEFAULT_SCANNER_TYPE,
       status: ScanStatus.PENDING,
     });
 
@@ -63,6 +65,7 @@ export class ScanService {
       createScanDto.url,
       createScanDto.language,
       createScanDto.rootElement,
+      createScanDto.scannerType,
     );
 
     return this.findOne(savedScan.id, baseUrl);
@@ -158,8 +161,9 @@ export class ScanService {
             : undefined,
         }));
 
-        // Generate help URLs algorithmically for the rule type
-        const urls = this.ruleService.getHelpUrls(ruleId);
+        // Get the appropriate rule service for this scanner type and generate help URLs
+        const ruleService = this.ruleServiceFactory.getRuleService(scan.scannerType);
+        const urls = ruleService.getHelpUrls(ruleId);
 
         // Use issue data from scan results (preserves original scanner output)
         const firstIssue = issues[0];
@@ -183,6 +187,7 @@ export class ScanService {
       id: scan.id,
       url: scan.url,
       rootElement: scan.rootElement,
+      scannerType: scan.scannerType,
       status: scan.status,
       violations,
       totalIssueCount: totalIssues,

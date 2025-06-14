@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { ScanStatus } from '../enums/scan-status.enum';
+import { ScannerType, DEFAULT_SCANNER_TYPE } from '../enums/scanner-type.enum';
 import { Issue } from './issue.entity';
 import { Language, DEFAULT_LANGUAGE } from '../types/language.types';
 
@@ -56,6 +57,22 @@ export class Scan {
     nullable: true,
   })
   rootElement?: string;
+
+  /**
+   * Accessibility scanner type used for this scan.
+   * 
+   * Determines which accessibility testing engine will be used:
+   * - HTMLCS: HTML_CodeSniffer-based accessibility testing
+   * - AXE: Axe-core accessibility testing
+   * 
+   * Defaults to HTMLCS for backward compatibility.
+   */
+  @Column({
+    type: 'varchar',
+    enum: ScannerType,
+    default: DEFAULT_SCANNER_TYPE,
+  })
+  scannerType: ScannerType;
 
   /**
    * Current processing status of the accessibility scan.

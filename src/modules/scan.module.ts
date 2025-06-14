@@ -5,6 +5,12 @@ import { ScanService } from '../services/scan.service';
 import { ScanController } from '../controllers/scan.controller';
 import { QueueModule } from './queue.module';
 import { RuleService } from '../services/rule.service';
+import { AxeRuleService } from '../services/axe-rule.service';
+import { RuleServiceFactory } from '../services/rule-service-factory.service';
+import { AccessibilityScannerFactory } from '../services/accessibility-scanner-factory.service';
+import { HtmlcsAccessibilityScanner } from '../services/htmlcs-accessibility-scanner.service';
+import { AxeAccessibilityScanner } from '../services/axe-accessibility-scanner.service';
+import { BaseAccessibilityScanner } from '../services/base-accessibility-scanner.service';
 
 /**
  * Scan module providing accessibility scanning functionality and REST API endpoints.
@@ -30,7 +36,15 @@ import { RuleService } from '../services/rule.service';
 @Module({
   imports: [TypeOrmModule.forFeature([Scan]), QueueModule],
   controllers: [ScanController],
-  providers: [ScanService, RuleService],
+  providers: [
+    ScanService,
+    RuleService,
+    AxeRuleService,
+    RuleServiceFactory,
+    AccessibilityScannerFactory,
+    HtmlcsAccessibilityScanner,
+    AxeAccessibilityScanner,
+  ],
   exports: [ScanService],
 })
 export class ScanModule {}

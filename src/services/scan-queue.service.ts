@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Language } from '../types/language.types';
+import { ScannerType } from '../enums/scanner-type.enum';
 
 /**
  * Data structure for scan processing jobs in the BullMQ queue.
@@ -18,6 +19,8 @@ export interface ScanJobData {
   language: Language;
   /** CSS selector defining the root element scope for scanning */
   rootElement?: string;
+  /** Accessibility scanner type to use for the scan */
+  scannerType?: ScannerType;
 }
 
 /**
@@ -59,12 +62,14 @@ export class ScanQueueService {
    * @param url - Target URL for accessibility scanning
    * @param language - Language preference for accessibility rule descriptions
    * @param rootElement - CSS selector defining the root element scope for scanning
+   * @param scannerType - Accessibility scanner type to use for the scan
    */
   async addScanJob(
     scanId: number,
     url: string,
     language: Language,
     rootElement?: string,
+    scannerType?: ScannerType,
   ): Promise<void> {
     await this.scanQueue.add(
       'process-scan',
@@ -73,6 +78,7 @@ export class ScanQueueService {
         url,
         language,
         rootElement,
+        scannerType: scannerType || ScannerType.HTMLCS,
       },
       {
         delay: 1000, // Small delay to ensure database transaction is committed

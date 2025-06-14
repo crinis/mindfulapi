@@ -1,4 +1,5 @@
 import { ScanStatus } from '../enums/scan-status.enum';
+import { ScannerType } from '../enums/scanner-type.enum';
 import { IssueImpact } from '../enums/issue-impact.enum';
 
 /**
@@ -82,6 +83,9 @@ export class ScanResponseDto {
   
   /** CSS selector defining the root element scope for the accessibility scan. If not specified, the entire page was scanned. */
   rootElement?: string;
+  
+  /** Accessibility scanner type used for this scan (HTMLCS or AXE) */
+  scannerType: ScannerType;
   
   /** Current processing status (PENDING, RUNNING, COMPLETED, or FAILED) */
   status: ScanStatus;

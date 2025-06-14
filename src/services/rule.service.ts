@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { Issue as KayleIssue } from 'kayle';
+import { IRuleService } from '../interfaces/rule-service.interface';
 
 /**
  * Service for generating accessibility rule help URLs and managing rule metadata.
@@ -30,7 +32,7 @@ import { Injectable } from '@nestjs/common';
  * with multiple technique identifiers and nested sub-rule structures.
  */
 @Injectable()
-export class RuleService {
+export class RuleService implements IRuleService {
   constructor() {
     // No initialization needed - service is now purely algorithmic
   }
@@ -105,7 +107,7 @@ export class RuleService {
    * @param ruleId - Accessibility rule identifier from scanner results
    * @returns Array of help URLs for rule remediation, always contains at least one URL
    */
-  getHelpUrls(ruleId: string): string[] {
+  getHelpUrls(ruleId: string, kayleIssue?: KayleIssue): string[] {
     // Generate URLs purely from rule ID analysis
     const generatedUrls = this.generateHelpUrlsFromRuleId(ruleId);
 
