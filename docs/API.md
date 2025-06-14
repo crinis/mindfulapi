@@ -43,9 +43,10 @@ Creates a new accessibility scan and queues it for asynchronous processing.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `url` | string | Yes | Target URL to scan. Supports HTTP, HTTPS, and file protocols. TLD not required for localhost/development. |
-| `language` | string | No | Language preference for accessibility rule descriptions. Defaults to "en". |
+| `url` | string | Yes | Target URL to scan. Supports HTTP and HTTPS protocols. TLD not required for localhost/development. |
+| `language` | string | No | Language preference for accessibility rule descriptions. Defaults to "en" if not specified. |
 | `rootElement` | string | No | CSS selector to limit scanning scope to a specific page element. If not specified, the entire page will be scanned. |
+| `scannerType` | string | No | Accessibility scanner type to use ('htmlcs' or 'axe'). Defaults to "htmlcs" if not specified. |
 
 ### Response
 
@@ -72,8 +73,18 @@ curl -X POST http://localhost:3000/scans \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer changeme" \
   -d '{
+    "url": "https://example.com"
+  }'
+```
+
+**Scan with language specified:**
+```bash
+curl -X POST http://localhost:3000/scans \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer changeme" \
+  -d '{
     "url": "https://example.com",
-    "language": "en"
+    "language": "es"
   }'
 ```
 

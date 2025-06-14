@@ -16,7 +16,24 @@ auth:bearer {
 
 body:json {
   {
-    "url": "http://localhost:8080",
-    "language": "en"
+    "url": "http://localhost:8080"
   }
+}
+
+tests {
+  test("Should return 201 Created", function() {
+    expect(res.getStatus()).to.equal(201);
+  });
+  
+  test("Should create scan with proper structure", function() {
+    const scan = res.getBody();
+    expect(scan).to.have.property('id');
+    expect(scan).to.have.property('url');
+    expect(scan).to.have.property('language');
+    expect(scan).to.have.property('status');
+    expect(scan).to.have.property('scannerType');
+    expect(scan.status).to.equal('pending');
+    expect(scan.url).to.equal('http://localhost:8080');
+    expect(scan.language).to.equal('en'); // Should default to 'en'
+  });
 }

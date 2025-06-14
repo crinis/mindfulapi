@@ -9,23 +9,21 @@ import { ScannerType } from '../enums/scanner-type.enum';
  * scan through the REST API. It includes validation rules to ensure scan
  * requests contain valid URLs and language preferences.
  * 
- * The DTO supports various URL protocols including HTTP, HTTPS, and file URLs
- * for development and testing scenarios. TLD requirement is disabled to
- * accommodate localhost and internal network scanning.
+ * The DTO supports HTTP and HTTPS protocols with flexible TLD requirements
+ * to accommodate localhost and internal network scanning.
  */
 export class CreateScanDto {
   /**
    * Target URL to scan for accessibility issues.
    * 
-   * Supports HTTP, HTTPS, and file protocols with flexible TLD requirements
+   * Supports HTTP and HTTPS protocols with flexible TLD requirements
    * to accommodate localhost, development servers, and internal network URLs.
    * The URL will be validated for proper format before scan processing begins.
    * 
    * @example "https://example.com"
    * @example "http://localhost:3000"
-   * @example "file:///path/to/local/file.html"
    */
-  @IsUrl({ require_tld: false, protocols: ['http', 'https', 'file'] })
+  @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   url: string;
 
   /**
@@ -33,13 +31,14 @@ export class CreateScanDto {
    * 
    * Determines the language used for issue descriptions and help URLs in
    * the scan results. Currently supports standard language codes with
-   * 'en' (English) as the default language.
+   * 'en' (English) as the default language when not specified.
    * 
-   * @example "en" for English
+   * @example "en" for English (default)
    * @example "es" for Spanish
    */
+  @IsOptional()
   @IsString()
-  language: Language;
+  language?: Language;
 
   /**
    * CSS selector to limit scanning scope to a specific page element.

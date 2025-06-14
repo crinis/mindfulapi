@@ -49,11 +49,14 @@ export class ScanService {
    * @throws {Error} When scan creation or queue operation fails
    */
   async create(createScanDto: CreateScanDto, baseUrl?: string): Promise<ScanResponseDto> {
+    const language = createScanDto.language || DEFAULT_LANGUAGE;
+    const scannerType = createScanDto.scannerType || DEFAULT_SCANNER_TYPE;
+    
     const scan = this.scanRepository.create({
       url: createScanDto.url,
-      language: createScanDto.language || DEFAULT_LANGUAGE,
+      language,
       rootElement: createScanDto.rootElement, // Only set if provided, no default
-      scannerType: createScanDto.scannerType || DEFAULT_SCANNER_TYPE,
+      scannerType,
       status: ScanStatus.PENDING,
     });
 
@@ -63,9 +66,9 @@ export class ScanService {
     await this.scanQueueService.addScanJob(
       savedScan.id,
       createScanDto.url,
-      createScanDto.language,
+      language,
       createScanDto.rootElement,
-      createScanDto.scannerType,
+      scannerType,
     );
 
     return this.findOne(savedScan.id, baseUrl);
@@ -186,6 +189,7 @@ export class ScanService {
     return {
       id: scan.id,
       url: scan.url,
+      language: scan.language,
       rootElement: scan.rootElement,
       scannerType: scan.scannerType,
       status: scan.status,

@@ -1,6 +1,7 @@
 import { ScanStatus } from '../enums/scan-status.enum';
 import { ScannerType } from '../enums/scanner-type.enum';
 import { IssueImpact } from '../enums/issue-impact.enum';
+import { Language } from '../types/language.types';
 
 /**
  * Data Transfer Object representing an individual accessibility issue for API responses.
@@ -80,6 +81,9 @@ export class ScanResponseDto {
   
   /** Target URL that was scanned for accessibility issues */
   url: string;
+  
+  /** Language preference for accessibility rule descriptions and help content */
+  language: Language;
   
   /** CSS selector defining the root element scope for the accessibility scan. If not specified, the entire page was scanned. */
   rootElement?: string;
