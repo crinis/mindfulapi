@@ -16,6 +16,8 @@ export interface ScanJobData {
   url: string;
   /** Language preference for accessibility rule descriptions */
   language: Language;
+  /** CSS selector defining the root element scope for scanning */
+  rootElement?: string;
 }
 
 /**
@@ -56,11 +58,13 @@ export class ScanQueueService {
    * @param scanId - Unique identifier of the scan entity to process
    * @param url - Target URL for accessibility scanning
    * @param language - Language preference for accessibility rule descriptions
+   * @param rootElement - CSS selector defining the root element scope for scanning
    */
   async addScanJob(
     scanId: number,
     url: string,
     language: Language,
+    rootElement?: string,
   ): Promise<void> {
     await this.scanQueue.add(
       'process-scan',
@@ -68,6 +72,7 @@ export class ScanQueueService {
         scanId,
         url,
         language,
+        rootElement,
       },
       {
         delay: 1000, // Small delay to ensure database transaction is committed

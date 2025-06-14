@@ -43,6 +43,21 @@ export class Scan {
   language: Language;
 
   /**
+   * CSS selector defining the root element for accessibility scanning scope.
+   * 
+   * When specified, accessibility analysis focuses only on the specified
+   * element and its descendants rather than the entire page. This enables
+   * targeted testing of specific page components or sections.
+   * 
+   * If not specified, the entire page will be scanned.
+   */
+  @Column({
+    type: 'varchar',
+    nullable: true,
+  })
+  rootElement?: string;
+
+  /**
    * Current processing status of the accessibility scan.
    * Tracks progression from PENDING through RUNNING to COMPLETED or FAILED.
    * Enables real-time status monitoring and result availability indication.

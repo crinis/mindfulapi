@@ -131,6 +131,11 @@ export class HtmlcsAccessibilityScanner implements IAccessibilityScanner {
           language: 'en', // used for fallback descriptions
         };
 
+        // Only set rootElement if it was explicitly provided
+        if (options?.rootElement) {
+          kayleOptions.rootElement = options.rootElement;
+        }
+
         // Debug log Kayle configuration
         this.logger.debug(
           `Kayle configuration: ${JSON.stringify(

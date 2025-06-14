@@ -70,16 +70,16 @@ export class ScanProcessor extends WorkerHost {
    * @throws {Error} Re-throws scan errors to trigger BullMQ retry mechanism
    */
   async process(job: Job<ScanJobData>): Promise<void> {
-    const { scanId, url } = job.data;
+    const { scanId, url, rootElement } = job.data;
 
-    this.logger.log(`Processing scan ${scanId} for URL: ${url}`);
+    this.logger.log(`Processing scan ${scanId} for URL: ${url}${rootElement ? ` (rootElement: ${rootElement})` : ''}`);
 
     try {
       // Update scan status to RUNNING
       await this.updateScanStatus(scanId, ScanStatus.RUNNING);
 
       // Simulate accessibility scanning process
-      await this.performAccessibilityScan(scanId, url);
+      await this.performAccessibilityScan(scanId, url, rootElement);
 
       // Update scan status to COMPLETED
       await this.updateScanStatus(scanId, ScanStatus.COMPLETED);
@@ -110,20 +110,29 @@ export class ScanProcessor extends WorkerHost {
    * 
    * @param scanId - Unique identifier of the scan being processed
    * @param url - Target URL to scan for accessibility issues
+   * @param rootElement - Optional CSS selector to limit scanning scope
    * @throws {Error} When browser automation, scanning, or data persistence fails
    */
   private async performAccessibilityScan(
     scanId: number,
     url: string,
+    rootElement?: string,
   ): Promise<void> {
     try {
       // Get the browser instance
       const browser = await this.browserService.getBrowser();
 
-      // Run accessibility scan using HTMLCS scanner
-      const partialIssues = await this.htmlcsScanner.scan(url, browser, {
+      // Build scan options, only including rootElement if provided
+      const scanOptions: any = {
         timeout: 30000, // 30 second timeout
-      });
+      };
+      
+      if (rootElement) {
+        scanOptions.rootElement = rootElement;
+      }
+
+      // Run accessibility scan using HTMLCS scanner
+      const partialIssues = await this.htmlcsScanner.scan(url, browser, scanOptions);
 
       // Save issues to database
       await this.saveIssues(scanId, partialIssues);

@@ -1,4 +1,4 @@
-import { IsString, IsUrl } from 'class-validator';
+import { IsString, IsUrl, IsOptional } from 'class-validator';
 import { Language } from '../types/language.types';
 
 /**
@@ -39,4 +39,20 @@ export class CreateScanDto {
    */
   @IsString()
   language: Language;
+
+  /**
+   * CSS selector to limit scanning scope to a specific page element.
+   * 
+   * When provided, accessibility analysis will focus only on the specified
+   * element and its descendants. This can be useful for testing specific
+   * components or sections of a page. If not specified, the entire page
+   * will be scanned.
+   * 
+   * @example "main" to scan only the main content area
+   * @example "#content" to scan only the element with id="content"
+   * @example ".article" to scan only elements with class="article"
+   */
+  @IsOptional()
+  @IsString()
+  rootElement?: string;
 }

@@ -51,6 +51,7 @@ export class ScanService {
     const scan = this.scanRepository.create({
       url: createScanDto.url,
       language: createScanDto.language || DEFAULT_LANGUAGE,
+      rootElement: createScanDto.rootElement, // Only set if provided, no default
       status: ScanStatus.PENDING,
     });
 
@@ -61,6 +62,7 @@ export class ScanService {
       savedScan.id,
       createScanDto.url,
       createScanDto.language,
+      createScanDto.rootElement,
     );
 
     return this.findOne(savedScan.id, baseUrl);
@@ -165,10 +167,12 @@ export class ScanService {
         const impact = firstIssue.impact;
 
         return {
-          ruleId,
-          description,
-          urls,
-          impact,
+          rule: {
+            id: ruleId,
+            description,
+            impact,
+            urls,
+          },
           issueCount,
           issues: issueDetails,
         };
@@ -178,6 +182,7 @@ export class ScanService {
     return {
       id: scan.id,
       url: scan.url,
+      rootElement: scan.rootElement,
       status: scan.status,
       violations,
       totalIssueCount: totalIssues,

@@ -26,24 +26,35 @@ export class IssueResponseDto {
 }
 
 /**
- * Data Transfer Object representing a group of accessibility issues for the same rule.
+ * Data Transfer Object representing accessibility rule information.
  * 
- * This DTO organizes accessibility issues by rule type, providing aggregated
- * information about violations of the same accessibility requirement. It includes
- * help URLs for remediation guidance and summarizes all instances of the violation.
+ * This DTO provides essential rule metadata including identification,
+ * description, impact level, and remediation guidance URLs.
  */
-export class ViolationResponseDto {
-  /** Accessibility rule identifier that triggered these issues */
-  ruleId: string;
+export class RuleResponseDto {
+  /** Accessibility rule identifier (e.g., "WCAG2AA.Principle1.Guideline1_1.1_1_1.H37") */
+  id: string;
   
   /** Human-readable description of the accessibility rule violation */
   description: string;
   
-  /** Array of help URLs providing remediation guidance for this rule type */
-  urls: string[];
-  
   /** Severity level for prioritizing remediation efforts */
   impact: IssueImpact;
+  
+  /** Array of help URLs providing remediation guidance for this rule type */
+  urls: string[];
+}
+
+/**
+ * Data Transfer Object representing a group of accessibility issues for the same rule.
+ * 
+ * This DTO organizes accessibility issues by rule type, providing aggregated
+ * information about violations of the same accessibility requirement. It includes
+ * rule metadata and all issue instances for that rule.
+ */
+export class ViolationResponseDto {
+  /** Accessibility rule information */
+  rule: RuleResponseDto;
   
   /** Array of individual issue instances for this rule violation */
   issues: IssueResponseDto[];
@@ -68,6 +79,9 @@ export class ScanResponseDto {
   
   /** Target URL that was scanned for accessibility issues */
   url: string;
+  
+  /** CSS selector defining the root element scope for the accessibility scan. If not specified, the entire page was scanned. */
+  rootElement?: string;
   
   /** Current processing status (PENDING, RUNNING, COMPLETED, or FAILED) */
   status: ScanStatus;
