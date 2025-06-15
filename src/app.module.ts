@@ -21,8 +21,11 @@ import { authProvider } from './guards/auth-provider';
       type: 'sqlite',
       database: process.env.DATABASE_PATH || './data/database.sqlite',
       entities: [Scan, Issue],
+      migrations: ['./src/migrations/*.ts'],
       // Auto-sync database schema in development (disable in production)
       synchronize: process.env.NODE_ENV !== 'production',
+      // Run migrations automatically in production
+      migrationsRun: process.env.NODE_ENV === 'production',
       // Enable SQL logging in development for debugging
       logging: process.env.NODE_ENV !== 'production',
     }),

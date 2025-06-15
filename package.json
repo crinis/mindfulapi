@@ -17,7 +17,17 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "migration:generate": "typeorm-ts-node-commonjs migration:generate -d typeorm.config.ts",
+    "migration:create": "typeorm-ts-node-commonjs migration:create",
+    "migration:run": "typeorm-ts-node-commonjs migration:run -d typeorm.config.ts",
+    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d typeorm.config.ts",
+    "migration:show": "typeorm-ts-node-commonjs migration:show -d typeorm.config.ts",
+    "schema:drop": "typeorm-ts-node-commonjs schema:drop -d typeorm.config.ts",
+    "schema:sync": "typeorm-ts-node-commonjs schema:sync -d typeorm.config.ts",
+    "db:init": "./scripts/init-db.sh",
+    "db:create-dirs": "node -e \"const fs=require('fs'); const path=require('path'); const dbDir=path.dirname(process.env.DATABASE_PATH||'./data/database.sqlite'); const screenshotDir=process.env.SCREENSHOT_DIR||'./data/screenshots'; fs.mkdirSync(dbDir,{recursive:true}); fs.mkdirSync(screenshotDir,{recursive:true}); console.log('📁 Directories created');\"",
+    "start:prod:init": "npm run db:init && npm run start:prod"
   },
   "dependencies": {
     "@nestjs/bullmq": "^11.0.2",

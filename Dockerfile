@@ -37,6 +37,11 @@ RUN npm ci --only=production && npm cache clean --force
 # Copy built application from builder stage
 COPY --from=builder /app/dist ./dist
 
+# Copy migration files and scripts
+COPY --from=builder /app/src/migrations ./src/migrations
+COPY --from=builder /app/typeorm.config.ts ./
+COPY --from=builder /app/scripts ./scripts
+
 # Copy other necessary files
 COPY --from=builder /app/nest-cli.json ./
 
@@ -52,5 +57,19 @@ EXPOSE 3000
 # Create volumes for persistent data
 VOLUME ["/data"]
 
-# Start the application
-CMD ["node", "dist/main"]
+# Create a startup script that initializes database
+RUN echo '#!/bin/sh' > /app/startup.sh && \
+    echo 'echo "🚀 Starting MindfulAPI with database initialization..."' >> /app/startup.sh && \
+    echo 'mkdir -p /data/screenshots' >> /app/startup.sh && \
+    echo 'echo "📁 Data directories created"' >> /app/startup.sh && \
+    echo 'if [ ! -f "/data/database.sqlite" ]; then' >> /app/startup.sh && \
+    echo '  echo "📊 Database does not exist, will be created by application"' >> /app/startup.sh && \
+    echo 'else' >> /app/startup.sh && \
+    echo '  echo "📊 Database exists, checking for migrations..."' >> /app/startup.sh && \
+    echo 'fi' >> /app/startup.sh && \
+    echo 'echo "🎉 Starting application..."' >> /app/startup.sh && \
+    echo 'exec node dist/main' >> /app/startup.sh && \
+    chmod +x /app/startup.sh
+
+# Start the application with initialization
+CMD ["/app/startup.sh"]
