@@ -41,7 +41,6 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/src/migrations ./src/migrations
 COPY --from=builder /app/src/ormconfig.ts ./src/
 COPY --from=builder /app/typeorm.config.ts ./
-COPY --from=builder /app/scripts ./scripts
 
 # Copy other necessary files
 COPY --from=builder /app/nest-cli.json ./
