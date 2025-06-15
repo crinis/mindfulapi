@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
+import * as path from 'path';
 
 /**
  * Bootstrap function that initializes and configures the NestJS application.
@@ -27,7 +28,13 @@ async function bootstrap() {
   // Configure static file serving for accessibility issue screenshots
   // Screenshots are served at /screenshots/{filename} endpoint
   const screenshotDir = process.env.SCREENSHOT_DIR || './screenshots';
-  app.useStaticAssets(join(process.cwd(), screenshotDir), {
+  
+  // Handle both relative and absolute paths correctly
+  const resolvedScreenshotDir = path.isAbsolute(screenshotDir) 
+    ? screenshotDir 
+    : join(process.cwd(), screenshotDir);
+    
+  app.useStaticAssets(resolvedScreenshotDir, {
     prefix: '/screenshots/',
   });
 

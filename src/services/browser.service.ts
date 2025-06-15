@@ -2,27 +2,27 @@ import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
 import { Browser, chromium } from 'playwright';
 
 /**
- * Singleton browser instance manager for efficient Chromium automation.
+ * Singleton browser instance manager for efficient browser automation.
  * 
- * This service provides a shared Chromium browser instance across the application
+ * This service provides a shared browser instance across the application
  * to optimize resource usage and improve performance. It supports two modes:
  * 
- * 1. **External CDP Connection**: Connect to an external Chromium instance via 
- *    Chrome DevTools Protocol when CHROMIUM_CDP_URL is configured
+ * 1. **External Playwright Connection**: Connect to an external Playwright instance via 
+ *    WebSocket when PLAYWRIGHT_WS_URL is configured
  * 2. **Local Browser Launch**: Launch a local headless Chromium instance when 
  *    no external URL is provided
  * 
  * Key features:
  * - Singleton pattern ensures single browser instance per application
  * - Lazy initialization - browser launches/connects only when first needed
- * - Support for external browser services via CDP
+ * - Support for external Playwright browser services via WebSocket
  * - Optimized Chromium flags for headless server environments
  * - Graceful shutdown handling to prevent resource leaks
  * - Docker and containerized environment compatibility
  * 
  * Environment Variables:
- * - CHROMIUM_CDP_URL: WebSocket URL to external Chromium CDP endpoint
- *   Example: ws://chromium:9222 or ws://localhost:9222
+ * - PLAYWRIGHT_WS_URL: WebSocket URL to external Playwright instance
+ *   Example: ws://playwright:3000 or ws://localhost:3000
  * 
  * @implements {OnApplicationShutdown} Ensures proper cleanup on app termination
  */
@@ -33,16 +33,16 @@ export class BrowserService implements OnApplicationShutdown {
   private isExternalConnection = false;
 
   /**
-   * Retrieves the shared browser instance, connecting to external CDP or launching locally.
+   * Retrieves the shared browser instance, connecting to external Playwright or launching locally.
    * 
-   * This method implements lazy initialization of the Chromium browser. It first checks
-   * for the CHROMIUM_CDP_URL environment variable:
+   * This method implements lazy initialization of the browser. It first checks
+   * for the PLAYWRIGHT_WS_URL environment variable:
    * 
-   * - If set: Connects to external Chromium instance via Chrome DevTools Protocol
+   * - If set: Connects to external Playwright instance via WebSocket
    * - If not set: Launches local headless Chromium with optimized flags
    * 
-   * External CDP connection enables using dedicated browser services like:
-   * - Docker containers running Chromium
+   * External Playwright connection enables using dedicated browser services like:
+   * - Docker containers running Playwright
    * - Cloud browser services
    * - Separate browser pods in Kubernetes
    * 
@@ -53,15 +53,15 @@ export class BrowserService implements OnApplicationShutdown {
    * - GPU and acceleration disabling for server compatibility
    * - Process model optimizations (--no-zygote)
    * 
-   * @returns Promise resolving to the shared Chromium browser instance
+   * @returns Promise resolving to the shared browser instance
    * @throws {Error} When browser launch/connection fails
    */
   async getBrowser(): Promise<Browser> {
     if (!this.browser) {
-      const cdpUrl = process.env.CHROMIUM_CDP_URL;
+      const playwrightUrl = process.env.PLAYWRIGHT_WS_URL;
       
-      if (cdpUrl) {
-        await this.connectToExternalBrowser(cdpUrl);
+      if (playwrightUrl) {
+        await this.connectToExternalPlaywright(playwrightUrl);
       } else {
         await this.launchLocalBrowser();
       }
@@ -70,25 +70,24 @@ export class BrowserService implements OnApplicationShutdown {
   }
 
   /**
-   * Connects to an external Chromium instance via Chrome DevTools Protocol.
+   * Connects to an external Playwright instance via WebSocket.
    * 
-   * This method establishes a WebSocket connection to a remote Chromium instance
-   * running with CDP enabled. The external browser should be started with:
-   * --remote-debugging-port=9222 --remote-debugging-address=0.0.0.0
+   * This method establishes a WebSocket connection to a remote Playwright instance.
+   * The external Playwright service should be running and accessible via WebSocket.
    * 
-   * @param cdpUrl - WebSocket URL to the CDP endpoint (e.g., ws://chromium:9222)
-   * @throws {Error} When connection to external browser fails
+   * @param wsUrl - WebSocket URL to the Playwright endpoint (e.g., ws://playwright:3000)
+   * @throws {Error} When connection to external Playwright fails
    */
-  private async connectToExternalBrowser(cdpUrl: string): Promise<void> {
-    this.logger.log(`Connecting to external Chromium via CDP: ${cdpUrl}`);
+  private async connectToExternalPlaywright(wsUrl: string): Promise<void> {
+    this.logger.log(`Connecting to external Playwright via WebSocket: ${wsUrl}`);
     
     try {
-      this.browser = await chromium.connectOverCDP(cdpUrl);
+      this.browser = await chromium.connect(wsUrl);
       this.isExternalConnection = true;
-      this.logger.log('Successfully connected to external Chromium instance');
+      this.logger.log('Successfully connected to external Playwright instance');
     } catch (error) {
-      this.logger.error(`Failed to connect to external Chromium at ${cdpUrl}:`, error);
-      throw new Error(`Unable to connect to external Chromium: ${error.message}`);
+      this.logger.error(`Failed to connect to external Playwright at ${wsUrl}:`, error);
+      throw new Error(`Unable to connect to external Playwright: ${error.message}`);
     }
   }
 
@@ -96,7 +95,7 @@ export class BrowserService implements OnApplicationShutdown {
    * Launches a local headless Chromium instance with optimized flags.
    * 
    * This fallback method creates a local browser instance when no external
-   * CDP URL is configured.
+   * Playwright URL is configured.
    * 
    * @throws {Error} When local browser launch fails
    */
@@ -138,7 +137,7 @@ export class BrowserService implements OnApplicationShutdown {
       if (this.isExternalConnection) {
         // For external connections, disconnect without closing the remote browser
         await this.browser.close();
-        this.logger.log('Disconnected from external Chromium instance');
+        this.logger.log('Disconnected from external Playwright instance');
       } else {
         // For local instances, close the browser completely
         await this.browser.close();

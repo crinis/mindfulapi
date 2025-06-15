@@ -17,11 +17,11 @@ export const createDatabaseConfig = (): TypeOrmModuleOptions & DataSourceOptions
     // Use different migration paths for development vs production
     migrations: isProduction 
       ? ['dist/migrations/*.js']
-      : ['src/migrations/*.ts'],
+      : [],  // Disable migrations in development, use synchronize instead
     migrationsTableName: 'migrations',
     // Auto-sync database schema in development (disable in production)
     synchronize: !isProduction,
-    // Run migrations automatically in production
+    // Run migrations automatically in production only
     migrationsRun: isProduction,
     // Enable SQL logging in development for debugging
     logging: !isProduction,
