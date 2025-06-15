@@ -3,9 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScanModule } from './modules/scan.module';
 import { QueueModule } from './modules/queue.module';
 import { CleanupModule } from './modules/cleanup.module';
-import { Scan } from './entities/scan.entity';
-import { Issue } from './entities/issue.entity';
 import { authProvider } from './guards/auth-provider';
+import { createDatabaseConfig } from './config/database.config';
 
 /**
  * Root application module that configures database connection and imports feature modules.
@@ -16,19 +15,8 @@ import { authProvider } from './guards/auth-provider';
  */
 @Module({
   imports: [
-    // Configure TypeORM with SQLite for simplicity in development
-    TypeOrmModule.forRoot({
-      type: 'sqlite',
-      database: process.env.DATABASE_PATH || './data/database.sqlite',
-      entities: [Scan, Issue],
-      migrations: ['./src/migrations/*.ts'],
-      // Auto-sync database schema in development (disable in production)
-      synchronize: process.env.NODE_ENV !== 'production',
-      // Run migrations automatically in production
-      migrationsRun: process.env.NODE_ENV === 'production',
-      // Enable SQL logging in development for debugging
-      logging: process.env.NODE_ENV !== 'production',
-    }),
+    // Configure TypeORM with shared configuration
+    TypeOrmModule.forRoot(createDatabaseConfig()),
     QueueModule, // Background job processing for accessibility scans
     ScanModule, // Core scan management functionality
     CleanupModule, // Automated cleanup of old scans and screenshots

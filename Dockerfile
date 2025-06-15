@@ -37,8 +37,9 @@ RUN npm ci --only=production && npm cache clean --force
 # Copy built application from builder stage
 COPY --from=builder /app/dist ./dist
 
-# Copy migration files and scripts
+# Copy migration source files (for development/manual operations if needed)
 COPY --from=builder /app/src/migrations ./src/migrations
+COPY --from=builder /app/src/ormconfig.ts ./src/
 COPY --from=builder /app/typeorm.config.ts ./
 COPY --from=builder /app/scripts ./scripts
 
@@ -57,19 +58,14 @@ EXPOSE 3000
 # Create volumes for persistent data
 VOLUME ["/data"]
 
-# Create a startup script that initializes database
+# Create a simple startup script that ensures directories exist
 RUN echo '#!/bin/sh' > /app/startup.sh && \
-    echo 'echo "🚀 Starting MindfulAPI with database initialization..."' >> /app/startup.sh && \
+    echo 'echo "🚀 Starting MindfulAPI..."' >> /app/startup.sh && \
     echo 'mkdir -p /data/screenshots' >> /app/startup.sh && \
     echo 'echo "📁 Data directories created"' >> /app/startup.sh && \
-    echo 'if [ ! -f "/data/database.sqlite" ]; then' >> /app/startup.sh && \
-    echo '  echo "📊 Database does not exist, will be created by application"' >> /app/startup.sh && \
-    echo 'else' >> /app/startup.sh && \
-    echo '  echo "📊 Database exists, checking for migrations..."' >> /app/startup.sh && \
-    echo 'fi' >> /app/startup.sh && \
-    echo 'echo "🎉 Starting application..."' >> /app/startup.sh && \
+    echo 'echo "🎉 Starting application (migrations will run automatically)..."' >> /app/startup.sh && \
     echo 'exec node dist/main' >> /app/startup.sh && \
     chmod +x /app/startup.sh
 
-# Start the application with initialization
+# Start the application with automatic migration
 CMD ["/app/startup.sh"]
