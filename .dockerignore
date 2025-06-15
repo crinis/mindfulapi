@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+
+# Distribution/build files
+dist/
+
+# Environment files (should be set via docker-compose or environment)
+.env
+.env.local
+.env.*.local
+.env.example
+
+# Runtime data
+data/
+
+# Logs
+logs/
+*.log
+output.txt
+
+# Test files
+test/
+coverage/
+*.spec.ts
+*.test.ts
+www/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Documentation (not needed in container)
+docs/
+README.md
+*.md
+todo.md
+
+# Bruno API tests
+.bruno/
+
+# Docker files (not needed inside container)
+docker-compose.yml
+dev.docker-compose.yml
+.dockerignore
+
+# GitHub workflows (not needed in container)
+.github/
+
+# Other
+.DS_Store
+Thumbs.db

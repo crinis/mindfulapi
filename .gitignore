@@ -60,5 +60,8 @@ database.sqlite-*
 # Screenshots
 screenshots/
 
+# Data directory (contains database and screenshots for development)
+data/
+
 # Temporary output files
 output.txt

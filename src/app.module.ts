@@ -19,7 +19,7 @@ import { authProvider } from './guards/auth-provider';
     // Configure TypeORM with SQLite for simplicity in development
     TypeOrmModule.forRoot({
       type: 'sqlite',
-      database: 'database.sqlite',
+      database: process.env.DATABASE_PATH || './data/database.sqlite',
       entities: [Scan, Issue],
       // Auto-sync database schema in development (disable in production)
       synchronize: process.env.NODE_ENV !== 'production',
