@@ -1,5 +1,6 @@
 import { Browser } from 'playwright';
 import { Issue } from '../entities/issue.entity';
+import { Language } from '../types/language.types';
 
 /**
  * Interface contract for accessibility scanner implementations.
@@ -106,6 +107,18 @@ export interface ScanOptions {
    * and protected resources throughout the scanning process.
    */
   basicAuth?: BasicAuth;
+
+  /**
+   * Language preference for accessibility rule descriptions and help content.
+   * 
+   * Determines the language used for issue descriptions and help URLs in
+   * the scan results. Used by Kayle for internationalized accessibility rules.
+   * 
+   * @example "en" for English (default)
+   * @example "es" for Spanish
+   * @example "fr" for French
+   */
+  language?: Language;
 
   /**
    * CSS selector to limit scanning scope to a specific page element.

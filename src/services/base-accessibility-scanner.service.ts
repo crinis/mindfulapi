@@ -109,7 +109,7 @@ export abstract class BaseAccessibilityScanner {
       waitUntil: 'domcontentloaded',
       allowImages: true,
       clip: false, // Disable Kayle's screenshot functionality
-      language: 'en',
+      language: options?.language || 'en',
     };
 
     // Only set rootElement if it was explicitly provided

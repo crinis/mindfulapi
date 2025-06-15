@@ -11,6 +11,7 @@ import { ScanJobData } from './scan-queue.service';
 import { BrowserService } from './browser.service';
 import { AccessibilityScannerFactory } from './accessibility-scanner-factory.service';
 import { RuleServiceFactory } from './rule-service-factory.service';
+import { Language } from '../types/language.types';
 
 /**
  * Background job processor for asynchronous accessibility scan execution.
@@ -73,16 +74,16 @@ export class ScanProcessor extends WorkerHost {
    * @throws {Error} Re-throws scan errors to trigger BullMQ retry mechanism
    */
   async process(job: Job<ScanJobData>): Promise<void> {
-    const { scanId, url, rootElement, scannerType, ruleIds } = job.data;
+    const { scanId, url, rootElement, scannerType, ruleIds, language } = job.data;
 
-    this.logger.log(`Processing scan ${scanId} for URL: ${url} using ${scannerType} scanner${rootElement ? ` (rootElement: ${rootElement})` : ''}${ruleIds ? ` (ruleIds: ${ruleIds.join(', ')})` : ''}`);
+    this.logger.log(`Processing scan ${scanId} for URL: ${url} using ${scannerType} scanner${rootElement ? ` (rootElement: ${rootElement})` : ''}${ruleIds ? ` (ruleIds: ${ruleIds.join(', ')})` : ''}${language ? ` (language: ${language})` : ''}`);
 
     try {
       // Update scan status to RUNNING
       await this.updateScanStatus(scanId, ScanStatus.RUNNING);
 
       // Perform accessibility scanning process with the specified scanner
-      await this.performAccessibilityScan(scanId, url, rootElement, scannerType, ruleIds);
+      await this.performAccessibilityScan(scanId, url, rootElement, scannerType, ruleIds, language);
 
       // Update scan status to COMPLETED
       await this.updateScanStatus(scanId, ScanStatus.COMPLETED);
@@ -125,6 +126,7 @@ export class ScanProcessor extends WorkerHost {
     rootElement?: string,
     scannerType?: ScannerType,
     ruleIds?: string[],
+    language?: Language,
   ): Promise<void> {
     try {
       // Get the browser instance
@@ -144,6 +146,10 @@ export class ScanProcessor extends WorkerHost {
 
       if (ruleIds && ruleIds.length > 0) {
         scanOptions.ruleIds = ruleIds;
+      }
+
+      if (language) {
+        scanOptions.language = language;
       }
 
       // Run accessibility scan using the specified scanner
