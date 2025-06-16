@@ -2,6 +2,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    user: "1001:1001"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -10,6 +11,8 @@ services:
     image: mcr.microsoft.com/playwright:v1.53.0-noble
     restart: unless-stopped
     user: "1001:1001"
+    # Based on guidance for Docker deployment: https://playwright.dev/docs/docker.
+    # Not needed for podman as it seems.
     security_opt:
       - "seccomp=./seccomp_profile.json"
     command:
@@ -22,6 +25,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    user: "1001:1001"
     ports:
       - "3000:3000"
     environment:
