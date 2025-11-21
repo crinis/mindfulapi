@@ -8,7 +8,7 @@ services:
     command: redis-server --appendonly yes
 
   playwright:
-    image: mcr.microsoft.com/playwright:v1.53.0-noble
+    image: mcr.microsoft.com/playwright:v1.55.0-noble
     restart: unless-stopped
     user: "1001:1001"
     # Based on guidance for Docker deployment: https://playwright.dev/docs/docker.
@@ -18,7 +18,7 @@ services:
     command:
       - /bin/sh
       - -c
-      - "npx -y playwright@1.53.0 run-server --port 3000 --host 0.0.0.0"
+      - "npx -y playwright@1.56.1 run-server --port 3000 --host 0.0.0.0"
 
   mindfulapi:
     image: ghcr.io/crinis/mindfulapi:latest
