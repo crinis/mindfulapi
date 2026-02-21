@@ -1,8 +1,15 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
+/**
+ * Initial schema migration creating `scans` and `issues` tables.
+ */
 export class InitialMigration1750018156076 implements MigrationInterface {
+  /** TypeORM migration name identifier. */
   name = 'InitialMigration1750018156076';
 
+  /**
+   * Applies the initial schema migration.
+   */
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
       `CREATE TABLE "issues" ("id" integer PRIMARY KEY AUTOINCREMENT NOT NULL, "ruleId" varchar NOT NULL, "description" varchar NOT NULL, "impact" text NOT NULL, "selector" varchar, "context" varchar, "screenshotFilename" varchar, "scanId" integer)`,
@@ -22,6 +29,9 @@ export class InitialMigration1750018156076 implements MigrationInterface {
     );
   }
 
+  /**
+   * Reverts the initial schema migration.
+   */
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
       `ALTER TABLE "issues" RENAME TO "temporary_issues"`,

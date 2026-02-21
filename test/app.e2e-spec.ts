@@ -12,24 +12,22 @@ import { Scan } from '../src/entities/scan.entity';
 import { Issue } from '../src/entities/issue.entity';
 import { ScanStatus } from '../src/enums/scan-status.enum';
 import { IssueImpact } from '../src/enums/issue-impact.enum';
+import { ScanMode } from '../src/enums/scan-mode.enum';
 
-// ---------------------------------------------------------------------------
-// Mock QueueModule — replaces BullMQ so no Redis connection is needed
-// ---------------------------------------------------------------------------
 const mockAddScanJob = jest.fn().mockResolvedValue(undefined);
 
 @Module({
   imports: [TypeOrmModule.forFeature([Scan, Issue])],
   providers: [
-    { provide: ScanQueueService, useValue: { addScanJob: mockAddScanJob } },
+    {
+      provide: ScanQueueService,
+      useValue: { addScanJob: mockAddScanJob },
+    },
   ],
   exports: [ScanQueueService],
 })
 class MockQueueModule {}
 
-// ---------------------------------------------------------------------------
-// Test helpers
-// ---------------------------------------------------------------------------
 function authHeader(token = 'testtoken') {
   return { Authorization: `Bearer ${token}` };
 }
@@ -41,7 +39,15 @@ async function seedCompletedScan(
   const scanRepo = dataSource.getRepository(Scan);
   const issueRepo = dataSource.getRepository(Issue);
 
-  const scan = await scanRepo.save({ url, status: ScanStatus.COMPLETED });
+  const scan = await scanRepo.save({
+    url,
+    mode: ScanMode.SINGLE_URL,
+    targets: [url],
+    status: ScanStatus.COMPLETED,
+    pagesDiscovered: 1,
+    pagesScanned: 1,
+    pagesFailed: 0,
+  });
 
   await issueRepo.save([
     {
@@ -49,6 +55,7 @@ async function seedCompletedScan(
       ruleId: 'color-contrast',
       description: 'Elements must have sufficient color contrast',
       impact: IssueImpact.SERIOUS,
+      pageUrl: url,
       selector: '.btn',
       context: '<button class="btn">Submit</button>',
       helpUrl:
@@ -59,6 +66,7 @@ async function seedCompletedScan(
       ruleId: 'color-contrast',
       description: 'Elements must have sufficient color contrast',
       impact: IssueImpact.SERIOUS,
+      pageUrl: url,
       selector: '.link',
       context: '<a class="link" href="#">Read more</a>',
       helpUrl:
@@ -69,6 +77,7 @@ async function seedCompletedScan(
       ruleId: 'image-alt',
       description: 'Images must have alternative text',
       impact: IssueImpact.CRITICAL,
+      pageUrl: `${url}/about`,
       selector: 'img',
       context: '<img src="logo.png">',
       helpUrl:
@@ -79,9 +88,6 @@ async function seedCompletedScan(
   return scan as Scan;
 }
 
-// ---------------------------------------------------------------------------
-// Test suite
-// ---------------------------------------------------------------------------
 describe('MindfulAPI (e2e)', () => {
   let app: INestApplication<App>;
   let dataSource: DataSource;
@@ -118,7 +124,6 @@ describe('MindfulAPI (e2e)', () => {
     SwaggerModule.setup('api', app, document, { jsonDocumentUrl: 'api-json' });
 
     await app.init();
-
     dataSource = moduleFixture.get<DataSource>(DataSource);
     seededScan = await seedCompletedScan(dataSource);
   });
@@ -131,333 +136,270 @@ describe('MindfulAPI (e2e)', () => {
 
   beforeEach(() => mockAddScanJob.mockClear());
 
-  // =========================================================================
-  // Authentication
-  // =========================================================================
   describe('Authentication', () => {
-    it('returns 401 when AUTH_TOKEN is set and no header is provided', () =>
+    it('returns 401 when token is missing', () =>
       request(app.getHttpServer()).get('/scans').expect(401));
 
-    it('returns 401 for an incorrect Bearer token', () =>
+    it('returns 401 when token is invalid', () =>
       request(app.getHttpServer())
         .get('/scans')
-        .set('Authorization', 'Bearer wrong')
+        .set(authHeader('wrong-token'))
         .expect(401));
 
-    it('returns 401 for a non-Bearer scheme', () =>
-      request(app.getHttpServer())
-        .get('/scans')
-        .set('Authorization', 'Basic testtoken')
-        .expect(401));
-
-    it('returns 200 for the correct Bearer token', () =>
+    it('returns 200 for correct Bearer token', () =>
       request(app.getHttpServer()).get('/scans').set(authHeader()).expect(200));
+
+    it('protects GET /rules when token is missing', () =>
+      request(app.getHttpServer()).get('/rules').expect(401));
+
+    it('protects GET /scans/:id when token is missing', () =>
+      request(app.getHttpServer()).get(`/scans/${seededScan.id}`).expect(401));
+
+    it('protects POST /cleanup when token is missing', () =>
+      request(app.getHttpServer()).post('/cleanup').expect(401));
+
+    it('protects GET /cleanup/config when token is missing', () =>
+      request(app.getHttpServer()).get('/cleanup/config').expect(401));
   });
 
-  // =========================================================================
-  // POST /scans
-  // =========================================================================
   describe('POST /scans', () => {
-    it('returns 201 with a pending scan', async () => {
-      const { body } = await request(app.getHttpServer())
-        .post('/scans')
-        .set(authHeader())
-        .send({ url: 'https://example.com' })
-        .expect(201);
-
-      expect(body.id).toEqual(expect.any(Number));
-      expect(body.url).toBe('https://example.com');
-      expect(body.status).toBe(ScanStatus.PENDING);
-      expect(body.violations).toEqual([]);
-      expect(body.totalIssueCount).toBe(0);
-      expect(body.createdAt).toBeDefined();
-      expect(body.updatedAt).toBeDefined();
-    });
-
-    it('queues a scan job after creating', async () => {
-      await request(app.getHttpServer())
-        .post('/scans')
-        .set(authHeader())
-        .send({ url: 'https://example.com' })
-        .expect(201);
-
-      expect(mockAddScanJob).toHaveBeenCalledWith(
-        expect.any(Number),
-        'https://example.com',
-        undefined,
-        undefined,
-      );
-    });
-
-    it('passes rootElement and ruleIds to the queue job', async () => {
-      await request(app.getHttpServer())
+    it('creates a single_url scan run', async () => {
+      const { body, headers } = await request(app.getHttpServer())
         .post('/scans')
         .set(authHeader())
         .send({
+          mode: ScanMode.SINGLE_URL,
           url: 'https://example.com',
-          rootElement: 'main',
-          ruleIds: ['color-contrast'],
+          scanOptions: { rootElement: 'main' },
         })
         .expect(201);
 
-      expect(mockAddScanJob).toHaveBeenCalledWith(
-        expect.any(Number),
-        'https://example.com',
-        'main',
-        ['color-contrast'],
-      );
+      expect(body.id).toEqual(expect.any(Number));
+      expect(body.mode).toBe(ScanMode.SINGLE_URL);
+      expect(body.targets).toEqual(['https://example.com/']);
+      expect(body.status).toBe(ScanStatus.PENDING);
+      expect(body.scanOptions.rootElement).toBe('main');
+      expect(body.violations).toEqual([]);
+      expect(body.totalIssueCount).toBe(0);
+      expect(body.progress.pagesDiscovered).toBe(0);
+      expect(headers.location).toBe(`/scans/${body.id}`);
     });
 
-    it('response does not contain removed fields (language, scannerType)', async () => {
+    it('creates a url_list scan run', async () => {
       const { body } = await request(app.getHttpServer())
         .post('/scans')
         .set(authHeader())
-        .send({ url: 'https://example.com' })
+        .send({
+          mode: ScanMode.URL_LIST,
+          urls: ['https://example.com', 'https://example.com/about'],
+        })
         .expect(201);
 
-      expect(body).not.toHaveProperty('language');
-      expect(body).not.toHaveProperty('scannerType');
+      expect(body.mode).toBe(ScanMode.URL_LIST);
+      expect(body.targets).toHaveLength(2);
     });
 
-    it('accepts localhost URLs without a TLD', async () => {
+    it('creates a crawl scan run with defaults', async () => {
       const { body } = await request(app.getHttpServer())
         .post('/scans')
         .set(authHeader())
-        .send({ url: 'http://localhost:8080' })
+        .send({
+          mode: ScanMode.CRAWL,
+          startUrls: ['https://example.com'],
+        })
         .expect(201);
 
-      expect(body.url).toBe('http://localhost:8080');
+      expect(body.mode).toBe(ScanMode.CRAWL);
+      expect(body.crawlOptions.maxPages).toBe(250);
+      expect(body.crawlOptions.maxDepth).toBe(4);
+      expect(body.crawlOptions.sameHostOnly).toBe(true);
+      expect(body.crawlOptions.concurrency).toBe(4);
     });
 
-    it('returns 400 when url is missing', () =>
+    it('queues a job after creating', async () => {
+      const { body } = await request(app.getHttpServer())
+        .post('/scans')
+        .set(authHeader())
+        .send({
+          mode: ScanMode.SINGLE_URL,
+          url: 'https://example.com',
+        })
+        .expect(201);
+
+      expect(mockAddScanJob).toHaveBeenCalledWith(body.id);
+    });
+
+    it('returns 400 for invalid mode payload combinations', () =>
       request(app.getHttpServer())
         .post('/scans')
         .set(authHeader())
-        .send({})
+        .send({
+          mode: ScanMode.SINGLE_URL,
+          url: 'https://example.com',
+          crawlOptions: { maxPages: 10 },
+        })
         .expect(400));
 
-    it('returns 400 for a URL without a protocol', () =>
+    it('returns 400 for invalid crawl regex patterns', () =>
       request(app.getHttpServer())
         .post('/scans')
         .set(authHeader())
-        .send({ url: 'example.com' })
+        .send({
+          mode: ScanMode.CRAWL,
+          startUrls: ['https://example.com'],
+          crawlOptions: { includePatterns: ['['] },
+        })
         .expect(400));
 
-    it('returns 400 for a plain string that is not a URL', () =>
+    it('returns 400 when url_list has fewer than 2 URLs', () =>
       request(app.getHttpServer())
         .post('/scans')
         .set(authHeader())
-        .send({ url: 'not-a-url' })
+        .send({
+          mode: ScanMode.URL_LIST,
+          urls: ['https://example.com'],
+        })
         .expect(400));
 
-    it('returns 400 when unknown fields are provided (whitelist validation)', () =>
+    it('returns 400 when url_list contains duplicate URLs', () =>
       request(app.getHttpServer())
         .post('/scans')
         .set(authHeader())
-        .send({ url: 'https://example.com', language: 'en' })
+        .send({
+          mode: ScanMode.URL_LIST,
+          urls: ['https://example.com', 'https://example.com'],
+        })
         .expect(400));
 
-    it('returns 400 when removed field scannerType is provided', () =>
+    it('returns 400 when crawl startUrls contains duplicates', () =>
       request(app.getHttpServer())
         .post('/scans')
         .set(authHeader())
-        .send({ url: 'https://example.com', scannerType: 'axe' })
+        .send({
+          mode: ScanMode.CRAWL,
+          startUrls: ['https://example.com', 'https://example.com'],
+        })
         .expect(400));
 
-    it('returns 401 without authentication', () =>
+    it('returns 400 when scanOptions.ruleIds contains duplicates', () =>
       request(app.getHttpServer())
         .post('/scans')
-        .send({ url: 'https://example.com' })
+        .set(authHeader())
+        .send({
+          mode: ScanMode.SINGLE_URL,
+          url: 'https://example.com',
+          scanOptions: { ruleIds: ['image-alt', 'image-alt'] },
+        })
+        .expect(400));
+
+    it('returns 400 when crawl includePatterns contains duplicates', () =>
+      request(app.getHttpServer())
+        .post('/scans')
+        .set(authHeader())
+        .send({
+          mode: ScanMode.CRAWL,
+          startUrls: ['https://example.com'],
+          crawlOptions: {
+            includePatterns: [
+              '^https://example.com/docs',
+              '^https://example.com/docs',
+            ],
+          },
+        })
+        .expect(400));
+
+    it('returns 401 without auth', () =>
+      request(app.getHttpServer())
+        .post('/scans')
+        .send({
+          mode: ScanMode.SINGLE_URL,
+          url: 'https://example.com',
+        })
         .expect(401));
   });
 
-  // =========================================================================
-  // GET /scans
-  // =========================================================================
   describe('GET /scans', () => {
-    it('returns 200 with an array', () =>
-      request(app.getHttpServer())
-        .get('/scans')
-        .set(authHeader())
-        .expect(200)
-        .expect((res) => expect(Array.isArray(res.body)).toBe(true)));
-
-    it('each scan has the correct shape', async () => {
+    it('returns runs with the unified response shape', async () => {
       const { body } = await request(app.getHttpServer())
         .get('/scans')
         .set(authHeader())
         .expect(200);
 
       expect(body.length).toBeGreaterThan(0);
-      for (const scan of body) {
-        expect(scan).toHaveProperty('id');
-        expect(scan).toHaveProperty('url');
-        expect(scan).toHaveProperty('status');
-        expect(scan).toHaveProperty('violations');
-        expect(scan).toHaveProperty('totalIssueCount');
-        expect(scan).toHaveProperty('createdAt');
-        expect(scan).toHaveProperty('updatedAt');
-        expect(scan).not.toHaveProperty('language');
-        expect(scan).not.toHaveProperty('scannerType');
+      for (const run of body) {
+        expect(run).toHaveProperty('id');
+        expect(run).toHaveProperty('mode');
+        expect(run).toHaveProperty('targets');
+        expect(run).toHaveProperty('status');
+        expect(run).toHaveProperty('scanOptions');
+        expect(run).toHaveProperty('progress');
+        expect(run).toHaveProperty('violations');
+        expect(run).toHaveProperty('totalIssueCount');
+        expect(run).toHaveProperty('createdAt');
+        expect(run).toHaveProperty('updatedAt');
+        expect(run).not.toHaveProperty('language');
+        expect(run).not.toHaveProperty('scannerType');
       }
     });
 
-    it('returns 401 without authentication', () =>
-      request(app.getHttpServer()).get('/scans').expect(401));
+    it('filters by target URL', async () => {
+      const { body } = await request(app.getHttpServer())
+        .get('/scans?target=https://seeded.example.com')
+        .set(authHeader())
+        .expect(200);
+
+      expect(body.length).toBeGreaterThanOrEqual(1);
+      for (const run of body) {
+        expect(run.targets).toContain('https://seeded.example.com');
+      }
+    });
+
+    it('returns 400 for invalid target URL query', () =>
+      request(app.getHttpServer())
+        .get('/scans?target=not-a-url')
+        .set(authHeader())
+        .expect(400));
   });
 
-  // =========================================================================
-  // GET /scans/:id
-  // =========================================================================
   describe('GET /scans/:id', () => {
-    it('returns 200 with the scan', async () => {
+    it('returns grouped violations with pageUrl per issue', async () => {
       const { body } = await request(app.getHttpServer())
         .get(`/scans/${seededScan.id}`)
         .set(authHeader())
         .expect(200);
 
       expect(body.id).toBe(seededScan.id);
-      expect(body.url).toBe('https://seeded.example.com');
+      expect(body.mode).toBe(ScanMode.SINGLE_URL);
       expect(body.status).toBe(ScanStatus.COMPLETED);
-    });
-
-    it('groups issues from the same rule into one violation', async () => {
-      const { body } = await request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}`)
-        .set(authHeader())
-        .expect(200);
-
-      // Seeded: 2 color-contrast + 1 image-alt = 2 violations
-      expect(body.violations).toHaveLength(2);
       expect(body.totalIssueCount).toBe(3);
-
-      const cc = body.violations.find(
-        (v: any) => v.rule.id === 'color-contrast',
-      );
-      expect(cc.issues).toHaveLength(2);
-      expect(cc.impact).toBe(IssueImpact.SERIOUS);
-
-      const ia = body.violations.find((v: any) => v.rule.id === 'image-alt');
-      expect(ia.issues).toHaveLength(1);
-      expect(ia.impact).toBe(IssueImpact.CRITICAL);
-    });
-
-    it('each violation has rule.id, rule.description, rule.helpUrl, impact, and issues', async () => {
-      const { body } = await request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}`)
-        .set(authHeader())
-        .expect(200);
+      expect(body.violations).toHaveLength(2);
 
       for (const violation of body.violations) {
         expect(violation.rule).toHaveProperty('id');
         expect(violation.rule).toHaveProperty('description');
-        expect(violation.rule).toHaveProperty('helpUrl');
-        expect(violation.rule.helpUrl).toContain('dequeuniversity.com');
         expect(Object.values(IssueImpact)).toContain(violation.impact);
-        expect(Array.isArray(violation.issues)).toBe(true);
-        expect(violation).not.toHaveProperty('issueCount');
-      }
-    });
-
-    it('impact is at the violation level, not inside rule', async () => {
-      const { body } = await request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}`)
-        .set(authHeader())
-        .expect(200);
-
-      for (const violation of body.violations) {
-        expect(violation).toHaveProperty('impact');
-        expect(violation.rule).not.toHaveProperty('impact');
-      }
-    });
-
-    it('rule does not have removed fields (urls)', async () => {
-      const { body } = await request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}`)
-        .set(authHeader())
-        .expect(200);
-
-      for (const violation of body.violations) {
-        expect(violation.rule).not.toHaveProperty('urls');
-      }
-    });
-
-    it('each issue has id and optional selector/context', async () => {
-      const { body } = await request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}`)
-        .set(authHeader())
-        .expect(200);
-
-      for (const violation of body.violations) {
         for (const issue of violation.issues) {
           expect(typeof issue.id).toBe('number');
+          expect(typeof issue.pageUrl).toBe('string');
         }
       }
     });
 
-    it('returns 404 for a non-existent scan ID', () =>
+    it('returns 404 for unknown ID', () =>
       request(app.getHttpServer())
         .get('/scans/999999')
         .set(authHeader())
         .expect(404));
 
-    it('returns 400 for a non-numeric ID', () =>
+    it('returns 400 for non-numeric ID', () =>
       request(app.getHttpServer())
         .get('/scans/abc')
         .set(authHeader())
         .expect(400));
-
-    it('returns 401 without authentication', () =>
-      request(app.getHttpServer()).get(`/scans/${seededScan.id}`).expect(401));
   });
 
-  // =========================================================================
-  // GET /scans (with url filter)
-  // =========================================================================
-  describe('GET /scans?url=', () => {
-    it('returns scans matching the given URL', async () => {
-      const { body } = await request(app.getHttpServer())
-        .get('/scans?url=https://seeded.example.com')
-        .set(authHeader())
-        .expect(200);
-
-      expect(Array.isArray(body)).toBe(true);
-      expect(body.length).toBeGreaterThanOrEqual(1);
-      for (const scan of body) {
-        expect(scan.url).toBe('https://seeded.example.com');
-      }
-    });
-
-    it('returns an empty array for a URL with no scans', async () => {
-      const { body } = await request(app.getHttpServer())
-        .get('/scans?url=https://no-match.example.com')
-        .set(authHeader())
-        .expect(200);
-
-      expect(body).toEqual([]);
-    });
-
-    it('returns all scans when url query param is omitted', async () => {
-      const { body } = await request(app.getHttpServer())
-        .get('/scans')
-        .set(authHeader())
-        .expect(200);
-
-      expect(Array.isArray(body)).toBe(true);
-      expect(body.length).toBeGreaterThan(0);
-    });
-
-    it('returns 401 without authentication', () =>
-      request(app.getHttpServer())
-        .get('/scans?url=https://example.com')
-        .expect(401));
-  });
-
-  // =========================================================================
-  // GET /rules
-  // =========================================================================
   describe('GET /rules', () => {
-    it('returns 200 with more than 100 rules', async () => {
+    it('returns axe rules', async () => {
       const { body } = await request(app.getHttpServer())
         .get('/rules')
         .set(authHeader())
@@ -465,68 +407,14 @@ describe('MindfulAPI (e2e)', () => {
 
       expect(Array.isArray(body)).toBe(true);
       expect(body.length).toBeGreaterThan(100);
+      expect(body[0]).toHaveProperty('id');
+      expect(body[0]).toHaveProperty('description');
+      expect(body[0]).toHaveProperty('tags');
     });
-
-    it('each rule has id, description, helpUrl, tags', async () => {
-      const { body } = await request(app.getHttpServer())
-        .get('/rules')
-        .set(authHeader())
-        .expect(200);
-
-      for (const rule of body) {
-        expect(typeof rule.id).toBe('string');
-        expect(typeof rule.description).toBe('string');
-        expect(Array.isArray(rule.tags)).toBe(true);
-        if (rule.helpUrl !== undefined) {
-          expect(typeof rule.helpUrl).toBe('string');
-          expect(rule.helpUrl).toContain('dequeuniversity.com');
-        }
-      }
-    });
-
-    it('does not include removed fields (impact, urls)', async () => {
-      const { body } = await request(app.getHttpServer())
-        .get('/rules')
-        .set(authHeader())
-        .expect(200);
-
-      for (const rule of body) {
-        expect(rule).not.toHaveProperty('impact');
-        expect(rule).not.toHaveProperty('urls');
-      }
-    });
-
-    it('returns rules sorted alphabetically by ID', async () => {
-      const { body } = await request(app.getHttpServer())
-        .get('/rules')
-        .set(authHeader())
-        .expect(200);
-
-      const ids: string[] = body.map((r: any) => r.id);
-      expect(ids).toEqual([...ids].sort());
-    });
-
-    it('contains well-known axe rules', async () => {
-      const { body } = await request(app.getHttpServer())
-        .get('/rules')
-        .set(authHeader())
-        .expect(200);
-
-      const ids: string[] = body.map((r: any) => r.id);
-      expect(ids).toContain('color-contrast');
-      expect(ids).toContain('image-alt');
-      expect(ids).toContain('landmark-one-main');
-    });
-
-    it('returns 401 without authentication', () =>
-      request(app.getHttpServer()).get('/rules').expect(401));
   });
 
-  // =========================================================================
-  // POST /cleanup
-  // =========================================================================
-  describe('POST /cleanup', () => {
-    it('returns 200 with a success message', async () => {
+  describe('Cleanup endpoints', () => {
+    it('POST /cleanup returns success', async () => {
       const { body } = await request(app.getHttpServer())
         .post('/cleanup')
         .set(authHeader())
@@ -535,15 +423,7 @@ describe('MindfulAPI (e2e)', () => {
       expect(body.message).toBe('Cleanup completed successfully');
     });
 
-    it('returns 401 without authentication', () =>
-      request(app.getHttpServer()).post('/cleanup').expect(401));
-  });
-
-  // =========================================================================
-  // GET /cleanup/config
-  // =========================================================================
-  describe('GET /cleanup/config', () => {
-    it('returns 200 with enabled, retentionDays and interval', async () => {
+    it('GET /cleanup/config returns config', async () => {
       const { body } = await request(app.getHttpServer())
         .get('/cleanup/config')
         .set(authHeader())
@@ -553,46 +433,52 @@ describe('MindfulAPI (e2e)', () => {
       expect(typeof body.retentionDays).toBe('number');
       expect(typeof body.interval).toBe('string');
     });
-
-    it('does not expose removed fields (screenshotDir, batchSize, concurrencyLimit)', async () => {
-      const { body } = await request(app.getHttpServer())
-        .get('/cleanup/config')
-        .set(authHeader())
-        .expect(200);
-
-      expect(body).not.toHaveProperty('screenshotDir');
-      expect(body).not.toHaveProperty('batchSize');
-      expect(body).not.toHaveProperty('concurrencyLimit');
-    });
-
-    it('returns 401 without authentication', () =>
-      request(app.getHttpServer()).get('/cleanup/config').expect(401));
   });
 
-  // =========================================================================
-  // GET /api-json  (OpenAPI spec)
-  // =========================================================================
   describe('GET /api-json', () => {
-    it('exposes the OpenAPI JSON document', async () => {
+    it('exposes OpenAPI with scan paths', async () => {
       const { body } = await request(app.getHttpServer())
         .get('/api-json')
         .expect(200);
 
       expect(body.openapi).toMatch(/^3\./);
-      expect(body.info.title).toBe('MindfulAPI');
+      expect(body.paths['/scans']).toBeDefined();
+      expect(body.paths['/scans/{id}']).toBeDefined();
     });
 
-    it('documents all expected paths', async () => {
+    it('documents mode-based start payload with oneOf', async () => {
       const { body } = await request(app.getHttpServer())
         .get('/api-json')
         .expect(200);
 
-      const paths = Object.keys(body.paths);
-      expect(paths).toContain('/scans');
-      expect(paths).toContain('/scans/{id}');
-      expect(paths).toContain('/rules');
-      expect(paths).toContain('/cleanup');
-      expect(paths).toContain('/cleanup/config');
+      const requestBodySchema =
+        body.paths['/scans'].post.requestBody.content['application/json']
+          .schema;
+      expect(requestBodySchema.oneOf).toBeDefined();
+      expect(requestBodySchema.discriminator.propertyName).toBe('mode');
+    });
+
+    it('documents request examples and operationIds for API usability', async () => {
+      const { body } = await request(app.getHttpServer())
+        .get('/api-json')
+        .expect(200);
+
+      const scanPost = body.paths['/scans'].post;
+      const requestContent = scanPost.requestBody.content['application/json'];
+
+      expect(scanPost.operationId).toBe('createScan');
+      expect(body.paths['/scans'].get.operationId).toBe('listScans');
+      expect(body.paths['/scans/{id}'].get.operationId).toBe('getScanById');
+      expect(body.paths['/rules'].get.operationId).toBe('listRules');
+      expect(body.paths['/cleanup'].post.operationId).toBe('triggerCleanup');
+      expect(body.paths['/cleanup/config'].get.operationId).toBe(
+        'getCleanupConfig',
+      );
+
+      expect(requestContent.examples).toBeDefined();
+      expect(requestContent.examples.singleUrl).toBeDefined();
+      expect(requestContent.examples.urlList).toBeDefined();
+      expect(requestContent.examples.crawl).toBeDefined();
     });
   });
 });

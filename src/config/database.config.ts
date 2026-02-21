@@ -6,6 +6,8 @@ import { Issue } from '../entities/issue.entity';
 /**
  * Shared TypeORM configuration for both NestJS module and CLI operations.
  * This ensures consistency between development and production environments.
+ *
+ * @returns Fully resolved TypeORM module/data-source options.
  */
 export const createDatabaseConfig = (): TypeOrmModuleOptions &
   DataSourceOptions => {

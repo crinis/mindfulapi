@@ -6,10 +6,22 @@ import { Queue } from 'bullmq';
  * Data for a scan processing job in the BullMQ queue.
  */
 export interface ScanJobData {
+  /** Scan run ID to process. */
   scanId: number;
-  url: string;
-  rootElement?: string;
-  ruleIds?: string[];
+}
+
+/**
+ * Snapshot counts for queue states used in operational monitoring.
+ */
+interface QueueStatusSnapshot {
+  /** Number of jobs waiting to be processed. */
+  waiting: number;
+  /** Number of jobs currently being processed. */
+  active: number;
+  /** Number of completed jobs retained in queue history. */
+  completed: number;
+  /** Number of failed jobs retained in queue history. */
+  failed: number;
 }
 
 /**
@@ -17,36 +29,33 @@ export interface ScanJobData {
  */
 @Injectable()
 export class ScanQueueService {
+  /**
+   * @param scanQueue BullMQ queue used for scan-processing jobs.
+   */
   constructor(
     @InjectQueue('scan-processing') private scanQueue: Queue<ScanJobData>,
   ) {}
 
-  async addScanJob(
-    scanId: number,
-    url: string,
-    rootElement?: string,
-    ruleIds?: string[],
-  ): Promise<void> {
-    await this.scanQueue.add(
-      'process-scan',
-      { scanId, url, rootElement, ruleIds },
-      { delay: 1000 },
-    );
+  /**
+   * Enqueues a background job to process a scan run.
+   *
+   * @param scanId Scan run ID to process.
+   */
+  async addScanJob(scanId: number): Promise<void> {
+    await this.scanQueue.add('process-scan', { scanId });
   }
 
-  async getQueueStatus() {
+  /**
+   * Returns a lightweight queue health snapshot.
+   */
+  async getQueueStatus(): Promise<QueueStatusSnapshot> {
     const [waiting, active, completed, failed] = await Promise.all([
-      this.scanQueue.getWaiting(),
-      this.scanQueue.getActive(),
-      this.scanQueue.getCompleted(),
-      this.scanQueue.getFailed(),
+      this.scanQueue.getWaitingCount(),
+      this.scanQueue.getActiveCount(),
+      this.scanQueue.getCompletedCount(),
+      this.scanQueue.getFailedCount(),
     ]);
 
-    return {
-      waiting: waiting.length,
-      active: active.length,
-      completed: completed.length,
-      failed: failed.length,
-    };
+    return { waiting, active, completed, failed };
   }
 }

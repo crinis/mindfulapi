@@ -7,8 +7,12 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * Changes to `issues`: remove `screenshotFilename`, add `helpUrl`.
  */
 export class DropKayleAddHelpUrl1750100000000 implements MigrationInterface {
+  /** TypeORM migration name identifier. */
   name = 'DropKayleAddHelpUrl1750100000000';
 
+  /**
+   * Applies schema changes for dropping legacy columns and adding help URLs.
+   */
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Recreate scans table without language and scannerType columns
     await queryRunner.query(
@@ -31,6 +35,9 @@ export class DropKayleAddHelpUrl1750100000000 implements MigrationInterface {
     await queryRunner.query(`ALTER TABLE "issues_new" RENAME TO "issues"`);
   }
 
+  /**
+   * Reverts schema changes introduced by this migration.
+   */
   public async down(queryRunner: QueryRunner): Promise<void> {
     // Restore issues table with screenshotFilename, without helpUrl
     await queryRunner.query(

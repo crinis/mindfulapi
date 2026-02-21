@@ -6,8 +6,18 @@ import {
 } from '@nestjs/common';
 import { Request } from 'express';
 
+/**
+ * Global guard enforcing a static bearer token when `AUTH_TOKEN` is configured.
+ */
 @Injectable()
 export class AuthTokenGuard implements CanActivate {
+  /**
+   * Authorizes the incoming request based on `Authorization: Bearer <token>`.
+   *
+   * @param context Nest execution context.
+   * @returns `true` when request is authorized.
+   * @throws UnauthorizedException When the expected bearer token is missing or invalid.
+   */
   canActivate(context: ExecutionContext): boolean {
     const token = process.env.AUTH_TOKEN;
     if (!token) {

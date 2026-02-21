@@ -6,7 +6,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { RulesService } from '../services/rules.service';
-import { RuleResponseDto } from '../dto/scan-response.dto';
+import { RuleResponseDto } from '../dto/scan/response';
 import { ErrorResponseDto } from '../dto/error-response.dto';
 
 /**
@@ -17,10 +17,14 @@ import { ErrorResponseDto } from '../dto/error-response.dto';
 @ApiBearerAuth()
 @Controller('rules')
 export class RulesController {
+  /**
+   * @param rulesService Service that exposes axe rule metadata.
+   */
   constructor(private readonly rulesService: RulesService) {}
 
   @Get()
   @ApiOperation({
+    operationId: 'listRules',
     summary: 'List all axe-core rules',
     description:
       'Returns all available axe-core accessibility rules with metadata, sorted alphabetically by ID.',
@@ -36,6 +40,14 @@ export class RulesController {
     description: 'Missing or invalid Bearer token',
     type: ErrorResponseDto,
   })
+  @ApiResponse({
+    status: 500,
+    description: 'Unexpected server error',
+    type: ErrorResponseDto,
+  })
+  /**
+   * Lists all available axe-core rules with response metadata.
+   */
   getRules(): RuleResponseDto[] {
     return this.rulesService.getRules();
   }

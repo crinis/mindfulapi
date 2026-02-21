@@ -6,11 +6,12 @@ import { IsOptional, IsUrl } from 'class-validator';
  * All fields are optional — omitting them returns all scans.
  */
 export class ScanQueryDto {
-  /** Filter results to scans for a specific URL. */
+  /** Filter results to scan runs containing a specific target URL. */
   @ApiPropertyOptional({
     example: 'https://example.com',
+    format: 'uri',
     description:
-      'Filter scans by exact URL match. When omitted, all scans are returned.',
+      'Filter runs by exact match in normalized input targets. When omitted, all scan runs are returned.',
   })
   @IsOptional()
   @IsUrl({
@@ -18,5 +19,5 @@ export class ScanQueryDto {
     require_protocol: true,
     protocols: ['http', 'https'],
   })
-  url?: string;
+  target?: string;
 }

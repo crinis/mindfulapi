@@ -7,6 +7,7 @@ MindfulAPI was built to serve as the external accessibility scanner backend for 
 ## Features
 
 - **Axe-core scanning** — industry-standard accessibility rules mapped to WCAG 2 / Section 508
+- **Three scan modes** — scan a single URL, an explicit list of URLs, or crawl a site automatically from seed URLs
 - **Asynchronous processing** — scans run in the background via a Redis-backed queue (BullMQ)
 - **Scoped scanning** — target a specific CSS selector instead of the whole page
 - **Rule filtering** — run only the axe rules you care about
@@ -99,34 +100,69 @@ The interactive OpenAPI UI (Swagger) is available at `/api` and does not require
 
 ---
 
-### POST /scans — Create a scan
+### POST /scans — Create a scan run
 
-Queues a new axe-core accessibility scan for the given URL. Scans run asynchronously — poll `GET /scans/:id` to check completion.
+Queues a new asynchronous scan run. The request supports three modes through an OpenAPI `oneOf` schema:
 
-**Request body**
+- `single_url`: scan exactly one URL
+- `url_list`: scan an explicit list of URLs
+- `crawl`: crawl from one or more seed URLs and scan discovered pages
+
+**Request body — `single_url`**
 
 ```json
 {
+  "mode": "single_url",
   "url": "https://example.com",
-  "rootElement": "main",
-  "ruleIds": ["color-contrast", "image-alt"]
+  "scanOptions": {
+    "rootElement": "main",
+    "ruleIds": ["color-contrast", "image-alt"]
+  }
 }
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `url` | string | Yes | Target URL. HTTP and HTTPS supported. TLD not required (supports localhost). |
-| `rootElement` | string | No | CSS selector to restrict scan scope. Scans the entire page when omitted. |
-| `ruleIds` | string[] | No | Specific axe rule IDs to run. All rules run when omitted. |
+**Request body — `url_list`**
+
+```json
+{
+  "mode": "url_list",
+  "urls": ["https://example.com", "https://example.com/about"]
+}
+```
+
+**Request body — `crawl`**
+
+```json
+{
+  "mode": "crawl",
+  "startUrls": ["https://example.com"],
+  "crawlOptions": {
+    "maxPages": 250,
+    "maxDepth": 4,
+    "sameHostOnly": true,
+    "concurrency": 4
+  }
+}
+```
 
 **Response — `201 Created`**
 
 ```json
 {
   "id": 1,
-  "url": "https://example.com",
-  "rootElement": "main",
+  "mode": "single_url",
+  "targets": ["https://example.com/"],
   "status": "pending",
+  "scanOptions": {
+    "rootElement": "main",
+    "ruleIds": ["color-contrast", "image-alt"]
+  },
+  "crawlOptions": null,
+  "progress": {
+    "pagesDiscovered": 0,
+    "pagesScanned": 0,
+    "pagesFailed": 0
+  },
   "violations": [],
   "totalIssueCount": 0,
   "createdAt": "2025-06-14T10:30:00.000Z",
@@ -138,21 +174,21 @@ Queues a new axe-core accessibility scan for the given URL. Scans run asynchrono
 curl -X POST http://localhost:3000/scans \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer changeme" \
-  -d '{"url": "https://example.com"}'
+  -d '{"mode":"single_url","url":"https://example.com"}'
 ```
 
 ---
 
-### GET /scans — List scans
+### GET /scans — List scan runs
 
-Returns all scans ordered by creation date (newest first). Use the optional `url` query parameter to filter results for a specific URL.
+Returns all scan runs ordered by creation date (newest first). Use the optional `target` query parameter to filter results by one input target URL.
 
 ```bash
 # All scans
 curl http://localhost:3000/scans -H "Authorization: Bearer changeme"
 
-# Filter by URL
-curl "http://localhost:3000/scans?url=https://example.com" \
+# Filter by target
+curl "http://localhost:3000/scans?target=https://example.com" \
   -H "Authorization: Bearer changeme"
 ```
 
@@ -171,20 +207,38 @@ curl http://localhost:3000/scans/1 -H "Authorization: Bearer changeme"
 ```json
 {
   "id": 1,
-  "url": "https://example.com",
-  "rootElement": null,
+  "mode": "crawl",
+  "targets": ["https://example.com/"],
   "status": "completed",
+  "scanOptions": {
+    "rootElement": null,
+    "ruleIds": null
+  },
+  "crawlOptions": {
+    "maxPages": 250,
+    "maxDepth": 4,
+    "sameHostOnly": true,
+    "includePatterns": [],
+    "excludePatterns": [],
+    "concurrency": 4
+  },
+  "progress": {
+    "pagesDiscovered": 15,
+    "pagesScanned": 15,
+    "pagesFailed": 0
+  },
   "violations": [
     {
       "rule": {
         "id": "color-contrast",
         "description": "Elements must have sufficient color contrast",
-        "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/color-contrast?application=playwright"
+        "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/color-contrast?application=axeAPI"
       },
       "impact": "serious",
       "issues": [
         {
           "id": 1,
+          "pageUrl": "https://example.com/pricing",
           "selector": ".btn-primary",
           "context": "<button class=\"btn-primary\">Submit</button>"
         }
@@ -213,9 +267,9 @@ curl http://localhost:3000/rules -H "Authorization: Bearer changeme"
 [
   {
     "id": "color-contrast",
-    "description": "Ensures the contrast between foreground and background colors meets WCAG 2 AA contrast ratio thresholds",
+    "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
     "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/color-contrast?application=axeAPI",
-    "tags": ["cat.color", "wcag2aa", "wcag143", "TTv5", "TT13.c", "EN-301-549", "ACT"]
+    "tags": ["cat.color", "wcag2aa", "wcag143", "TTv5", "TT13.c", "EN-301-549", "EN-9.1.4.3", "ACT", "RGAAv4", "RGAA-3.2.1"]
   }
 ]
 ```

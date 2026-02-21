@@ -62,6 +62,7 @@ screenshots/
 
 # Data directory (contains database and screenshots for development)
 data/
+storage/
 
 # Temporary output files
 output.txt

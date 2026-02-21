@@ -7,6 +7,7 @@ import { IssueImpact } from '../enums/issue-impact.enum';
  */
 @Entity('issues')
 export class Issue {
+  /** Primary key for the persisted issue occurrence. */
   @PrimaryGeneratedColumn()
   id: number;
 
@@ -25,6 +26,10 @@ export class Issue {
   /** Severity level as reported by axe-core (critical, serious, moderate, minor). */
   @Column({ type: 'text' })
   impact: IssueImpact;
+
+  /** Canonical URL of the page where this issue was found. */
+  @Column({ nullable: true })
+  pageUrl?: string;
 
   /** CSS selector identifying the specific DOM element with the issue. */
   @Column({ nullable: true })

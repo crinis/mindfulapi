@@ -1,5 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { RuleResponseDto } from '../dto/scan-response.dto';
+import { Injectable } from '@nestjs/common';
+import { RuleResponseDto } from '../dto/scan/response';
 import * as axe from 'axe-core';
 
 /**
@@ -7,23 +7,21 @@ import * as axe from 'axe-core';
  */
 @Injectable()
 export class RulesService {
-  private readonly logger = new Logger(RulesService.name);
+  /** Cached rule list — axe-core rules are static and never change at runtime. */
+  private readonly rules: RuleResponseDto[] = axe
+    .getRules()
+    .map((rule) => ({
+      id: rule.ruleId,
+      description: rule.description,
+      helpUrl: rule.helpUrl,
+      tags: rule.tags,
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
 
   /**
    * Returns all axe-core accessibility rules with their metadata.
    */
   getRules(): RuleResponseDto[] {
-    this.logger.log('Loading axe-core rules');
-
-    const rules = axe.getRules();
-
-    return rules
-      .map((rule) => ({
-        id: rule.ruleId,
-        description: rule.description,
-        helpUrl: rule.helpUrl,
-        tags: rule.tags,
-      }))
-      .sort((a, b) => a.id.localeCompare(b.id));
+    return this.rules;
   }
 }

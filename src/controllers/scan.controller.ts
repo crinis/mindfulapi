@@ -8,6 +8,7 @@ import {
   HttpStatus,
   HttpCode,
   Query,
+  Res,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -16,12 +17,21 @@ import {
   ApiBearerAuth,
   ApiParam,
   ApiBody,
+  ApiExtraModels,
 } from '@nestjs/swagger';
 import { ScanService } from '../services/scan.service';
-import { CreateScanDto } from '../dto/create-scan.dto';
+import {
+  CreateScanDto,
+  CreateSingleUrlScanDto,
+  CreateUrlListScanDto,
+  CreateCrawlScanDto,
+  createScanRequestExamples,
+  createScanRequestOneOfSchema,
+} from '../dto/scan/request';
 import { ScanQueryDto } from '../dto/scan-query.dto';
-import { ScanResponseDto } from '../dto/scan-response.dto';
+import { ScanResponseDto } from '../dto/scan/response';
 import { ErrorResponseDto } from '../dto/error-response.dto';
+import { Response } from 'express';
 
 /**
  * REST API controller for managing accessibility scans.
@@ -31,19 +41,37 @@ import { ErrorResponseDto } from '../dto/error-response.dto';
 @ApiBearerAuth()
 @Controller('scans')
 export class ScanController {
+  /**
+   * @param scanService Application service handling scan lifecycle operations.
+   */
   constructor(private readonly scanService: ScanService) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @ApiExtraModels(
+    CreateSingleUrlScanDto,
+    CreateUrlListScanDto,
+    CreateCrawlScanDto,
+  )
   @ApiOperation({
-    summary: 'Create a new accessibility scan',
+    operationId: 'createScan',
+    summary: 'Start a new accessibility scan run',
     description:
-      'Queues a new axe-core accessibility scan for the given URL. The scan runs asynchronously in the background. Poll GET /scans/:id to check completion.',
+      'Queues a new axe-core scan run in one of three modes: single URL, URL list, or crawl. Processing runs asynchronously in the background. Poll GET /scans/:id for status and results.',
   })
-  @ApiBody({ type: CreateScanDto })
+  @ApiBody({
+    schema: createScanRequestOneOfSchema,
+    examples: createScanRequestExamples,
+  })
   @ApiResponse({
     status: 201,
-    description: 'Scan created and queued',
+    description: 'Scan run created and queued',
+    headers: {
+      Location: {
+        description: 'URL of the created scan run resource',
+        schema: { type: 'string', format: 'uri-reference' },
+      },
+    },
     type: ScanResponseDto,
   })
   @ApiResponse({
@@ -56,15 +84,29 @@ export class ScanController {
     description: 'Missing or invalid Bearer token',
     type: ErrorResponseDto,
   })
-  async create(@Body() createScanDto: CreateScanDto): Promise<ScanResponseDto> {
-    return this.scanService.create(createScanDto);
+  @ApiResponse({
+    status: 500,
+    description: 'Unexpected server error',
+    type: ErrorResponseDto,
+  })
+  /**
+   * Creates a new scan run and sets the resource `Location` header.
+   */
+  async create(
+    @Body() createScanDto: CreateScanDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<ScanResponseDto> {
+    const scan = await this.scanService.create(createScanDto);
+    response.location(`/scans/${scan.id}`);
+    return scan;
   }
 
   @Get()
   @ApiOperation({
-    summary: 'List all scans',
+    operationId: 'listScans',
+    summary: 'List all scan runs',
     description:
-      'Returns all scans ordered by creation date, newest first. Use the optional `url` query parameter to filter scans for a specific URL.',
+      'Returns all scan runs ordered by creation date, newest first. Use the optional `target` query parameter to filter runs by one of their input targets.',
   })
   @ApiResponse({
     status: 200,
@@ -82,12 +124,23 @@ export class ScanController {
     description: 'Missing or invalid Bearer token',
     type: ErrorResponseDto,
   })
+  @ApiResponse({
+    status: 500,
+    description: 'Unexpected server error',
+    type: ErrorResponseDto,
+  })
+  /**
+   * Returns all scan runs, optionally filtered by a normalized target URL.
+   */
   async findAll(@Query() query: ScanQueryDto): Promise<ScanResponseDto[]> {
-    return this.scanService.findAll(query.url ? { url: query.url } : undefined);
+    return this.scanService.findAll(
+      query.target ? { target: query.target } : undefined,
+    );
   }
 
   @Get(':id')
   @ApiOperation({
+    operationId: 'getScanById',
     summary: 'Get scan by ID',
     description: 'Returns a specific scan with full violation details.',
   })
@@ -112,6 +165,14 @@ export class ScanController {
     description: 'Scan not found',
     type: ErrorResponseDto,
   })
+  @ApiResponse({
+    status: 500,
+    description: 'Unexpected server error',
+    type: ErrorResponseDto,
+  })
+  /**
+   * Returns one scan run by numeric identifier.
+   */
   async findOne(
     @Param('id', ParseIntPipe) id: number,
   ): Promise<ScanResponseDto> {

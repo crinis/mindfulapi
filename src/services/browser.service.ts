@@ -2,81 +2,49 @@ import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
 import { Browser, chromium } from 'playwright';
 
 /**
- * Singleton browser instance manager for efficient browser automation.
+ * Manages a single shared Playwright browser instance for the whole app.
  *
- * This service provides a shared browser instance across the application
- * to optimize resource usage and improve performance. It supports two modes:
- *
- * 1. **External Playwright Connection**: Connect to an external Playwright instance via
- *    WebSocket when PLAYWRIGHT_WS_URL is configured
- * 2. **Local Browser Launch**: Launch a local headless Chromium instance when
- *    no external URL is provided
- *
- * Key features:
- * - Singleton pattern ensures single browser instance per application
- * - Lazy initialization - browser launches/connects only when first needed
- * - Support for external Playwright browser services via WebSocket
- * - Optimized Chromium flags for headless server environments
- * - Graceful shutdown handling to prevent resource leaks
- * - Docker and containerized environment compatibility
- *
- * Environment Variables:
- * - PLAYWRIGHT_WS_URL: WebSocket URL to external Playwright instance
- *   Example: ws://playwright:3000 or ws://localhost:3000
- *
- * @implements {OnApplicationShutdown} Ensures proper cleanup on app termination
+ * Resolution order:
+ * 1. Connect to external browser if `PLAYWRIGHT_WS_URL` is set.
+ * 2. Otherwise launch local headless Chromium.
  */
 @Injectable()
 export class BrowserService implements OnApplicationShutdown {
   private readonly logger = new Logger(BrowserService.name);
+  /** Lazily initialized shared browser instance. */
   private browser: Browser | null = null;
-  private isExternalConnection = false;
+  /** In-flight initialization promise — prevents concurrent launches. */
+  private initPromise: Promise<Browser> | null = null;
+  /** Indicates whether the browser is locally launched or externally connected. */
+  private connectionType: 'external' | 'local' | null = null;
 
   /**
-   * Retrieves the shared browser instance, connecting to external Playwright or launching locally.
-   *
-   * This method implements lazy initialization of the browser. It first checks
-   * for the PLAYWRIGHT_WS_URL environment variable:
-   *
-   * - If set: Connects to external Playwright instance via WebSocket
-   * - If not set: Launches local headless Chromium with optimized flags
-   *
-   * External Playwright connection enables using dedicated browser services like:
-   * - Docker containers running Playwright
-   * - Cloud browser services
-   * - Separate browser pods in Kubernetes
-   *
-   * Local browser configuration includes:
-   * - Headless mode for server environments
-   * - Security flags for containerized deployments (--no-sandbox)
-   * - Memory optimization flags (--disable-dev-shm-usage)
-   * - GPU and acceleration disabling for server compatibility
-   * - Process model optimizations (--no-zygote)
-   *
-   * @returns Promise resolving to the shared browser instance
-   * @throws {Error} When browser launch/connection fails
+   * Returns the shared browser instance, creating it on first access.
+   * Concurrent callers await the same initialization promise.
    */
   async getBrowser(): Promise<Browser> {
-    if (!this.browser) {
-      const playwrightUrl = process.env.PLAYWRIGHT_WS_URL;
-
-      if (playwrightUrl) {
-        await this.connectToExternalPlaywright(playwrightUrl);
-      } else {
-        await this.launchLocalBrowser();
-      }
-    }
-    return this.browser!; // Non-null assertion safe here as browser is set above
+    if (this.browser) return this.browser;
+    this.initPromise ??= this.initBrowser();
+    return this.initPromise;
   }
 
   /**
-   * Connects to an external Playwright instance via WebSocket.
+   * Initializes the browser by connecting externally or launching locally.
+   */
+  private async initBrowser(): Promise<Browser> {
+    const playwrightUrl = process.env.PLAYWRIGHT_WS_URL;
+    if (playwrightUrl) {
+      await this.connectToExternalPlaywright(playwrightUrl);
+    } else {
+      await this.launchLocalBrowser();
+    }
+    return this.browser!;
+  }
+
+  /**
+   * Connects to an externally managed Playwright browser over WebSocket.
    *
-   * This method establishes a WebSocket connection to a remote Playwright instance.
-   * The external Playwright service should be running and accessible via WebSocket.
-   *
-   * @param wsUrl - WebSocket URL to the Playwright endpoint (e.g., ws://playwright:3000)
-   * @throws {Error} When connection to external Playwright fails
+   * @param wsUrl External Playwright endpoint URL.
    */
   private async connectToExternalPlaywright(wsUrl: string): Promise<void> {
     this.logger.log(
@@ -85,8 +53,8 @@ export class BrowserService implements OnApplicationShutdown {
 
     try {
       this.browser = await chromium.connect(wsUrl);
-      this.isExternalConnection = true;
-      this.logger.log('Successfully connected to external Playwright instance');
+      this.connectionType = 'external';
+      this.logger.log('Connected to external Playwright instance');
     } catch (error) {
       this.logger.error(
         `Failed to connect to external Playwright at ${wsUrl}:`,
@@ -99,22 +67,15 @@ export class BrowserService implements OnApplicationShutdown {
   }
 
   /**
-   * Launches a local headless Chromium instance with optimized flags.
-   *
-   * This fallback method creates a local browser instance when no external
-   * Playwright URL is configured.
-   *
-   * @throws {Error} When local browser launch fails
+   * Launches a local headless Chromium instance.
    */
   private async launchLocalBrowser(): Promise<void> {
-    this.logger.log('Launching local Chrome browser instance');
+    this.logger.log('Launching local Chromium browser instance');
 
     try {
-      this.browser = await chromium.launch({
-        headless: true,
-      });
-      this.isExternalConnection = false;
-      this.logger.log('Local Chrome browser instance launched successfully');
+      this.browser = await chromium.launch({ headless: true });
+      this.connectionType = 'local';
+      this.logger.log('Local Chromium browser instance launched successfully');
     } catch (error) {
       this.logger.error('Failed to launch local Chromium browser:', error);
       throw new Error(
@@ -124,37 +85,28 @@ export class BrowserService implements OnApplicationShutdown {
   }
 
   /**
-   * Gracefully closes the browser instance during application shutdown.
+   * Gracefully closes the shared browser when the Nest application shuts down.
    *
-   * This lifecycle hook ensures proper cleanup of browser resources when the
-   * application terminates. For external connections, it disconnects gracefully
-   * without closing the remote browser. For local instances, it closes the browser
-   * completely to prevent memory leaks and zombie processes.
-   *
-   * The method is automatically called by NestJS during shutdown events
-   * including SIGTERM, SIGINT, and normal application termination.
-   *
-   * @param signal - Optional shutdown signal that triggered the cleanup
+   * @param signal Optional shutdown signal reason.
    */
   async onApplicationShutdown(signal?: string): Promise<void> {
-    if (this.browser) {
-      const connectionType = this.isExternalConnection ? 'external' : 'local';
-      this.logger.log(
-        `Shutting down ${connectionType} browser connection due to ${signal || 'application shutdown'}`,
-      );
+    if (!this.browser) return;
 
-      if (this.isExternalConnection) {
-        // For external connections, disconnect without closing the remote browser
-        await this.browser.close();
-        this.logger.log('Disconnected from external Playwright instance');
-      } else {
-        // For local instances, close the browser completely
-        await this.browser.close();
-        this.logger.log('Local browser instance closed');
-      }
+    const mode = this.connectionType || 'unknown';
+    this.logger.log(
+      `Shutting down ${mode} browser connection due to ${signal || 'application shutdown'}`,
+    );
 
-      this.browser = null;
-      this.isExternalConnection = false;
+    await this.browser.close();
+
+    if (mode === 'external') {
+      this.logger.log('Disconnected from external Playwright instance');
+    } else {
+      this.logger.log('Local browser instance closed');
     }
+
+    this.browser = null;
+    this.initPromise = null;
+    this.connectionType = null;
   }
 }

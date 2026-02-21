@@ -23,4 +23,7 @@ import { createDatabaseConfig } from './config/database.config';
   ],
   providers: [authProvider],
 })
+/**
+ * Root NestJS module wiring persistence, queue processing, cleanup, and auth guard.
+ */
 export class AppModule {}

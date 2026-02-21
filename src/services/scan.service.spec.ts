@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ScanService } from './scan.service';
 import { ScanQueueService } from './scan-queue.service';
@@ -7,7 +7,8 @@ import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 import { ScanStatus } from '../enums/scan-status.enum';
 import { IssueImpact } from '../enums/issue-impact.enum';
-import { CreateScanDto } from '../dto/create-scan.dto';
+import { CreateScanDto } from '../dto/scan/request';
+import { ScanMode } from '../enums/scan-mode.enum';
 
 const makeIssue = (overrides: Partial<Issue> = {}): Issue =>
   ({
@@ -15,6 +16,7 @@ const makeIssue = (overrides: Partial<Issue> = {}): Issue =>
     ruleId: 'color-contrast',
     description: 'Elements must have sufficient color contrast',
     impact: IssueImpact.SERIOUS,
+    pageUrl: 'https://example.com',
     selector: '.btn',
     context: '<button class="btn">Click</button>',
     helpUrl:
@@ -26,8 +28,20 @@ const makeScan = (overrides: Partial<Scan> = {}): Scan =>
   ({
     id: 1,
     url: 'https://example.com',
+    mode: ScanMode.SINGLE_URL,
+    targets: ['https://example.com'],
     rootElement: undefined,
+    ruleIds: null,
+    crawlMaxPages: null,
+    crawlMaxDepth: null,
+    crawlSameHostOnly: null,
+    crawlIncludePatterns: null,
+    crawlExcludePatterns: null,
+    crawlConcurrency: null,
     status: ScanStatus.PENDING,
+    pagesDiscovered: 0,
+    pagesScanned: 0,
+    pagesFailed: 0,
     issues: [],
     createdAt: new Date('2025-01-01T00:00:00Z'),
     updatedAt: new Date('2025-01-01T00:00:00Z'),
@@ -62,53 +76,113 @@ describe('ScanService', () => {
   });
 
   describe('create()', () => {
-    it('saves the scan, queues a job, and returns the created scan', async () => {
-      const dto: CreateScanDto = { url: 'https://example.com' };
+    it('saves a single_url scan, queues a job, and returns the created scan', async () => {
+      const dto: CreateScanDto = {
+        mode: ScanMode.SINGLE_URL,
+        url: 'https://example.com',
+      };
       const saved = makeScan();
 
       mockRepo.create.mockReturnValue(saved);
       mockRepo.save.mockResolvedValue(saved);
-      // findOne called by create → findOne internally
       mockRepo.findOne.mockResolvedValue({ ...saved, issues: [] });
 
       const result = await service.create(dto);
 
       expect(mockRepo.create).toHaveBeenCalledWith({
-        url: dto.url,
+        url: 'https://example.com/',
+        mode: ScanMode.SINGLE_URL,
+        targets: ['https://example.com/'],
         rootElement: undefined,
+        ruleIds: null,
+        crawlMaxPages: null,
+        crawlMaxDepth: null,
+        crawlSameHostOnly: null,
+        crawlIncludePatterns: null,
+        crawlExcludePatterns: null,
+        crawlConcurrency: null,
         status: ScanStatus.PENDING,
       });
       expect(mockRepo.save).toHaveBeenCalledWith(saved);
-      expect(mockQueue.addScanJob).toHaveBeenCalledWith(
-        saved.id,
-        dto.url,
-        undefined,
-        undefined,
-      );
+      expect(mockQueue.addScanJob).toHaveBeenCalledWith(saved.id);
       expect(result.id).toBe(saved.id);
-      expect(result.status).toBe(ScanStatus.PENDING);
+      expect(result.mode).toBe(ScanMode.SINGLE_URL);
+      expect(result.targets).toEqual(['https://example.com']);
       expect(result.violations).toEqual([]);
       expect(result.totalIssueCount).toBe(0);
     });
 
-    it('passes rootElement and ruleIds to the queue', async () => {
+    it('saves a crawl scan with defaults and queues a job', async () => {
       const dto: CreateScanDto = {
-        url: 'https://example.com',
-        rootElement: 'main',
-        ruleIds: ['image-alt'],
+        mode: ScanMode.CRAWL,
+        startUrls: ['https://example.com'],
       };
-      const saved = makeScan({ rootElement: 'main' });
+      const saved = makeScan({
+        mode: ScanMode.CRAWL,
+        targets: ['https://example.com/'],
+        crawlMaxPages: 250,
+        crawlMaxDepth: 4,
+        crawlSameHostOnly: true,
+        crawlIncludePatterns: null,
+        crawlExcludePatterns: null,
+        crawlConcurrency: 4,
+      });
+
       mockRepo.create.mockReturnValue(saved);
       mockRepo.save.mockResolvedValue(saved);
       mockRepo.findOne.mockResolvedValue({ ...saved, issues: [] });
 
       await service.create(dto);
 
-      expect(mockQueue.addScanJob).toHaveBeenCalledWith(
-        saved.id,
-        dto.url,
-        'main',
-        ['image-alt'],
+      expect(mockQueue.addScanJob).toHaveBeenCalledWith(saved.id);
+    });
+
+    it('throws when mode-specific fields are invalid', async () => {
+      const dto: CreateScanDto = {
+        mode: ScanMode.SINGLE_URL,
+        url: 'https://example.com',
+        crawlOptions: { maxPages: 20 },
+      };
+
+      await expect(service.create(dto)).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws for invalid crawl regex patterns', async () => {
+      const dto: CreateScanDto = {
+        mode: ScanMode.CRAWL,
+        startUrls: ['https://example.com'],
+        crawlOptions: { includePatterns: ['['] },
+      };
+
+      await expect(service.create(dto)).rejects.toThrow(BadRequestException);
+    });
+
+    it('normalizes and deduplicates url_list targets', async () => {
+      const dto: CreateScanDto = {
+        mode: ScanMode.URL_LIST,
+        urls: [
+          'https://example.com/',
+          'https://example.com',
+          'https://example.com/about/',
+        ],
+      };
+      const saved = makeScan({
+        mode: ScanMode.URL_LIST,
+        targets: ['https://example.com/', 'https://example.com/about'],
+      });
+
+      mockRepo.create.mockReturnValue(saved);
+      mockRepo.save.mockResolvedValue(saved);
+      mockRepo.findOne.mockResolvedValue({ ...saved, issues: [] });
+
+      await service.create(dto);
+
+      expect(mockRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: ScanMode.URL_LIST,
+          targets: ['https://example.com/', 'https://example.com/about'],
+          url: 'https://example.com/',
+        }),
       );
     });
   });
@@ -121,35 +195,40 @@ describe('ScanService', () => {
       const result = await service.findAll();
 
       expect(mockRepo.find).toHaveBeenCalledWith({
-        where: undefined,
         relations: ['issues'],
         order: { createdAt: 'DESC' },
       });
       expect(result).toHaveLength(2);
     });
 
-    it('filters by URL when options.url is provided', async () => {
-      const scan = makeScan({ issues: [] });
-      mockRepo.find.mockResolvedValue([scan]);
+    it('filters by target when options.target is provided', async () => {
+      const scans = [
+        makeScan({ id: 1, targets: ['https://example.com/'], issues: [] }),
+        makeScan({ id: 2, targets: ['https://other.example/'], issues: [] }),
+      ];
+      mockRepo.find.mockResolvedValue(scans);
 
-      const result = await service.findAll({ url: 'https://example.com' });
+      const result = await service.findAll({ target: 'https://example.com' });
 
-      expect(mockRepo.find).toHaveBeenCalledWith({
-        where: { url: 'https://example.com' },
-        relations: ['issues'],
-        order: { createdAt: 'DESC' },
-      });
       expect(result).toHaveLength(1);
+      expect(result[0].id).toBe(1);
     });
 
-    it('returns empty array when there are no scans', async () => {
-      mockRepo.find.mockResolvedValue([]);
-      expect(await service.findAll()).toEqual([]);
+    it('normalizes filter target before matching', async () => {
+      const scans = [
+        makeScan({ id: 1, targets: ['https://example.com/'], issues: [] }),
+      ];
+      mockRepo.find.mockResolvedValue(scans);
+
+      const result = await service.findAll({ target: 'https://example.com/' });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe(1);
     });
   });
 
   describe('findOne()', () => {
-    it('returns the scan with enriched violation data', async () => {
+    it('returns scan with grouped violations and issue page URLs', async () => {
       const issue = makeIssue();
       const scan = makeScan({ status: ScanStatus.COMPLETED, issues: [issue] });
       mockRepo.findOne.mockResolvedValue(scan);
@@ -161,7 +240,9 @@ describe('ScanService', () => {
       expect(result.violations).toHaveLength(1);
       expect(result.violations[0].rule.id).toBe('color-contrast');
       expect(result.violations[0].impact).toBe(IssueImpact.SERIOUS);
-      expect(result.violations[0].issues[0].selector).toBe('.btn');
+      expect(result.violations[0].issues[0].pageUrl).toBe(
+        'https://example.com',
+      );
       expect(result.totalIssueCount).toBe(1);
     });
 
@@ -170,7 +251,7 @@ describe('ScanService', () => {
       await expect(service.findOne(999)).rejects.toThrow(NotFoundException);
     });
 
-    it('groups issues from the same rule into a single violation', async () => {
+    it('groups same rule+impact into one violation', async () => {
       const issues = [
         makeIssue({ id: 1, selector: '.a' }),
         makeIssue({ id: 2, selector: '.b' }),
@@ -186,15 +267,10 @@ describe('ScanService', () => {
       expect(result.totalIssueCount).toBe(2);
     });
 
-    it('creates separate violations for different rules', async () => {
+    it('separates same rule with different impacts into different violations', async () => {
       const issues = [
-        makeIssue({ id: 1, ruleId: 'color-contrast', selector: '.a' }),
-        makeIssue({
-          id: 2,
-          ruleId: 'image-alt',
-          description: 'Images must have alt text',
-          selector: 'img',
-        }),
+        makeIssue({ id: 1, impact: IssueImpact.SERIOUS }),
+        makeIssue({ id: 2, impact: IssueImpact.CRITICAL }),
       ];
       mockRepo.findOne.mockResolvedValue(
         makeScan({ status: ScanStatus.COMPLETED, issues }),
@@ -203,12 +279,17 @@ describe('ScanService', () => {
       const result = await service.findOne(1);
 
       expect(result.violations).toHaveLength(2);
-      expect(result.totalIssueCount).toBe(2);
+      expect(
+        result.violations.some((v) => v.impact === IssueImpact.SERIOUS),
+      ).toBe(true);
+      expect(
+        result.violations.some((v) => v.impact === IssueImpact.CRITICAL),
+      ).toBe(true);
     });
   });
 
   describe('remove()', () => {
-    it('removes the scan when it exists', async () => {
+    it('removes scan when it exists', async () => {
       const scan = makeScan();
       mockRepo.findOne.mockResolvedValue(scan);
       mockRepo.remove = jest.fn().mockResolvedValue(undefined);

@@ -8,6 +8,9 @@ import { AxeAccessibilityScanner } from '../services/axe-accessibility-scanner.s
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 
+/**
+ * Infrastructure module configuring BullMQ workers and shared scan-processing services.
+ */
 @Module({
   imports: [
     BullModule.forRoot({
