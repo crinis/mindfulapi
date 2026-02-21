@@ -1,108 +1,100 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ScanStatus } from '../enums/scan-status.enum';
-import { ScannerType } from '../enums/scanner-type.enum';
 import { IssueImpact } from '../enums/issue-impact.enum';
-import { Language } from '../types/language.types';
 
-/**
- * Data Transfer Object representing an individual accessibility issue for API responses.
- * 
- * This DTO provides essential issue details including element location information
- * and visual context through screenshots. It focuses on the information most
- * useful for developers during remediation efforts.
- */
 export class IssueResponseDto {
-  /** Unique identifier for the accessibility issue */
+  @ApiProperty({ example: 1 })
   id: number;
-  
-  /** CSS selector identifying the DOM element with the accessibility issue */
+
+  @ApiPropertyOptional({
+    example: '.btn-primary',
+    description: 'CSS selector identifying the element with the issue',
+  })
   selector?: string;
-  
-  /** HTML context snippet showing the problematic element and surroundings */
+
+  @ApiPropertyOptional({
+    example: '<button class="btn-primary">Submit</button>',
+    description: 'HTML snippet of the problematic element',
+  })
   context?: string;
-  
-  /** 
-   * Full URL to screenshot image showing visual context of the accessibility issue.
-   * Constructed by combining base URL with screenshot filename when available.
-   */
-  screenshotUrl?: string;
 }
 
-/**
- * Data Transfer Object representing accessibility rule information.
- * 
- * This DTO provides essential rule metadata including identification,
- * description, impact level, and remediation guidance URLs.
- */
 export class RuleResponseDto {
-  /** Accessibility rule identifier (e.g., "WCAG2AA.Principle1.Guideline1_1.1_1_1.H37") */
+  @ApiProperty({
+    example: 'color-contrast',
+    description: 'Axe rule identifier',
+  })
   id: string;
-  
-  /** Human-readable description of the accessibility rule violation */
+
+  @ApiProperty({ example: 'Elements must have sufficient color contrast' })
   description: string;
-  
-  /** Severity level for prioritizing remediation efforts */
-  impact: IssueImpact;
-  
-  /** Array of help URLs providing remediation guidance for this rule type */
-  urls: string[];
+
+  @ApiPropertyOptional({
+    example:
+      'https://dequeuniversity.com/rules/axe/4.11/color-contrast?application=axeAPI',
+    description: 'Link to remediation guidance on Deque University',
+  })
+  helpUrl?: string;
+
+  @ApiPropertyOptional({
+    example: ['wcag2aa', 'wcag143', 'cat.color'],
+    description: 'WCAG and category tags for this rule',
+  })
+  tags?: string[];
 }
 
-/**
- * Data Transfer Object representing a group of accessibility issues for the same rule.
- * 
- * This DTO organizes accessibility issues by rule type, providing aggregated
- * information about violations of the same accessibility requirement. It includes
- * rule metadata and all issue instances for that rule.
- */
 export class ViolationResponseDto {
-  /** Accessibility rule information */
+  @ApiProperty({ type: () => RuleResponseDto })
   rule: RuleResponseDto;
-  
-  /** Array of individual issue instances for this rule violation */
+
+  @ApiProperty({
+    enum: IssueImpact,
+    example: IssueImpact.SERIOUS,
+    description: 'Severity of the violation as reported by axe-core',
+  })
+  impact: IssueImpact;
+
+  @ApiProperty({ type: () => IssueResponseDto, isArray: true })
   issues: IssueResponseDto[];
-  
-  /** Total count of issues for this specific accessibility rule */
-  issueCount: number;
 }
 
-/**
- * Data Transfer Object for comprehensive accessibility scan results in API responses.
- * 
- * This DTO provides complete scan information including metadata, processing status,
- * and structured accessibility violation data. Issues are organized by rule type
- * for easier consumption by client applications and developer tools.
- * 
- * The response structure groups individual issues by accessibility rule, making
- * it easier for developers to understand and prioritize remediation efforts.
- */
 export class ScanResponseDto {
-  /** Unique identifier for the accessibility scan */
+  @ApiProperty({ example: 1 })
   id: number;
-  
-  /** Target URL that was scanned for accessibility issues */
+
+  @ApiProperty({ example: 'https://example.com' })
   url: string;
-  
-  /** Language preference for accessibility rule descriptions and help content */
-  language: Language;
-  
-  /** CSS selector defining the root element scope for the accessibility scan. If not specified, the entire page was scanned. */
+
+  @ApiPropertyOptional({
+    example: 'main',
+    description:
+      'CSS selector used to scope the scan. Null means the entire page was scanned.',
+  })
   rootElement?: string;
-  
-  /** Accessibility scanner type used for this scan (HTMLCS or AXE) */
-  scannerType: ScannerType;
-  
-  /** Current processing status (PENDING, RUNNING, COMPLETED, or FAILED) */
+
+  @ApiProperty({ enum: ScanStatus, example: ScanStatus.COMPLETED })
   status: ScanStatus;
-  
-  /** Array of accessibility violations organized by rule type */
+
+  @ApiProperty({ type: () => ViolationResponseDto, isArray: true })
   violations: ViolationResponseDto[];
-  
-  /** Total count of all accessibility issues found across all rules */
+
+  @ApiProperty({
+    example: 3,
+    description: 'Sum of issues across all violations',
+  })
   totalIssueCount: number;
-  
-  /** Timestamp when the scan was initially created */
+
+  @ApiProperty({
+    example: '2025-06-14T10:30:00.000Z',
+    type: 'string',
+    format: 'date-time',
+  })
   createdAt: Date;
-  
-  /** Timestamp when the scan was last updated (status changes, etc.) */
+
+  @ApiProperty({
+    example: '2025-06-14T10:31:00.000Z',
+    type: 'string',
+    format: 'date-time',
+  })
   updatedAt: Date;
 }

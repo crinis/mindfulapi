@@ -2,36 +2,43 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    user: "1001:1001"
+    # user: "1001:1001" # Removed to avoid permission issues with /data volume
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     command: redis-server --appendonly yes
 
   playwright:
-    image: mcr.microsoft.com/playwright:v1.55.0-noble
+    image: mcr.microsoft.com/playwright:v1.56.1-noble
     restart: unless-stopped
-    user: "1001:1001"
+    # user: "1001:1001"
     # Based on guidance for Docker deployment: https://playwright.dev/docs/docker.
     # Not needed for podman as it seems.
-    security_opt:
-      - "seccomp=./seccomp_profile.json"
+    #security_opt:
+    #  - "seccomp=./seccomp_profile.json"
     command:
       - /bin/sh
       - -c
       - "npx -y playwright@1.56.1 run-server --port 3000 --host 0.0.0.0"
+    networks:
+      - default
+      - ddev_default
 
   mindfulapi:
     image: ghcr.io/crinis/mindfulapi:latest
     build:
       context: .
       dockerfile: Dockerfile
-    user: "1001:1001"
+    # user: "1001:1001"
     ports:
       - "3000:3000"
     environment:
       - NODE_ENV=production
       - DATABASE_PATH=/data/database.sqlite
-      - SCREENSHOT_DIR=/data/screenshots
       - PLAYWRIGHT_WS_URL=ws://playwright:3000
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -40,12 +47,23 @@ services:
       - CLEANUP_ENABLED=${CLEANUP_ENABLED:-true}
       - CLEANUP_RETENTION_DAYS=${CLEANUP_RETENTION_DAYS:-30}
       - CLEANUP_INTERVAL=${CLEANUP_INTERVAL:-0 2 * * *}
+      - IGNORE_HTTPS_ERRORS=true
     volumes:
       - mindfulapi_data:/data
     depends_on:
-      - redis
-      - playwright
+      redis:
+        condition: service_healthy
+      playwright:
+        condition: service_started
     restart: unless-stopped
+    networks:
+      - default
+      - ddev_default
+
+networks:
+  ddev_default:
+    external: true
+    name: ddev_default
 
 volumes:
   redis_data:

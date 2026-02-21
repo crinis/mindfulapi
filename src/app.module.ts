@@ -8,7 +8,7 @@ import { createDatabaseConfig } from './config/database.config';
 
 /**
  * Root application module that configures database connection and imports feature modules.
- * 
+ *
  * Configures SQLite database with TypeORM for development and testing environments.
  * Database synchronization and logging are enabled in non-production environments
  * for easier development and debugging.

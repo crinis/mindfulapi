@@ -1,56 +1,63 @@
-import { Controller, Post, Get, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { CleanupService } from '../services/cleanup.service';
-import { AuthTokenGuard } from '../guards/auth-token.guard';
+import { CleanupConfigDto, MessageDto } from '../dto/cleanup.dto';
+import { ErrorResponseDto } from '../dto/error-response.dto';
 
 /**
- * Administrative controller for cleanup operations.
- * 
- * This controller provides administrative endpoints for managing the cleanup
- * service, including manual cleanup triggers and configuration inspection.
- * All endpoints are protected by authentication to prevent unauthorized access
- * to administrative functions.
- * 
- * @route /admin/cleanup
+ * Controller for cleanup operations.
+ * @route /cleanup
  */
-@Controller('admin/cleanup')
-@UseGuards(AuthTokenGuard)
+@ApiTags('Cleanup')
+@ApiBearerAuth()
+@Controller('cleanup')
 export class CleanupController {
   constructor(private readonly cleanupService: CleanupService) {}
 
-  /**
-   * Manually trigger cleanup process.
-   * 
-   * This endpoint allows administrators to trigger cleanup manually without
-   * waiting for the scheduled job. Useful for maintenance, testing, or when
-   * immediate cleanup is required.
-   * 
-   * @returns Success message when cleanup completes
-   */
-  @Post('trigger')
+  @Post()
   @HttpCode(HttpStatus.OK)
-  async triggerCleanup(): Promise<{ message: string }> {
+  @ApiOperation({
+    summary: 'Trigger manual cleanup',
+    description:
+      'Immediately runs the cleanup process to delete scans older than the configured retention period, bypassing the enabled flag.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Cleanup completed',
+    type: MessageDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid Bearer token',
+    type: ErrorResponseDto,
+  })
+  async triggerCleanup(): Promise<MessageDto> {
     await this.cleanupService.triggerManualCleanup();
     return { message: 'Cleanup completed successfully' };
   }
 
-  /**
-   * Get current cleanup configuration.
-   * 
-   * Returns the current cleanup service configuration including retention
-   * period, schedule, enabled status, and performance tuning parameters
-   * for monitoring and verification.
-   * 
-   * @returns Object containing cleanup configuration
-   */
   @Get('config')
-  getCleanupConfig(): {
-    enabled: boolean;
-    retentionDays: number;
-    screenshotDir: string;
-    interval: string;
-    batchSize: number;
-    concurrencyLimit: number;
-  } {
+  @ApiOperation({
+    summary: 'Get cleanup configuration',
+    description:
+      'Returns the current cleanup configuration derived from environment variables.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Cleanup configuration',
+    type: CleanupConfigDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid Bearer token',
+    type: ErrorResponseDto,
+  })
+  getCleanupConfig(): CleanupConfigDto {
     return this.cleanupService.getCleanupConfig();
   }
 }

@@ -7,17 +7,16 @@ import { Issue } from '../entities/issue.entity';
  * Shared TypeORM configuration for both NestJS module and CLI operations.
  * This ensures consistency between development and production environments.
  */
-export const createDatabaseConfig = (): TypeOrmModuleOptions & DataSourceOptions => {
+export const createDatabaseConfig = (): TypeOrmModuleOptions &
+  DataSourceOptions => {
   const isProduction = process.env.NODE_ENV === 'production';
-  
+
   return {
     type: 'sqlite',
     database: process.env.DATABASE_PATH || './data/database.sqlite',
     entities: [Scan, Issue],
     // Use different migration paths for development vs production
-    migrations: isProduction 
-      ? ['dist/migrations/*.js']
-      : [],  // Disable migrations in development, use synchronize instead
+    migrations: isProduction ? ['dist/migrations/*.js'] : [], // Disable migrations in development, use synchronize instead
     migrationsTableName: 'migrations',
     // Auto-sync database schema in development (disable in production)
     synchronize: !isProduction,
