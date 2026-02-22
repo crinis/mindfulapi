@@ -11,6 +11,7 @@ import { CrawlStrategy } from '../../../enums/crawl-strategy.enum';
 export class CrawlOptionsResponseDto {
   /** Maximum number of pages the crawler attempts to analyze. */
   @ApiProperty({
+    type: 'integer',
     example: DEFAULT_CRAWL_OPTIONS.maxPages,
     minimum: CRAWL_LIMITS.maxPages.min,
     maximum: CRAWL_LIMITS.maxPages.max,
@@ -20,6 +21,7 @@ export class CrawlOptionsResponseDto {
 
   /** Maximum crawl discovery depth from each seed URL. */
   @ApiProperty({
+    type: 'integer',
     example: DEFAULT_CRAWL_OPTIONS.maxDepth,
     minimum: CRAWL_LIMITS.maxDepth.min,
     maximum: CRAWL_LIMITS.maxDepth.max,
@@ -38,18 +40,20 @@ export class CrawlOptionsResponseDto {
   /** Glob patterns that discovered URLs must match to be enqueued. */
   @ApiProperty({
     example: ['https://example.com/docs/**'],
-    isArray: true,
+    type: [String],
     uniqueItems: true,
-    description: 'Glob patterns used to include discovered URLs during crawling.',
+    description:
+      'Glob patterns used to include discovered URLs during crawling.',
   })
   globs: string[];
 
   /** Glob patterns used to exclude discovered URLs. */
   @ApiProperty({
     example: ['**/private/**'],
-    isArray: true,
+    type: [String],
     uniqueItems: true,
-    description: 'Glob patterns used to exclude discovered URLs during crawling.',
+    description:
+      'Glob patterns used to exclude discovered URLs during crawling.',
   })
   excludeGlobs: string[];
 }

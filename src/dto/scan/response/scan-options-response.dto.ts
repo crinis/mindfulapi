@@ -6,6 +6,7 @@ import { ApiProperty } from '@nestjs/swagger';
 export class ScanOptionsResponseDto {
   /** CSS selector used to limit scan scope, or `null` for full-page scanning. */
   @ApiProperty({
+    type: String,
     example: 'main',
     nullable: true,
     description:
@@ -16,9 +17,9 @@ export class ScanOptionsResponseDto {
   /** Effective subset of axe rule IDs, or `null` when all rules were run. */
   @ApiProperty({
     example: ['color-contrast', 'image-alt'],
+    type: [String],
     nullable: true,
     description: 'Subset of axe rule IDs executed for this run.',
-    isArray: true,
     uniqueItems: true,
   })
   ruleIds: string[] | null;

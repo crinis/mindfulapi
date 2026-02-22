@@ -24,7 +24,7 @@ export class ScanByIdQueryDto {
   /**
    * When provided, only violations containing at least one issue on one of the given
    * page URLs are included in the response. Violations with no matching issues are omitted.
-   * Accepts one or more values: `?pageUrl=https://a.com&pageUrl=https://b.com`
+   * Accepts one or more values: `?pageUrls=https://a.com&pageUrls=https://b.com`
    */
   @ApiPropertyOptional({
     type: [String],
@@ -39,5 +39,5 @@ export class ScanByIdQueryDto {
   @Transform(({ value }: TransformFnParams) =>
     normalizeRepeatedQueryParam(value),
   )
-  pageUrl?: string[];
+  pageUrls?: string[];
 }

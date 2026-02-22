@@ -221,18 +221,18 @@ Returns a specific scan with full violation details.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `pageUrl` | `string` (repeatable) | Filter violations to those containing at least one issue on any of the given page URLs. Repeat the parameter for multiple values. Omitting it returns all violations. |
+| `pageUrls` | `string` (repeatable) | Filter violations to those containing at least one issue on any of the given page URLs. Repeat the parameter for multiple values. Omitting it returns all violations. |
 
 ```bash
 # All violations
 curl http://localhost:3000/scans/1 -H "Authorization: Bearer changeme"
 
 # Violations from one specific page
-curl "http://localhost:3000/scans/1?pageUrl=https://example.com/pricing" \
+curl "http://localhost:3000/scans/1?pageUrls=https://example.com/pricing" \
   -H "Authorization: Bearer changeme"
 
 # Violations from any of several pages
-curl "http://localhost:3000/scans/1?pageUrl=https://example.com/pricing&pageUrl=https://example.com/about" \
+curl "http://localhost:3000/scans/1?pageUrls=https://example.com/pricing&pageUrls=https://example.com/about" \
   -H "Authorization: Bearer changeme"
 ```
 

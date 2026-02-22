@@ -22,6 +22,7 @@ import { CrawlStrategy } from '../../../enums/crawl-strategy.enum';
 export class CrawlOptionsDto {
   /** Maximum number of pages to discover and analyze in the crawl run. */
   @ApiPropertyOptional({
+    type: 'integer',
     example: DEFAULT_CRAWL_OPTIONS.maxPages,
     description: 'Maximum number of pages to crawl and analyze.',
     default: DEFAULT_CRAWL_OPTIONS.maxPages,
@@ -36,6 +37,7 @@ export class CrawlOptionsDto {
 
   /** Maximum number of link hops from each crawl seed URL. */
   @ApiPropertyOptional({
+    type: 'integer',
     example: DEFAULT_CRAWL_OPTIONS.maxDepth,
     description: 'Maximum crawl depth from each start URL.',
     default: DEFAULT_CRAWL_OPTIONS.maxDepth,

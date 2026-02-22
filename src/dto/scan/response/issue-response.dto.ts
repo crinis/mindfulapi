@@ -5,11 +5,12 @@ import { ApiProperty } from '@nestjs/swagger';
  */
 export class IssueResponseDto {
   /** Unique persisted issue identifier. */
-  @ApiProperty({ example: 1, minimum: 1 })
+  @ApiProperty({ type: 'integer', example: 1, minimum: 1 })
   id: number;
 
   /** Canonical URL of the page where this occurrence was detected. */
   @ApiProperty({
+    type: String,
     example: 'https://example.com/about',
     description: 'Page URL where this issue occurrence was found.',
     nullable: true,
@@ -19,6 +20,7 @@ export class IssueResponseDto {
 
   /** CSS selector pointing to the problematic element. */
   @ApiProperty({
+    type: String,
     example: '.btn-primary',
     description: 'CSS selector identifying the element with the issue.',
     nullable: true,
@@ -27,6 +29,7 @@ export class IssueResponseDto {
 
   /** HTML snippet for quick issue context in clients. */
   @ApiProperty({
+    type: String,
     example: '<button class="btn-primary">Submit</button>',
     description: 'HTML snippet of the problematic element.',
     nullable: true,

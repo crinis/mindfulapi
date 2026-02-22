@@ -25,6 +25,7 @@ export class CleanupConfigDto {
 
   /** Number of days scan data is retained before deletion. */
   @ApiProperty({
+    type: 'integer',
     example: 30,
     description: 'Number of days to retain scans before deletion',
     minimum: 1,

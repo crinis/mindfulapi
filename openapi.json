@@ -232,18 +232,20 @@
             "in": "path",
             "description": "Scan ID",
             "schema": {
-              "example": 1,
-              "type": "number"
+              "type": "integer",
+              "minimum": 1
             }
           },
           {
-            "name": "pageUrl",
+            "name": "pageUrls",
             "required": false,
             "in": "query",
-            "description": "Filter returned violations to those with at least one issue on any of the given page URLs. Repeat the parameter for multiple values: ?pageUrl=https://a.com&pageUrl=https://b.com",
+            "description": "Filter returned violations to those with at least one issue on any of the given page URLs. Repeat the parameter for multiple values: ?pageUrls=https://a.com&pageUrls=https://b.com",
             "explode": true,
             "schema": {
-              "example": "https://example.com/about",
+              "example": [
+                "https://example.com/about"
+              ],
               "type": "array",
               "items": {
                 "type": "string",
@@ -368,6 +370,7 @@
     },
     "/scans/{id}/reports/html": {
       "get": {
+        "description": "Returns a full standalone HTML accessibility report.",
         "operationId": "getHtmlReport",
         "parameters": [
           {
@@ -376,7 +379,8 @@
             "in": "path",
             "description": "Scan ID",
             "schema": {
-              "type": "number"
+              "type": "integer",
+              "minimum": 1
             }
           }
         ],
@@ -391,10 +395,20 @@
               }
             }
           },
-          "401": {
-            "description": "Authentication required",
+          "400": {
+            "description": "ID must be a positive integer",
             "content": {
-              "text/html": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponseDto"
                 }
@@ -404,7 +418,17 @@
           "404": {
             "description": "Scan not found",
             "content": {
-              "text/html": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponseDto"
                 }
@@ -425,6 +449,7 @@
     },
     "/scans/{id}/reports/pdf": {
       "get": {
+        "description": "Returns a generated PDF accessibility report.",
         "operationId": "getPdfReport",
         "parameters": [
           {
@@ -433,7 +458,8 @@
             "in": "path",
             "description": "Scan ID",
             "schema": {
-              "type": "number"
+              "type": "integer",
+              "minimum": 1
             }
           }
         ],
@@ -449,10 +475,20 @@
               }
             }
           },
-          "401": {
-            "description": "Authentication required",
+          "400": {
+            "description": "ID must be a positive integer",
             "content": {
-              "application/pdf": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponseDto"
                 }
@@ -462,7 +498,17 @@
           "404": {
             "description": "Scan not found",
             "content": {
-              "application/pdf": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponseDto"
                 }
@@ -580,13 +626,39 @@
   },
   "info": {
     "title": "MindfulAPI",
-    "description": "",
+    "description": "Automated web accessibility scanning API powered by axe-core and Playwright. Built for use with the [mindfula11y](https://github.com/crinis/mindfula11y) TYPO3 extension.",
     "version": "1.0",
     "contact": {}
   },
-  "tags": [],
-  "servers": [],
+  "tags": [
+    {
+      "name": "Scans",
+      "description": "Create and inspect accessibility scan runs"
+    },
+    {
+      "name": "Rules",
+      "description": "List available axe-core rules and metadata"
+    },
+    {
+      "name": "Cleanup",
+      "description": "Manage retention cleanup lifecycle"
+    }
+  ],
+  "servers": [
+    {
+      "url": "/",
+      "description": "Current environment"
+    }
+  ],
   "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Set the AUTH_TOKEN environment variable to enable authentication. Leave unset for open access.",
+        "type": "http"
+      }
+    },
     "schemas": {
       "ScanOptionsDto": {
         "type": "object",
@@ -649,18 +721,18 @@
             "example": "url_list"
           },
           "urls": {
+            "type": "array",
             "example": [
               "https://example.com",
               "https://example.com/about"
             ],
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
             "uniqueItems": true,
             "minItems": 2,
-            "description": "Explicit list of page URLs to analyze.",
-            "type": "array",
-            "items": {
-              "type": "array",
-              "format": "uri"
-            }
+            "description": "Explicit list of page URLs to analyze."
           },
           "scanOptions": {
             "$ref": "#/components/schemas/ScanOptionsDto"
@@ -675,7 +747,7 @@
         "type": "object",
         "properties": {
           "maxPages": {
-            "type": "number",
+            "type": "integer",
             "example": 250,
             "description": "Maximum number of pages to crawl and analyze.",
             "default": 250,
@@ -683,7 +755,7 @@
             "maximum": 5000
           },
           "maxDepth": {
-            "type": "number",
+            "type": "integer",
             "example": 4,
             "description": "Maximum crawl depth from each start URL.",
             "default": 4,
@@ -741,17 +813,17 @@
             "example": "crawl"
           },
           "startUrls": {
+            "type": "array",
             "example": [
               "https://example.com"
             ],
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
             "uniqueItems": true,
             "minItems": 1,
-            "description": "One or more seed URLs used as crawl entry points for page discovery.",
-            "type": "array",
-            "items": {
-              "type": "array",
-              "format": "uri"
-            }
+            "description": "One or more seed URLs used as crawl entry points for page discovery."
           },
           "scanOptions": {
             "$ref": "#/components/schemas/ScanOptionsDto"
@@ -769,7 +841,7 @@
         "type": "object",
         "properties": {
           "rootElement": {
-            "type": "object",
+            "type": "string",
             "example": "main",
             "nullable": true,
             "description": "CSS selector used to scope scans. Null means entire page scanning."
@@ -784,7 +856,7 @@
             "uniqueItems": true,
             "type": "array",
             "items": {
-              "type": "object"
+              "type": "string"
             }
           }
         },
@@ -797,14 +869,14 @@
         "type": "object",
         "properties": {
           "maxPages": {
-            "type": "number",
+            "type": "integer",
             "example": 250,
             "minimum": 1,
             "maximum": 5000,
             "description": "Maximum number of pages the crawler will analyze."
           },
           "maxDepth": {
-            "type": "number",
+            "type": "integer",
             "example": 4,
             "minimum": 0,
             "maximum": 20,
@@ -829,7 +901,7 @@
             "description": "Glob patterns used to include discovered URLs during crawling.",
             "type": "array",
             "items": {
-              "type": "array"
+              "type": "string"
             }
           },
           "excludeGlobs": {
@@ -840,7 +912,7 @@
             "description": "Glob patterns used to exclude discovered URLs during crawling.",
             "type": "array",
             "items": {
-              "type": "array"
+              "type": "string"
             }
           }
         },
@@ -856,19 +928,19 @@
         "type": "object",
         "properties": {
           "pagesDiscovered": {
-            "type": "number",
+            "type": "integer",
             "example": 120,
             "minimum": 0,
             "description": "Number of unique pages discovered for this run."
           },
           "pagesScanned": {
-            "type": "number",
+            "type": "integer",
             "example": 100,
             "minimum": 0,
             "description": "Number of pages successfully analyzed."
           },
           "pagesFailed": {
-            "type": "number",
+            "type": "integer",
             "example": 3,
             "minimum": 0,
             "description": "Number of pages that failed during processing."
@@ -893,7 +965,7 @@
             "example": "Elements must have sufficient color contrast"
           },
           "helpUrl": {
-            "type": "object",
+            "type": "string",
             "example": "https://dequeuniversity.com/rules/axe/4.11/color-contrast?application=axeAPI",
             "description": "Link to remediation guidance on Deque University.",
             "format": "uri",
@@ -909,7 +981,7 @@
             "uniqueItems": true,
             "type": "array",
             "items": {
-              "type": "array"
+              "type": "string"
             }
           }
         },
@@ -923,25 +995,25 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "number",
+            "type": "integer",
             "example": 1,
             "minimum": 1
           },
           "pageUrl": {
-            "type": "object",
+            "type": "string",
             "example": "https://example.com/about",
             "description": "Page URL where this issue occurrence was found.",
             "nullable": true,
             "format": "uri"
           },
           "selector": {
-            "type": "object",
+            "type": "string",
             "example": ".btn-primary",
             "description": "CSS selector identifying the element with the issue.",
             "nullable": true
           },
           "context": {
-            "type": "object",
+            "type": "string",
             "example": "<button class=\"btn-primary\">Submit</button>",
             "description": "HTML snippet of the problematic element.",
             "nullable": true
@@ -990,7 +1062,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "number",
+            "type": "integer",
             "example": 1,
             "minimum": 1,
             "description": "Unique scan run identifier."
@@ -1005,17 +1077,17 @@
             "example": "crawl"
           },
           "targets": {
+            "type": "array",
             "example": [
               "https://example.com"
             ],
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
             "uniqueItems": true,
             "minItems": 1,
-            "description": "Input URL targets or crawl seeds for this run.",
-            "type": "array",
-            "items": {
-              "type": "array",
-              "format": "uri"
-            }
+            "description": "Input URL targets or crawl seeds for this run."
           },
           "status": {
             "type": "string",
@@ -1055,8 +1127,9 @@
             }
           },
           "totalIssueCount": {
-            "type": "number",
+            "type": "integer",
             "example": 3,
+            "minimum": 0,
             "description": "Sum of issue occurrences across all violations."
           },
           "createdAt": {
@@ -1090,7 +1163,7 @@
         "type": "object",
         "properties": {
           "statusCode": {
-            "type": "number",
+            "type": "integer",
             "example": 400,
             "description": "HTTP status code.",
             "minimum": 400,
@@ -1147,7 +1220,7 @@
             "description": "Whether scheduled automatic cleanup is enabled"
           },
           "retentionDays": {
-            "type": "number",
+            "type": "integer",
             "example": 30,
             "description": "Number of days to retain scans before deletion",
             "minimum": 1

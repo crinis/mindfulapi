@@ -146,15 +146,20 @@ export class ScanController {
     summary: 'Get scan by ID',
     description: 'Returns a specific scan with full violation details.',
   })
-  @ApiParam({ name: 'id', description: 'Scan ID', type: Number, example: 1 })
+  @ApiParam({
+    name: 'id',
+    description: 'Scan ID',
+    schema: { type: 'integer', minimum: 1 },
+    example: 1,
+  })
   @ApiQuery({
-    name: 'pageUrl',
+    name: 'pageUrls',
     required: false,
     isArray: true,
     explode: true,
     description:
-      'Filter returned violations to those with at least one issue on any of the given page URLs. Repeat the parameter for multiple values: ?pageUrl=https://a.com&pageUrl=https://b.com',
-    example: 'https://example.com/about',
+      'Filter returned violations to those with at least one issue on any of the given page URLs. Repeat the parameter for multiple values: ?pageUrls=https://a.com&pageUrls=https://b.com',
+    example: ['https://example.com/about'],
   })
   @ApiResponse({
     status: 200,
@@ -188,6 +193,6 @@ export class ScanController {
     @Param('id', ParseIntPipe) id: number,
     @Query() query: ScanByIdQueryDto,
   ): Promise<ScanResponseDto> {
-    return this.scanService.findOne(id, query.pageUrl);
+    return this.scanService.findOne(id, query.pageUrls);
   }
 }

@@ -17,6 +17,7 @@ export class RuleResponseDto {
 
   /** Link to external remediation guidance for the rule. */
   @ApiProperty({
+    type: String,
     example:
       'https://dequeuniversity.com/rules/axe/4.11/color-contrast?application=axeAPI',
     description: 'Link to remediation guidance on Deque University.',
@@ -28,8 +29,8 @@ export class RuleResponseDto {
   /** Tags associated with the rule (e.g., WCAG mappings). Present on /rules responses, absent on violations. */
   @ApiProperty({
     example: ['wcag2aa', 'wcag143', 'cat.color'],
+    type: [String],
     description: 'WCAG and category tags for this rule.',
-    isArray: true,
     uniqueItems: true,
     required: false,
   })

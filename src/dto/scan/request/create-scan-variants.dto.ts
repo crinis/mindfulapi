@@ -39,8 +39,8 @@ export class CreateUrlListScanDto {
   /** Fixed set of URLs that will be analyzed without link discovery. */
   @ApiProperty({
     example: ['https://example.com', 'https://example.com/about'],
-    format: 'uri',
-    isArray: true,
+    type: 'array',
+    items: { type: 'string', format: 'uri' },
     uniqueItems: true,
     minItems: 2,
     description: 'Explicit list of page URLs to analyze.',
@@ -63,8 +63,8 @@ export class CreateCrawlScanDto {
   /** One or more crawl seed URLs used as discovery entry points. */
   @ApiProperty({
     example: ['https://example.com'],
-    format: 'uri',
-    isArray: true,
+    type: 'array',
+    items: { type: 'string', format: 'uri' },
     uniqueItems: true,
     minItems: 1,
     description:

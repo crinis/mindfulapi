@@ -12,6 +12,7 @@ import { ViolationResponseDto } from './violation-response.dto';
 export class ScanResponseDto {
   /** Stable numeric identifier of the scan run. */
   @ApiProperty({
+    type: 'integer',
     example: 1,
     minimum: 1,
     description: 'Unique scan run identifier.',
@@ -25,8 +26,8 @@ export class ScanResponseDto {
   /** Normalized target URLs or crawl seed URLs used for this run. */
   @ApiProperty({
     example: ['https://example.com'],
-    format: 'uri',
-    isArray: true,
+    type: 'array',
+    items: { type: 'string', format: 'uri' },
     uniqueItems: true,
     minItems: 1,
     description: 'Input URL targets or crawl seeds for this run.',
@@ -67,7 +68,9 @@ export class ScanResponseDto {
 
   /** Total number of issue occurrences across all grouped violations. */
   @ApiProperty({
+    type: 'integer',
     example: 3,
+    minimum: 0,
     description: 'Sum of issue occurrences across all violations.',
   })
   totalIssueCount: number;

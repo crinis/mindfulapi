@@ -12,7 +12,6 @@ import {
   ApiBearerAuth,
   ApiParam,
   ApiResponse,
-  ApiProduces,
 } from '@nestjs/swagger';
 import { ScanService } from '../services/scan.service';
 import { ReportService } from '../services/report.service';
@@ -32,12 +31,17 @@ export class ReportController {
   ) {}
 
   @Get('html')
-  @ApiProduces('text/html')
   @ApiOperation({
     operationId: 'getHtmlReport',
     summary: 'Generate an HTML accessibility report for a scan',
+    description: 'Returns a full standalone HTML accessibility report.',
   })
-  @ApiParam({ name: 'id', description: 'Scan ID', type: Number })
+  @ApiParam({
+    name: 'id',
+    description: 'Scan ID',
+    schema: { type: 'integer', minimum: 1 },
+    example: 1,
+  })
   @ApiResponse({
     status: 200,
     description: 'HTML accessibility report',
@@ -73,12 +77,17 @@ export class ReportController {
   }
 
   @Get('pdf')
-  @ApiProduces('application/pdf')
   @ApiOperation({
     operationId: 'getPdfReport',
     summary: 'Generate a PDF accessibility report for a scan',
+    description: 'Returns a generated PDF accessibility report.',
   })
-  @ApiParam({ name: 'id', description: 'Scan ID', type: Number })
+  @ApiParam({
+    name: 'id',
+    description: 'Scan ID',
+    schema: { type: 'integer', minimum: 1 },
+    example: 1,
+  })
   @ApiResponse({
     status: 200,
     description: 'PDF accessibility report',
