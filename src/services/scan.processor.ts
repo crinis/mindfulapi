@@ -3,7 +3,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Job } from 'bullmq';
-import { EnqueueStrategy, PlaywrightCrawler, RequestQueue } from 'crawlee';
+import {
+  BasicCrawler,
+  Configuration,
+  EnqueueStrategy,
+  RequestQueue,
+} from 'crawlee';
+import { MemoryStorage } from '@crawlee/memory-storage';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 import { ScanStatus } from '../enums/scan-status.enum';
@@ -19,8 +25,22 @@ import {
   normalizeAndDedupeHttpUrls,
   normalizeHttpUrl,
 } from '../utils/url-normalization.util';
-import { compileRegexPatterns } from '../utils/regex.util';
 import { DEFAULT_CRAWL_OPTIONS } from '../constants/crawl-options.constants';
+
+/** Default concurrent page limit for both crawl and url_list modes. */
+const DEFAULT_CONCURRENCY = 4;
+
+/**
+ * Reads the `CRAWL_CONCURRENCY` environment variable and clamps it to [1, 16].
+ * Falls back to {@link DEFAULT_CONCURRENCY} when the variable is absent or invalid.
+ */
+function resolveConcurrency(): number {
+  const raw = parseInt(process.env.CRAWL_CONCURRENCY ?? '', 10);
+  if (Number.isFinite(raw) && raw >= 1) {
+    return Math.min(raw, 16);
+  }
+  return DEFAULT_CONCURRENCY;
+}
 
 /**
  * Unit of work for scanning a single page URL.
@@ -154,7 +174,7 @@ export class ScanProcessor extends WorkerHost {
     try {
       await this.processTaskQueue(
         tasks,
-        DEFAULT_CRAWL_OPTIONS.concurrency,
+        resolveConcurrency(),
         async (task) => {
           const page = await context.newPage();
           try {
@@ -184,7 +204,11 @@ export class ScanProcessor extends WorkerHost {
   }
 
   /**
-   * Executes crawl-mode scans using Crawlee and analyzes each discovered page once.
+   * Executes crawl-mode scans: uses Crawlee's {@link BasicCrawler} for URL
+   * queuing, deduplication, concurrency, and retry logic while managing the
+   * browser entirely through {@link BrowserService}. Links are extracted from
+   * each loaded page and passed to Crawlee's native `enqueueLinks` utility,
+   * which applies the strategy and glob filters before adding them to the queue.
    */
   private async performCrawl(
     scan: Scan,
@@ -193,26 +217,23 @@ export class ScanProcessor extends WorkerHost {
     const seedUrls = this.resolveScanTargets(scan);
     const maxPages = scan.crawlMaxPages ?? DEFAULT_CRAWL_OPTIONS.maxPages;
     const maxDepth = scan.crawlMaxDepth ?? DEFAULT_CRAWL_OPTIONS.maxDepth;
-    const sameHostOnly =
-      scan.crawlSameHostOnly ?? DEFAULT_CRAWL_OPTIONS.sameHostOnly;
-    const concurrency =
-      scan.crawlConcurrency ?? DEFAULT_CRAWL_OPTIONS.concurrency;
-    const includePatterns = compileRegexPatterns(
-      scan.crawlIncludePatterns || [],
-      'includePatterns',
-    );
-    const excludePatterns = compileRegexPatterns(
-      scan.crawlExcludePatterns || [],
-      'excludePatterns',
-    );
+    const strategy = (scan.crawlStrategy ??
+      DEFAULT_CRAWL_OPTIONS.strategy) as EnqueueStrategy;
+    const globs = scan.crawlGlobs || [];
+    const excludeGlobs = scan.crawlExcludeGlobs || [];
+    const concurrency = resolveConcurrency();
 
     const seen = new Set(seedUrls);
+    const crawlConfig = new Configuration({
+      storageClient: new MemoryStorage({ persistStorage: false }),
+    });
     const requestQueue = await RequestQueue.open(
       `scan-${scan.id}-${Date.now()}`,
+      { config: crawlConfig },
     );
 
     const progress: ScanProgress = {
-      pagesDiscovered: seen.size,
+      pagesDiscovered: 0,
       pagesScanned: 0,
       pagesFailed: 0,
     };
@@ -222,68 +243,93 @@ export class ScanProcessor extends WorkerHost {
       seedUrls.map((url) => ({ url, uniqueKey: url, userData: { depth: 0 } })),
     );
 
-    const crawler = new PlaywrightCrawler({
-      requestQueue,
-      maxConcurrency: Math.max(1, concurrency),
-      maxRequestsPerCrawl: maxPages,
-      requestHandler: async ({ page, request, enqueueLinks }) => {
-        const depth = Number(request.userData.depth || 0);
-        const loadedUrl = request.loadedUrl || page.url() || request.url;
-        const normalizedLoaded = normalizeHttpUrl(loadedUrl) || loadedUrl;
+    const browser = await this.browserService.getBrowser();
+    const context = await this.scanner.createContext(browser, scanOptions);
 
-        if (!seen.has(normalizedLoaded)) {
-          seen.add(normalizedLoaded);
-          progress.pagesDiscovered = seen.size;
-        }
+    const crawler = new BasicCrawler(
+      {
+        requestQueue,
+        maxConcurrency: Math.max(1, concurrency),
+        maxRequestsPerCrawl: maxPages,
+        requestHandler: async ({ request, enqueueLinks }) => {
+          const depth = Number(request.userData.depth || 0);
+          progress.pagesDiscovered += 1;
+          const page = await context.newPage();
+          try {
+            // Scan phase — failures here count as page failures.
+            try {
+              const { issues } = await this.scanner.scanPage(
+                page,
+                request.url,
+                scanOptions,
+              );
+              await this.saveIssues(scan.id, issues);
+              progress.pagesScanned += 1;
+            } catch (error) {
+              progress.pagesFailed += 1;
+              this.logger.warn(
+                `Failed page ${request.url} in crawl scan ${scan.id}: ${String(error)}`,
+              );
+            }
 
-        const { issues } = await this.scanner.analyzeLoadedPage(
-          page,
-          scanOptions,
-          normalizedLoaded,
-        );
-        await this.saveIssues(scan.id, issues);
-        progress.pagesScanned += 1;
+            // Link discovery phase — non-fatal; failures do not affect counters.
+            if (depth < maxDepth && seen.size < maxPages) {
+              let hrefs: string[] = [];
+              try {
+                hrefs = await page.evaluate(() =>
+                  Array.from(
+                    document.querySelectorAll<HTMLAnchorElement>('a[href]'),
+                  ).map((a) => a.href),
+                );
+              } catch {
+                // Page may have navigated or crashed during the scan; skip link discovery.
+              }
 
-        if (depth < maxDepth && seen.size < maxPages) {
-          await enqueueLinks({
-            strategy: sameHostOnly
-              ? EnqueueStrategy.SameHostname
-              : EnqueueStrategy.All,
-            regexps: includePatterns.length ? includePatterns : undefined,
-            exclude: excludePatterns.length ? excludePatterns : undefined,
-            transformRequestFunction: (nextRequest) => {
-              const normalized = normalizeHttpUrl(nextRequest.url);
-              if (!normalized) return false;
-              if (seen.has(normalized)) return false;
-              if (seen.size >= maxPages) return false;
+              if (hrefs.length > 0) {
+                await enqueueLinks({
+                  urls: hrefs,
+                  baseUrl: page.url(),
+                  strategy,
+                  globs: globs.length ? globs : undefined,
+                  exclude: excludeGlobs.length ? excludeGlobs : undefined,
+                  transformRequestFunction: (nextRequest) => {
+                    const normalized = normalizeHttpUrl(nextRequest.url);
+                    if (!normalized) return false;
+                    if (seen.has(normalized)) return false;
+                    if (seen.size >= maxPages) return false;
 
-              seen.add(normalized);
-              progress.pagesDiscovered = seen.size;
-              nextRequest.url = normalized;
-              nextRequest.uniqueKey = normalized;
-              nextRequest.userData = {
-                ...(nextRequest.userData || {}),
-                depth: depth + 1,
-              };
-              return nextRequest;
-            },
-          });
-        }
-
-        await this.persistProgress(scan.id, progress);
+                    seen.add(normalized);
+                    nextRequest.url = normalized;
+                    nextRequest.uniqueKey = normalized;
+                    nextRequest.userData = {
+                      ...(nextRequest.userData ?? {}),
+                      depth: depth + 1,
+                    };
+                    return nextRequest;
+                  },
+                });
+              }
+            }
+          } finally {
+            await page.close();
+            await this.persistProgress(scan.id, progress);
+          }
+        },
+        failedRequestHandler: async ({ request }) => {
+          progress.pagesFailed += 1;
+          this.logger.warn(
+            `Failed page ${request.url} in crawl scan ${scan.id} after retries`,
+          );
+          await this.persistProgress(scan.id, progress);
+        },
       },
-      failedRequestHandler: async ({ request }) => {
-        progress.pagesFailed += 1;
-        this.logger.warn(
-          `Failed page ${request.url} in crawl scan ${scan.id} after retries`,
-        );
-        await this.persistProgress(scan.id, progress);
-      },
-    });
+      crawlConfig,
+    );
 
     try {
       await crawler.run();
     } finally {
+      await context.close();
       await requestQueue.drop().catch((error: unknown) => {
         this.logger.warn(
           `Failed to drop temporary crawl queue for scan ${scan.id}: ${String(error)}`,

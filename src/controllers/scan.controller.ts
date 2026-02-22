@@ -18,6 +18,7 @@ import {
   ApiParam,
   ApiBody,
   ApiExtraModels,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { ScanService } from '../services/scan.service';
 import {
@@ -29,6 +30,7 @@ import {
   createScanRequestOneOfSchema,
 } from '../dto/scan/request';
 import { ScanQueryDto } from '../dto/scan-query.dto';
+import { ScanByIdQueryDto } from '../dto/scan-by-id-query.dto';
 import { ScanResponseDto } from '../dto/scan/response';
 import { ErrorResponseDto } from '../dto/error-response.dto';
 import { Response } from 'express';
@@ -145,6 +147,15 @@ export class ScanController {
     description: 'Returns a specific scan with full violation details.',
   })
   @ApiParam({ name: 'id', description: 'Scan ID', type: Number, example: 1 })
+  @ApiQuery({
+    name: 'pageUrl',
+    required: false,
+    isArray: true,
+    explode: true,
+    description:
+      'Filter returned violations to those with at least one issue on any of the given page URLs. Repeat the parameter for multiple values: ?pageUrl=https://a.com&pageUrl=https://b.com',
+    example: 'https://example.com/about',
+  })
   @ApiResponse({
     status: 200,
     description: 'Scan found',
@@ -175,7 +186,7 @@ export class ScanController {
    */
   async findOne(
     @Param('id', ParseIntPipe) id: number,
+    @Query() query: ScanByIdQueryDto,
   ): Promise<ScanResponseDto> {
-    return this.scanService.findOne(id);
-  }
+    return this.scanService.findOne(id, query.pageUrl);  }
 }

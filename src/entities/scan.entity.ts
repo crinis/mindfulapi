@@ -68,27 +68,23 @@ export class Scan {
   crawlMaxDepth?: number | null;
 
   /**
-   * Restrict crawl discovery to the host(s) of seed URLs.
+   * Crawlee link-following strategy controlling which discovered URLs are enqueued.
    * Null when crawl mode is not used.
    */
-  @Column({ type: 'boolean', nullable: true })
-  crawlSameHostOnly?: boolean | null;
+  @Column({ type: 'varchar', nullable: true })
+  crawlStrategy?: string | null;
 
   /**
-   * Optional regex patterns of URLs to include while crawling.
+   * Glob patterns that discovered URLs must match to be enqueued.
    */
   @Column({ type: 'simple-json', nullable: true })
-  crawlIncludePatterns?: string[] | null;
+  crawlGlobs?: string[] | null;
 
   /**
-   * Optional regex patterns of URLs to exclude while crawling.
+   * Glob patterns used to exclude discovered URLs during crawl.
    */
   @Column({ type: 'simple-json', nullable: true })
-  crawlExcludePatterns?: string[] | null;
-
-  /** Number of pages analyzed concurrently while crawling. */
-  @Column({ type: 'integer', nullable: true })
-  crawlConcurrency?: number | null;
+  crawlExcludeGlobs?: string[] | null;
 
   /** Current lifecycle status of this run. */
   @Column({

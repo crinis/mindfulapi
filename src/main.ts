@@ -1,15 +1,19 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 /**
  * Bootstrap the NestJS application.
  *
- * Initializes validation, OpenAPI documentation, and HTTP server startup.
+ * Initializes security middleware, validation, OpenAPI documentation, and HTTP server startup.
  */
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Security headers: X-Content-Type-Options, X-Frame-Options, HSTS, etc.
+  app.use(helmet());
 
   app.useGlobalPipes(
     new ValidationPipe({

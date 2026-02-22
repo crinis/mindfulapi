@@ -12,6 +12,7 @@ MindfulAPI was built to serve as the external accessibility scanner backend for 
 - **Scoped scanning** — target a specific CSS selector instead of the whole page
 - **Rule filtering** — run only the axe rules you care about
 - **Scan history** — results are persisted in SQLite and queryable via the API
+- **HTML & PDF reports** — generate accessible, print-ready reports directly from scan results
 - **Optional authentication** — protect the API with a Bearer token, or leave it open
 - **Automated cleanup** — configurable scheduled deletion of old scan data
 - **Flexible browser setup** — runs a local Chromium instance by default; optionally connect to a remote Playwright server via WebSocket
@@ -81,6 +82,7 @@ All configuration is done via environment variables. Copy `.env.example` for a f
 | `CLEANUP_ENABLED` | `true` | Enable scheduled deletion of old scans |
 | `CLEANUP_RETENTION_DAYS` | `30` | How many days to keep scans |
 | `CLEANUP_INTERVAL` | `0 2 * * *` | Cron schedule for cleanup |
+| `CRAWL_CONCURRENCY` | `4` | Maximum pages analyzed in parallel for crawl and url_list modes (clamped to 1–16) |
 
 ---
 
@@ -88,7 +90,7 @@ All configuration is done via environment variables. Copy `.env.example` for a f
 
 ### Authentication
 
-Authentication is optional. When the `AUTH_TOKEN` environment variable is set, all requests must include a Bearer token:
+Authentication is optional. When the `AUTH_TOKEN` environment variable is set, all API requests must include a Bearer token:
 
 ```http
 Authorization: Bearer YOUR_AUTH_TOKEN
@@ -96,7 +98,9 @@ Authorization: Bearer YOUR_AUTH_TOKEN
 
 When `AUTH_TOKEN` is **not set**, the API is open and requires no authentication. This is useful for local development or deployments in trusted internal networks.
 
-The interactive OpenAPI UI (Swagger) is available at `/api` and does not require authentication.
+> **Security note:** The interactive OpenAPI UI (`/api`), the JSON schema (`/api-json`), and the YAML schema (`/api-yaml`) are always accessible without authentication. They contain only API metadata, not data. If you need to restrict access to these endpoints, place a reverse proxy in front of the API.
+
+The token comparison uses a constant-time algorithm (`crypto.timingSafeEqual`) to prevent timing-based token enumeration attacks.
 
 ---
 
@@ -139,11 +143,22 @@ Queues a new asynchronous scan run. The request supports three modes through an 
   "crawlOptions": {
     "maxPages": 250,
     "maxDepth": 4,
-    "sameHostOnly": true,
-    "concurrency": 4
+    "strategy": "same-hostname",
+    "globs": ["https://example.com/docs/**"],
+    "excludeGlobs": ["**/admin/**"]
   }
 }
 ```
+
+**`crawlOptions` fields**
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `maxPages` | `250` | Maximum number of pages to scan |
+| `maxDepth` | `4` | Maximum link-follow depth from seed URLs |
+| `strategy` | `same-hostname` | Crawlee enqueue strategy: `all`, `same-hostname`, `same-domain`, `same-origin` |
+| `globs` | `[]` | Crawlee glob patterns — only URLs matching at least one glob are enqueued (e.g. `https://example.com/docs/**`) |
+| `excludeGlobs` | `[]` | Crawlee glob patterns — matching URLs are never enqueued |
 
 **Response — `201 Created`**
 
@@ -198,8 +213,23 @@ curl "http://localhost:3000/scans?target=https://example.com" \
 
 Returns a specific scan with full violation details.
 
+**Query parameters**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `pageUrl` | `string` (repeatable) | Filter violations to those containing at least one issue on any of the given page URLs. Repeat the parameter for multiple values. Omitting it returns all violations. |
+
 ```bash
+# All violations
 curl http://localhost:3000/scans/1 -H "Authorization: Bearer changeme"
+
+# Violations from one specific page
+curl "http://localhost:3000/scans/1?pageUrl=https://example.com/pricing" \
+  -H "Authorization: Bearer changeme"
+
+# Violations from any of several pages
+curl "http://localhost:3000/scans/1?pageUrl=https://example.com/pricing&pageUrl=https://example.com/about" \
+  -H "Authorization: Bearer changeme"
 ```
 
 **Response — `200 OK` (completed scan)**
@@ -217,10 +247,9 @@ curl http://localhost:3000/scans/1 -H "Authorization: Bearer changeme"
   "crawlOptions": {
     "maxPages": 250,
     "maxDepth": 4,
-    "sameHostOnly": true,
-    "includePatterns": [],
-    "excludePatterns": [],
-    "concurrency": 4
+    "strategy": "same-hostname",
+    "globs": [],
+    "excludeGlobs": []
   },
   "progress": {
     "pagesDiscovered": 15,
@@ -250,6 +279,34 @@ curl http://localhost:3000/scans/1 -H "Authorization: Bearer changeme"
   "updatedAt": "2025-06-14T10:31:00.000Z"
 }
 ```
+
+---
+
+### GET /scans/:id/reports/html — Get HTML report
+
+Generates and returns a complete, self-contained HTML accessibility report for a scan. The report includes a summary, scan targets, violation details grouped by rule and impact level, and issue tables with page URL, CSS selector, and HTML context. The HTML is accessible and renders correctly in a browser or can be saved as a file.
+
+```bash
+curl http://localhost:3000/scans/1/reports/html \
+  -H "Authorization: Bearer changeme" \
+  -o report.html
+```
+
+**Response — `200 OK`**: `Content-Type: text/html; charset=utf-8`
+
+---
+
+### GET /scans/:id/reports/pdf — Get PDF report
+
+Generates and returns a PDF accessibility report for a scan. The PDF is rendered from the same HTML template used by the HTML report endpoint using a headless Chromium browser.
+
+```bash
+curl http://localhost:3000/scans/1/reports/pdf \
+  -H "Authorization: Bearer changeme" \
+  -o report.pdf
+```
+
+**Response — `200 OK`**: `Content-Type: application/pdf`, `Content-Disposition: inline; filename="scan-1-report.pdf"`
 
 ---
 

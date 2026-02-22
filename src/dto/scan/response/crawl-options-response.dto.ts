@@ -3,6 +3,7 @@ import {
   CRAWL_LIMITS,
   DEFAULT_CRAWL_OPTIONS,
 } from '../../../constants/crawl-options.constants';
+import { CrawlStrategy } from '../../../enums/crawl-strategy.enum';
 
 /**
  * Effective crawl configuration used for a crawl-mode scan run.
@@ -26,39 +27,29 @@ export class CrawlOptionsResponseDto {
   })
   maxDepth: number;
 
-  /** Whether URL discovery is restricted to seed hostnames. */
+  /** Crawlee link-following strategy for this run. */
   @ApiProperty({
-    example: DEFAULT_CRAWL_OPTIONS.sameHostOnly,
-    description: 'Whether discovery is restricted to seed hostnames.',
+    enum: CrawlStrategy,
+    example: DEFAULT_CRAWL_OPTIONS.strategy,
+    description: 'URL discovery strategy used during crawling.',
   })
-  sameHostOnly: boolean;
+  strategy: CrawlStrategy;
 
-  /** Regex patterns that discovered URLs must match to be included. */
+  /** Glob patterns that discovered URLs must match to be enqueued. */
   @ApiProperty({
-    example: ['^https://example.com/docs'],
+    example: ['https://example.com/docs/**'],
     isArray: true,
     uniqueItems: true,
-    description:
-      'Regex patterns used to include discovered URLs during crawling.',
+    description: 'Glob patterns used to include discovered URLs during crawling.',
   })
-  includePatterns: string[];
+  globs: string[];
 
-  /** Regex patterns used to exclude discovered URLs. */
+  /** Glob patterns used to exclude discovered URLs. */
   @ApiProperty({
-    example: ['\\?.*preview=true'],
+    example: ['**/private/**'],
     isArray: true,
     uniqueItems: true,
-    description:
-      'Regex patterns used to exclude discovered URLs during crawling.',
+    description: 'Glob patterns used to exclude discovered URLs during crawling.',
   })
-  excludePatterns: string[];
-
-  /** Maximum concurrent page analyses in crawl mode. */
-  @ApiProperty({
-    example: DEFAULT_CRAWL_OPTIONS.concurrency,
-    minimum: CRAWL_LIMITS.concurrency.min,
-    maximum: CRAWL_LIMITS.concurrency.max,
-    description: 'Maximum number of pages analyzed concurrently in crawl mode.',
-  })
-  concurrency: number;
+  excludeGlobs: string[];
 }

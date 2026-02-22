@@ -1,0 +1,1169 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/scans": {
+      "post": {
+        "description": "Queues a new axe-core scan run in one of three modes: single URL, URL list, or crawl. Processing runs asynchronously in the background. Poll GET /scans/:id for status and results.",
+        "operationId": "createScan",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateSingleUrlScanDto"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CreateUrlListScanDto"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CreateCrawlScanDto"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "mode",
+                  "mapping": {
+                    "single_url": "#/components/schemas/CreateSingleUrlScanDto",
+                    "url_list": "#/components/schemas/CreateUrlListScanDto",
+                    "crawl": "#/components/schemas/CreateCrawlScanDto"
+                  }
+                }
+              },
+              "examples": {
+                "singleUrl": {
+                  "summary": "Single URL run",
+                  "description": "Analyze one page URL.",
+                  "value": {
+                    "mode": "single_url",
+                    "url": "https://example.com",
+                    "scanOptions": {
+                      "rootElement": "main"
+                    }
+                  }
+                },
+                "urlList": {
+                  "summary": "URL list run",
+                  "description": "Analyze a fixed list of URLs.",
+                  "value": {
+                    "mode": "url_list",
+                    "urls": [
+                      "https://example.com",
+                      "https://example.com/about"
+                    ],
+                    "scanOptions": {
+                      "ruleIds": [
+                        "image-alt",
+                        "color-contrast"
+                      ]
+                    }
+                  }
+                },
+                "crawl": {
+                  "summary": "Crawl run",
+                  "description": "Discover and analyze pages by crawling from one or more seeds.",
+                  "value": {
+                    "mode": "crawl",
+                    "startUrls": [
+                      "https://example.com"
+                    ],
+                    "scanOptions": {
+                      "rootElement": "main"
+                    },
+                    "crawlOptions": {
+                      "maxPages": 250,
+                      "maxDepth": 4,
+                      "strategy": "same-hostname",
+                      "globs": [
+                        "https://example.com/docs/**"
+                      ],
+                      "excludeGlobs": [
+                        "**/private/**"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Scan run created and queued",
+            "headers": {
+              "Location": {
+                "description": "URL of the created scan run resource",
+                "schema": {
+                  "type": "string",
+                  "format": "uri-reference"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Start a new accessibility scan run",
+        "tags": [
+          "Scans"
+        ]
+      },
+      "get": {
+        "description": "Returns all scan runs ordered by creation date, newest first. Use the optional `target` query parameter to filter runs by one of their input targets.",
+        "operationId": "listScans",
+        "parameters": [
+          {
+            "name": "target",
+            "required": false,
+            "in": "query",
+            "description": "Filter runs by exact match in normalized input targets. When omitted, all scan runs are returned.",
+            "schema": {
+              "format": "uri",
+              "example": "https://example.com",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of scans",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScanResponseDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List all scan runs",
+        "tags": [
+          "Scans"
+        ]
+      }
+    },
+    "/scans/{id}": {
+      "get": {
+        "description": "Returns a specific scan with full violation details.",
+        "operationId": "getScanById",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Scan ID",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "pageUrl",
+            "required": false,
+            "in": "query",
+            "description": "Filter returned violations to those with at least one issue on any of the given page URLs. Repeat the parameter for multiple values: ?pageUrl=https://a.com&pageUrl=https://b.com",
+            "explode": true,
+            "schema": {
+              "example": "https://example.com/about",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uri"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scan found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "ID must be a positive integer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Scan not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get scan by ID",
+        "tags": [
+          "Scans"
+        ]
+      }
+    },
+    "/rules": {
+      "get": {
+        "description": "Returns all available axe-core accessibility rules with metadata, sorted alphabetically by ID.",
+        "operationId": "listRules",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Array of axe-core rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RuleResponseDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List all axe-core rules",
+        "tags": [
+          "Rules"
+        ]
+      }
+    },
+    "/scans/{id}/reports/html": {
+      "get": {
+        "operationId": "getHtmlReport",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Scan ID",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML accessibility report",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Scan not found",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Generate an HTML accessibility report for a scan",
+        "tags": [
+          "Reports"
+        ]
+      }
+    },
+    "/scans/{id}/reports/pdf": {
+      "get": {
+        "operationId": "getPdfReport",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Scan ID",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PDF accessibility report",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Scan not found",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Generate a PDF accessibility report for a scan",
+        "tags": [
+          "Reports"
+        ]
+      }
+    },
+    "/cleanup": {
+      "post": {
+        "description": "Immediately runs the cleanup process to delete scans older than the configured retention period, bypassing the enabled flag.",
+        "operationId": "triggerCleanup",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Cleanup completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Trigger manual cleanup",
+        "tags": [
+          "Cleanup"
+        ]
+      }
+    },
+    "/cleanup/config": {
+      "get": {
+        "description": "Returns the current cleanup configuration derived from environment variables.",
+        "operationId": "getCleanupConfig",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Cleanup configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupConfigDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get cleanup configuration",
+        "tags": [
+          "Cleanup"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "MindfulAPI",
+    "description": "",
+    "version": "1.0",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "schemas": {
+      "ScanOptionsDto": {
+        "type": "object",
+        "properties": {
+          "rootElement": {
+            "type": "string",
+            "example": "main",
+            "description": "CSS selector to restrict the scan to a specific page region. Scans the entire page when omitted.",
+            "minLength": 1
+          },
+          "ruleIds": {
+            "example": [
+              "color-contrast",
+              "image-alt"
+            ],
+            "description": "Specific axe rule IDs to run. All rules run when omitted. See GET /rules for available IDs.",
+            "uniqueItems": true,
+            "minItems": 1,
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "CreateSingleUrlScanDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "single_url"
+            ],
+            "example": "single_url"
+          },
+          "url": {
+            "type": "string",
+            "example": "https://example.com",
+            "format": "uri",
+            "description": "Single page URL to analyze."
+          },
+          "scanOptions": {
+            "$ref": "#/components/schemas/ScanOptionsDto"
+          }
+        },
+        "required": [
+          "mode",
+          "url"
+        ]
+      },
+      "CreateUrlListScanDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "url_list"
+            ],
+            "example": "url_list"
+          },
+          "urls": {
+            "example": [
+              "https://example.com",
+              "https://example.com/about"
+            ],
+            "uniqueItems": true,
+            "minItems": 2,
+            "description": "Explicit list of page URLs to analyze.",
+            "type": "array",
+            "items": {
+              "type": "array",
+              "format": "uri"
+            }
+          },
+          "scanOptions": {
+            "$ref": "#/components/schemas/ScanOptionsDto"
+          }
+        },
+        "required": [
+          "mode",
+          "urls"
+        ]
+      },
+      "CrawlOptionsDto": {
+        "type": "object",
+        "properties": {
+          "maxPages": {
+            "type": "number",
+            "example": 250,
+            "description": "Maximum number of pages to crawl and analyze.",
+            "default": 250,
+            "minimum": 1,
+            "maximum": 5000
+          },
+          "maxDepth": {
+            "type": "number",
+            "example": 4,
+            "description": "Maximum crawl depth from each start URL.",
+            "default": 4,
+            "minimum": 0,
+            "maximum": 20
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "all",
+              "same-hostname",
+              "same-domain",
+              "same-origin"
+            ],
+            "example": "same-hostname",
+            "default": "same-hostname",
+            "description": "URL discovery strategy. `same-hostname` restricts to the seed host, `same-domain` allows subdomains, `same-origin` also matches protocol, `all` follows any link."
+          },
+          "globs": {
+            "example": [
+              "https://example.com/docs/**"
+            ],
+            "description": "Glob patterns. A discovered URL must match at least one pattern to be crawled.",
+            "uniqueItems": true,
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "excludeGlobs": {
+            "example": [
+              "**/private/**"
+            ],
+            "description": "Glob patterns. URLs matching any pattern are skipped during crawl.",
+            "uniqueItems": true,
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "CreateCrawlScanDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "crawl"
+            ],
+            "example": "crawl"
+          },
+          "startUrls": {
+            "example": [
+              "https://example.com"
+            ],
+            "uniqueItems": true,
+            "minItems": 1,
+            "description": "One or more seed URLs used as crawl entry points for page discovery.",
+            "type": "array",
+            "items": {
+              "type": "array",
+              "format": "uri"
+            }
+          },
+          "scanOptions": {
+            "$ref": "#/components/schemas/ScanOptionsDto"
+          },
+          "crawlOptions": {
+            "$ref": "#/components/schemas/CrawlOptionsDto"
+          }
+        },
+        "required": [
+          "mode",
+          "startUrls"
+        ]
+      },
+      "ScanOptionsResponseDto": {
+        "type": "object",
+        "properties": {
+          "rootElement": {
+            "type": "object",
+            "example": "main",
+            "nullable": true,
+            "description": "CSS selector used to scope scans. Null means entire page scanning."
+          },
+          "ruleIds": {
+            "example": [
+              "color-contrast",
+              "image-alt"
+            ],
+            "nullable": true,
+            "description": "Subset of axe rule IDs executed for this run.",
+            "uniqueItems": true,
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "rootElement",
+          "ruleIds"
+        ]
+      },
+      "CrawlOptionsResponseDto": {
+        "type": "object",
+        "properties": {
+          "maxPages": {
+            "type": "number",
+            "example": 250,
+            "minimum": 1,
+            "maximum": 5000,
+            "description": "Maximum number of pages the crawler will analyze."
+          },
+          "maxDepth": {
+            "type": "number",
+            "example": 4,
+            "minimum": 0,
+            "maximum": 20,
+            "description": "Maximum crawl depth from each seed URL."
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "all",
+              "same-hostname",
+              "same-domain",
+              "same-origin"
+            ],
+            "example": "same-hostname",
+            "description": "URL discovery strategy used during crawling."
+          },
+          "globs": {
+            "example": [
+              "https://example.com/docs/**"
+            ],
+            "uniqueItems": true,
+            "description": "Glob patterns used to include discovered URLs during crawling.",
+            "type": "array",
+            "items": {
+              "type": "array"
+            }
+          },
+          "excludeGlobs": {
+            "example": [
+              "**/private/**"
+            ],
+            "uniqueItems": true,
+            "description": "Glob patterns used to exclude discovered URLs during crawling.",
+            "type": "array",
+            "items": {
+              "type": "array"
+            }
+          }
+        },
+        "required": [
+          "maxPages",
+          "maxDepth",
+          "strategy",
+          "globs",
+          "excludeGlobs"
+        ]
+      },
+      "ScanProgressResponseDto": {
+        "type": "object",
+        "properties": {
+          "pagesDiscovered": {
+            "type": "number",
+            "example": 120,
+            "minimum": 0,
+            "description": "Number of unique pages discovered for this run."
+          },
+          "pagesScanned": {
+            "type": "number",
+            "example": 100,
+            "minimum": 0,
+            "description": "Number of pages successfully analyzed."
+          },
+          "pagesFailed": {
+            "type": "number",
+            "example": 3,
+            "minimum": 0,
+            "description": "Number of pages that failed during processing."
+          }
+        },
+        "required": [
+          "pagesDiscovered",
+          "pagesScanned",
+          "pagesFailed"
+        ]
+      },
+      "RuleResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "color-contrast",
+            "description": "Axe rule identifier."
+          },
+          "description": {
+            "type": "string",
+            "example": "Elements must have sufficient color contrast"
+          },
+          "helpUrl": {
+            "type": "object",
+            "example": "https://dequeuniversity.com/rules/axe/4.11/color-contrast?application=axeAPI",
+            "description": "Link to remediation guidance on Deque University.",
+            "format": "uri",
+            "nullable": true
+          },
+          "tags": {
+            "example": [
+              "wcag2aa",
+              "wcag143",
+              "cat.color"
+            ],
+            "description": "WCAG and category tags for this rule.",
+            "uniqueItems": true,
+            "type": "array",
+            "items": {
+              "type": "array"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "description",
+          "helpUrl"
+        ]
+      },
+      "IssueResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "example": 1,
+            "minimum": 1
+          },
+          "pageUrl": {
+            "type": "object",
+            "example": "https://example.com/about",
+            "description": "Page URL where this issue occurrence was found.",
+            "nullable": true,
+            "format": "uri"
+          },
+          "selector": {
+            "type": "object",
+            "example": ".btn-primary",
+            "description": "CSS selector identifying the element with the issue.",
+            "nullable": true
+          },
+          "context": {
+            "type": "object",
+            "example": "<button class=\"btn-primary\">Submit</button>",
+            "description": "HTML snippet of the problematic element.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "pageUrl",
+          "selector",
+          "context"
+        ]
+      },
+      "ViolationResponseDto": {
+        "type": "object",
+        "properties": {
+          "rule": {
+            "$ref": "#/components/schemas/RuleResponseDto"
+          },
+          "impact": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "serious",
+              "moderate",
+              "minor"
+            ],
+            "example": "serious",
+            "description": "Severity of the violation as reported by axe-core."
+          },
+          "issues": {
+            "minItems": 1,
+            "description": "Issue occurrences for this rule+impact pair.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IssueResponseDto"
+            }
+          }
+        },
+        "required": [
+          "rule",
+          "impact",
+          "issues"
+        ]
+      },
+      "ScanResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "example": 1,
+            "minimum": 1,
+            "description": "Unique scan run identifier."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "single_url",
+              "url_list",
+              "crawl"
+            ],
+            "example": "crawl"
+          },
+          "targets": {
+            "example": [
+              "https://example.com"
+            ],
+            "uniqueItems": true,
+            "minItems": 1,
+            "description": "Input URL targets or crawl seeds for this run.",
+            "type": "array",
+            "items": {
+              "type": "array",
+              "format": "uri"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed"
+            ],
+            "example": "completed"
+          },
+          "scanOptions": {
+            "$ref": "#/components/schemas/ScanOptionsResponseDto"
+          },
+          "crawlOptions": {
+            "nullable": true,
+            "description": "Present only for crawl runs.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CrawlOptionsResponseDto"
+              }
+            ]
+          },
+          "progress": {
+            "description": "Runtime page-processing counters for this run.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ScanProgressResponseDto"
+              }
+            ]
+          },
+          "violations": {
+            "description": "Accessibility violations grouped by rule and impact severity.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ViolationResponseDto"
+            }
+          },
+          "totalIssueCount": {
+            "type": "number",
+            "example": 3,
+            "description": "Sum of issue occurrences across all violations."
+          },
+          "createdAt": {
+            "type": "string",
+            "example": "2025-06-14T10:30:00.000Z",
+            "format": "date-time",
+            "description": "Timestamp when this run was created."
+          },
+          "updatedAt": {
+            "type": "string",
+            "example": "2025-06-14T10:31:00.000Z",
+            "format": "date-time",
+            "description": "Timestamp when this run was last updated."
+          }
+        },
+        "required": [
+          "id",
+          "mode",
+          "targets",
+          "status",
+          "scanOptions",
+          "crawlOptions",
+          "progress",
+          "violations",
+          "totalIssueCount",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "ErrorResponseDto": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "number",
+            "example": 400,
+            "description": "HTTP status code.",
+            "minimum": 400,
+            "maximum": 599
+          },
+          "message": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "example": [
+              "url must be a URL address"
+            ],
+            "description": "Human-readable error message or array of validation messages."
+          },
+          "error": {
+            "type": "string",
+            "example": "Bad Request",
+            "description": "Short error classification"
+          }
+        },
+        "required": [
+          "statusCode",
+          "message",
+          "error"
+        ]
+      },
+      "MessageDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "Cleanup completed successfully",
+            "description": "Human-readable operation result message."
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "CleanupConfigDto": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "example": true,
+            "description": "Whether scheduled automatic cleanup is enabled"
+          },
+          "retentionDays": {
+            "type": "number",
+            "example": 30,
+            "description": "Number of days to retain scans before deletion",
+            "minimum": 1
+          },
+          "interval": {
+            "type": "string",
+            "example": "0 2 * * *",
+            "description": "Cron expression controlling the cleanup schedule"
+          }
+        },
+        "required": [
+          "enabled",
+          "retentionDays",
+          "interval"
+        ]
+      }
+    }
+  }
+}

@@ -14,6 +14,7 @@ import {
 } from '../dto/scan/request';
 import { ScanStatus } from '../enums/scan-status.enum';
 import { ScanMode } from '../enums/scan-mode.enum';
+import { CrawlStrategy } from '../enums/crawl-strategy.enum';
 import { ScanQueueService } from './scan-queue.service';
 import { ScanResponseDto } from '../dto/scan/response';
 import { DEFAULT_CRAWL_OPTIONS } from '../constants/crawl-options.constants';
@@ -21,7 +22,6 @@ import {
   normalizeAndDedupeHttpUrls,
   normalizeHttpUrl,
 } from '../utils/url-normalization.util';
-import { compileRegexPatterns } from '../utils/regex.util';
 
 /**
  * Canonical normalized create payload used internally for persistence/queueing.
@@ -70,14 +70,13 @@ export class ScanService {
         : null,
       crawlMaxPages: normalized.crawlOptions?.maxPages ?? null,
       crawlMaxDepth: normalized.crawlOptions?.maxDepth ?? null,
-      crawlSameHostOnly: normalized.crawlOptions?.sameHostOnly ?? null,
-      crawlIncludePatterns: normalized.crawlOptions?.includePatterns.length
-        ? normalized.crawlOptions.includePatterns
+      crawlStrategy: normalized.crawlOptions?.strategy ?? null,
+      crawlGlobs: normalized.crawlOptions?.globs.length
+        ? normalized.crawlOptions.globs
         : null,
-      crawlExcludePatterns: normalized.crawlOptions?.excludePatterns.length
-        ? normalized.crawlOptions.excludePatterns
+      crawlExcludeGlobs: normalized.crawlOptions?.excludeGlobs.length
+        ? normalized.crawlOptions.excludeGlobs
         : null,
-      crawlConcurrency: normalized.crawlOptions?.concurrency ?? null,
       status: ScanStatus.PENDING,
     });
 
@@ -120,7 +119,7 @@ export class ScanService {
    * @param id Scan run identifier.
    * @throws NotFoundException When no run exists for the given ID.
    */
-  async findOne(id: number): Promise<ScanResponseDto> {
+  async findOne(id: number, pageUrls?: string[]): Promise<ScanResponseDto> {
     const scan = await this.scanRepository.findOne({
       where: { id },
       relations: ['issues'],
@@ -128,6 +127,11 @@ export class ScanService {
 
     if (!scan) {
       throw new NotFoundException(`Scan with ID ${id} not found`);
+    }
+
+    if (pageUrls?.length) {
+      const urlSet = new Set(pageUrls);
+      scan.issues = scan.issues.filter((issue) => issue.pageUrl != null && urlSet.has(issue.pageUrl));
     }
 
     return this.enrichScanData(scan);
@@ -237,6 +241,7 @@ export class ScanService {
   }
 
   /**
+     /**
    * Validates and normalizes `crawl` mode payload.
    */
   private normalizeCrawlMode(
@@ -255,27 +260,16 @@ export class ScanService {
       );
     }
 
-    const crawlOptions = this.buildCrawlOptions(dto.crawlOptions);
-
-    try {
-      compileRegexPatterns(crawlOptions.includePatterns, 'includePatterns');
-      compileRegexPatterns(crawlOptions.excludePatterns, 'excludePatterns');
-    } catch (error) {
-      throw new BadRequestException(
-        error instanceof Error ? error.message : 'Invalid regex pattern',
-      );
-    }
-
     return {
       mode: dto.mode,
       targets: this.requireValidUrlList(dto.startUrls),
       scanOptions,
-      crawlOptions,
+      crawlOptions: this.buildCrawlOptions(dto.crawlOptions),
     };
   }
 
   /**
-   * Merges user crawl options with defaults and removes duplicate regex entries.
+   * Merges user crawl options with defaults and deduplicates glob arrays.
    */
   private buildCrawlOptions(
     crawlOptions?: CrawlOptionsDto,
@@ -283,8 +277,9 @@ export class ScanService {
     return {
       ...DEFAULT_CRAWL_OPTIONS,
       ...(crawlOptions || {}),
-      includePatterns: this.dedupeStrings(crawlOptions?.includePatterns || []),
-      excludePatterns: this.dedupeStrings(crawlOptions?.excludePatterns || []),
+      strategy: crawlOptions?.strategy ?? DEFAULT_CRAWL_OPTIONS.strategy,
+      globs: this.dedupeStrings(crawlOptions?.globs || []),
+      excludeGlobs: this.dedupeStrings(crawlOptions?.excludeGlobs || []),
     };
   }
 
@@ -367,12 +362,9 @@ export class ScanService {
           ? {
               maxPages: scan.crawlMaxPages ?? DEFAULT_CRAWL_OPTIONS.maxPages,
               maxDepth: scan.crawlMaxDepth ?? DEFAULT_CRAWL_OPTIONS.maxDepth,
-              sameHostOnly:
-                scan.crawlSameHostOnly ?? DEFAULT_CRAWL_OPTIONS.sameHostOnly,
-              includePatterns: scan.crawlIncludePatterns || [],
-              excludePatterns: scan.crawlExcludePatterns || [],
-              concurrency:
-                scan.crawlConcurrency ?? DEFAULT_CRAWL_OPTIONS.concurrency,
+              strategy: (scan.crawlStrategy as CrawlStrategy) ?? DEFAULT_CRAWL_OPTIONS.strategy,
+              globs: scan.crawlGlobs || [],
+              excludeGlobs: scan.crawlExcludeGlobs || [],
             }
           : null,
       progress: {

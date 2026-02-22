@@ -37,10 +37,6 @@ RUN npm ci --only=production && npm cache clean --force
 # Copy built application from builder stage
 COPY --from=builder /app/dist ./dist
 
-# Copy migration source files
-COPY --from=builder /app/src/migrations ./src/migrations
-COPY --from=builder /app/src/ormconfig.ts ./src/
-
 # Copy other necessary files
 COPY --from=builder /app/nest-cli.json ./
 

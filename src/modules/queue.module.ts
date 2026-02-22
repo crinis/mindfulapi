@@ -37,6 +37,6 @@ import { Issue } from '../entities/issue.entity';
     BrowserService,
     AxeAccessibilityScanner,
   ],
-  exports: [ScanQueueService],
+  exports: [ScanQueueService, BrowserService],
 })
 export class QueueModule {}

@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   ArrayUnique,
   IsArray,
@@ -46,10 +47,12 @@ export class CreateScanDto {
     description: 'Used when mode is url_list.',
     uniqueItems: true,
     minItems: 2,
+    maxItems: 500,
   })
   @ValidateIf((o: CreateScanDto) => o.mode === ScanMode.URL_LIST)
   @IsArray()
   @ArrayMinSize(2)
+  @ArrayMaxSize(500)
   @ArrayUnique()
   @IsUrl(
     {
@@ -67,10 +70,12 @@ export class CreateScanDto {
     description: 'Used when mode is crawl.',
     uniqueItems: true,
     minItems: 1,
+    maxItems: 50,
   })
   @ValidateIf((o: CreateScanDto) => o.mode === ScanMode.CRAWL)
   @IsArray()
   @ArrayMinSize(1)
+  @ArrayMaxSize(50)
   @ArrayUnique()
   @IsUrl(
     {

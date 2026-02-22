@@ -153,10 +153,9 @@ export const createScanRequestExamples: Record<string, OpenApiExampleObject> = {
       crawlOptions: {
         maxPages: 250,
         maxDepth: 4,
-        sameHostOnly: true,
-        includePatterns: ['^https://example.com/docs'],
-        excludePatterns: ['\\?.*preview=true'],
-        concurrency: 4,
+        strategy: 'same-hostname',
+        globs: ['https://example.com/docs/**'],
+        excludeGlobs: ['**/private/**'],
       },
     },
   },

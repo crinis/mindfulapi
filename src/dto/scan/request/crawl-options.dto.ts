@@ -1,8 +1,9 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   ArrayUnique,
   IsArray,
-  IsBoolean,
+  IsEnum,
   IsInt,
   IsOptional,
   IsString,
@@ -13,6 +14,7 @@ import {
   CRAWL_LIMITS,
   DEFAULT_CRAWL_OPTIONS,
 } from '../../../constants/crawl-options.constants';
+import { CrawlStrategy } from '../../../enums/crawl-strategy.enum';
 
 /**
  * Crawl-only options.
@@ -46,56 +48,56 @@ export class CrawlOptionsDto {
   @Max(CRAWL_LIMITS.maxDepth.max)
   maxDepth?: number;
 
-  /** Restricts discovered URLs to the same host(s) as the provided seed URLs. */
+  /**
+   * Crawlee link-following strategy that controls which discovered URLs are enqueued.
+   * Defaults to `same-hostname` which restricts crawling to the seed host(s).
+   */
   @ApiPropertyOptional({
-    example: DEFAULT_CRAWL_OPTIONS.sameHostOnly,
+    enum: CrawlStrategy,
+    example: DEFAULT_CRAWL_OPTIONS.strategy,
+    default: DEFAULT_CRAWL_OPTIONS.strategy,
     description:
-      'When true, only URLs on the host(s) of start URLs are crawled.',
-    default: DEFAULT_CRAWL_OPTIONS.sameHostOnly,
+      'URL discovery strategy. `same-hostname` restricts to the seed host, ' +
+      '`same-domain` allows subdomains, `same-origin` also matches protocol, ' +
+      '`all` follows any link.',
   })
   @IsOptional()
-  @IsBoolean()
-  sameHostOnly?: boolean;
+  @IsEnum(CrawlStrategy)
+  strategy?: CrawlStrategy;
 
-  /** Regex patterns discovered URLs must match to be considered crawl targets. */
+  /**
+   * Glob patterns discovered URLs must match to be enqueued.
+   * Useful for restricting the crawl to a specific path prefix, e.g.
+   * `https://example.com/docs/**`.
+   */
   @ApiPropertyOptional({
-    example: ['^https://example.com/docs'],
+    example: ['https://example.com/docs/**'],
     description:
-      'Optional regex patterns. URL must match at least one pattern to be crawled.',
+      'Glob patterns. A discovered URL must match at least one pattern to be crawled.',
     uniqueItems: true,
     minItems: 1,
+    maxItems: 20,
   })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(20)
   @ArrayUnique()
   @IsString({ each: true })
-  includePatterns?: string[];
+  globs?: string[];
 
-  /** Regex patterns used to skip discovered URLs during crawl discovery. */
+  /** Glob patterns used to skip discovered URLs during crawl discovery. */
   @ApiPropertyOptional({
-    example: ['\\?.*preview=true'],
+    example: ['**/private/**'],
     description:
-      'Optional regex patterns. URLs matching any pattern are skipped during crawl.',
+      'Glob patterns. URLs matching any pattern are skipped during crawl.',
     uniqueItems: true,
     minItems: 1,
+    maxItems: 20,
   })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(20)
   @ArrayUnique()
   @IsString({ each: true })
-  excludePatterns?: string[];
-
-  /** Maximum number of pages analyzed in parallel during crawl processing. */
-  @ApiPropertyOptional({
-    example: DEFAULT_CRAWL_OPTIONS.concurrency,
-    description: 'Number of pages to analyze concurrently in crawl mode.',
-    default: DEFAULT_CRAWL_OPTIONS.concurrency,
-    minimum: CRAWL_LIMITS.concurrency.min,
-    maximum: CRAWL_LIMITS.concurrency.max,
-  })
-  @IsOptional()
-  @IsInt()
-  @Min(CRAWL_LIMITS.concurrency.min)
-  @Max(CRAWL_LIMITS.concurrency.max)
-  concurrency?: number;
+  excludeGlobs?: string[];
 }

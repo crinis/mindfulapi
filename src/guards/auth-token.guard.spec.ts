@@ -71,6 +71,13 @@ describe('AuthTokenGuard', () => {
       );
     });
 
+    it('throws UnauthorizedException for a token with the same length but different value', () => {
+      // Ensures the constant-time comparison rejects matching-length but wrong tokens
+      expect(() => guard.canActivate(mockContext('Bearer badSecret'))).toThrow(
+        UnauthorizedException,
+      );
+    });
+
     it('includes a descriptive message in the exception', () => {
       try {
         guard.canActivate(mockContext('Bearer wrong'));

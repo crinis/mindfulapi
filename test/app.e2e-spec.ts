@@ -8,6 +8,7 @@ import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { QueueModule } from '../src/modules/queue.module';
 import { ScanQueueService } from '../src/services/scan-queue.service';
+import { BrowserService } from '../src/services/browser.service';
 import { Scan } from '../src/entities/scan.entity';
 import { Issue } from '../src/entities/issue.entity';
 import { ScanStatus } from '../src/enums/scan-status.enum';
@@ -16,6 +17,12 @@ import { ScanMode } from '../src/enums/scan-mode.enum';
 
 const mockAddScanJob = jest.fn().mockResolvedValue(undefined);
 
+const mockPage = {
+  setContent: jest.fn().mockResolvedValue(undefined),
+  pdf: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4 mock')),
+  close: jest.fn().mockResolvedValue(undefined),
+};
+
 @Module({
   imports: [TypeOrmModule.forFeature([Scan, Issue])],
   providers: [
@@ -23,8 +30,14 @@ const mockAddScanJob = jest.fn().mockResolvedValue(undefined);
       provide: ScanQueueService,
       useValue: { addScanJob: mockAddScanJob },
     },
+    {
+      provide: BrowserService,
+      useValue: {
+        getBrowser: jest.fn().mockResolvedValue({ newPage: jest.fn().mockResolvedValue(mockPage) }),
+      },
+    },
   ],
-  exports: [ScanQueueService],
+  exports: [ScanQueueService, BrowserService],
 })
 class MockQueueModule {}
 
@@ -212,8 +225,7 @@ describe('MindfulAPI (e2e)', () => {
       expect(body.mode).toBe(ScanMode.CRAWL);
       expect(body.crawlOptions.maxPages).toBe(250);
       expect(body.crawlOptions.maxDepth).toBe(4);
-      expect(body.crawlOptions.sameHostOnly).toBe(true);
-      expect(body.crawlOptions.concurrency).toBe(4);
+      expect(body.crawlOptions.strategy).toBe('same-hostname');
     });
 
     it('queues a job after creating', async () => {
@@ -240,14 +252,19 @@ describe('MindfulAPI (e2e)', () => {
         })
         .expect(400));
 
-    it('returns 400 for invalid crawl regex patterns', () =>
+    it('returns 400 when crawl globs contains duplicates', () =>
       request(app.getHttpServer())
         .post('/scans')
         .set(authHeader())
         .send({
           mode: ScanMode.CRAWL,
           startUrls: ['https://example.com'],
-          crawlOptions: { includePatterns: ['['] },
+          crawlOptions: {
+            globs: [
+              'https://example.com/docs/**',
+              'https://example.com/docs/**',
+            ],
+          },
         })
         .expect(400));
 
@@ -289,22 +306,6 @@ describe('MindfulAPI (e2e)', () => {
           mode: ScanMode.SINGLE_URL,
           url: 'https://example.com',
           scanOptions: { ruleIds: ['image-alt', 'image-alt'] },
-        })
-        .expect(400));
-
-    it('returns 400 when crawl includePatterns contains duplicates', () =>
-      request(app.getHttpServer())
-        .post('/scans')
-        .set(authHeader())
-        .send({
-          mode: ScanMode.CRAWL,
-          startUrls: ['https://example.com'],
-          crawlOptions: {
-            includePatterns: [
-              '^https://example.com/docs',
-              '^https://example.com/docs',
-            ],
-          },
         })
         .expect(400));
 
@@ -396,6 +397,54 @@ describe('MindfulAPI (e2e)', () => {
         .get('/scans/abc')
         .set(authHeader())
         .expect(400));
+
+    it('filters violations to a single matching pageUrl', async () => {
+      const url = 'https://seeded.example.com';
+      const { body } = await request(app.getHttpServer())
+        .get(`/scans/${seededScan.id}?pageUrl=${encodeURIComponent(url)}`)
+        .set(authHeader())
+        .expect(200);
+
+      for (const violation of body.violations) {
+        for (const issue of violation.issues) {
+          expect(issue.pageUrl).toBe(url);
+        }
+      }
+    });
+
+    it('filters violations to any of multiple pageUrls when repeated params are provided', async () => {
+      const url1 = 'https://seeded.example.com';
+      const url2 = 'https://seeded.example.com/about';
+      const { body } = await request(app.getHttpServer())
+        .get(
+          `/scans/${seededScan.id}?pageUrl=${encodeURIComponent(url1)}&pageUrl=${encodeURIComponent(url2)}`,
+        )
+        .set(authHeader())
+        .expect(200);
+
+      expect(body.totalIssueCount).toBe(3);
+      for (const violation of body.violations) {
+        for (const issue of violation.issues) {
+          expect([url1, url2]).toContain(issue.pageUrl);
+        }
+      }
+    });
+
+    it('returns empty violations when pageUrl matches no issues', async () => {
+      const { body } = await request(app.getHttpServer())
+        .get(`/scans/${seededScan.id}?pageUrl=https://no-match.example.com/`)
+        .set(authHeader())
+        .expect(200);
+
+      expect(body.violations).toHaveLength(0);
+      expect(body.totalIssueCount).toBe(0);
+    });
+
+    it('returns 400 for invalid pageUrl query param', () =>
+      request(app.getHttpServer())
+        .get(`/scans/${seededScan.id}?pageUrl=not-a-url`)
+        .set(authHeader())
+        .expect(400));
   });
 
   describe('GET /rules', () => {
@@ -479,6 +528,80 @@ describe('MindfulAPI (e2e)', () => {
       expect(requestContent.examples.singleUrl).toBeDefined();
       expect(requestContent.examples.urlList).toBeDefined();
       expect(requestContent.examples.crawl).toBeDefined();
+    });
+
+    it('documents report endpoints with correct content types', async () => {
+      const { body } = await request(app.getHttpServer())
+        .get('/api-json')
+        .expect(200);
+
+      const htmlPath = body.paths['/scans/{id}/reports/html'];
+      const pdfPath = body.paths['/scans/{id}/reports/pdf'];
+      expect(htmlPath.get.responses['200'].content['text/html']).toBeDefined();
+      expect(pdfPath.get.responses['200'].content['application/pdf']).toBeDefined();
+    });
+  });
+
+  describe('GET /scans/:id/reports/html', () => {
+    it('returns 200 with text/html content type', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/scans/${seededScan.id}/reports/html`)
+        .set(authHeader())
+        .expect(200);
+
+      expect(res.headers['content-type']).toMatch(/text\/html/);
+      expect(res.text).toContain('<!DOCTYPE html>');
+      expect(res.text).toContain(`Scan #${seededScan.id}`);
+    });
+
+    it('includes violation data in the report', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/scans/${seededScan.id}/reports/html`)
+        .set(authHeader())
+        .expect(200);
+
+      expect(res.text).toContain('color-contrast');
+      expect(res.text).toContain('serious');
+    });
+
+    it('returns 404 for unknown scan', async () => {
+      await request(app.getHttpServer())
+        .get('/scans/99999/reports/html')
+        .set(authHeader())
+        .expect(404);
+    });
+
+    it('returns 401 when auth token is missing', async () => {
+      await request(app.getHttpServer())
+        .get(`/scans/${seededScan.id}/reports/html`)
+        .expect(401);
+    });
+  });
+
+  describe('GET /scans/:id/reports/pdf', () => {
+    it('returns 200 with application/pdf content type', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/scans/${seededScan.id}/reports/pdf`)
+        .set(authHeader())
+        .expect(200);
+
+      expect(res.headers['content-type']).toMatch(/application\/pdf/);
+      expect(res.headers['content-disposition']).toContain(
+        `scan-${seededScan.id}-report.pdf`,
+      );
+    });
+
+    it('returns 404 for unknown scan', async () => {
+      await request(app.getHttpServer())
+        .get('/scans/99999/reports/pdf')
+        .set(authHeader())
+        .expect(404);
+    });
+
+    it('returns 401 when auth token is missing', async () => {
+      await request(app.getHttpServer())
+        .get(`/scans/${seededScan.id}/reports/pdf`)
+        .expect(401);
     });
   });
 });

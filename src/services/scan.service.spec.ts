@@ -34,10 +34,9 @@ const makeScan = (overrides: Partial<Scan> = {}): Scan =>
     ruleIds: null,
     crawlMaxPages: null,
     crawlMaxDepth: null,
-    crawlSameHostOnly: null,
-    crawlIncludePatterns: null,
-    crawlExcludePatterns: null,
-    crawlConcurrency: null,
+    crawlStrategy: null,
+    crawlGlobs: null,
+    crawlExcludeGlobs: null,
     status: ScanStatus.PENDING,
     pagesDiscovered: 0,
     pagesScanned: 0,
@@ -97,10 +96,9 @@ describe('ScanService', () => {
         ruleIds: null,
         crawlMaxPages: null,
         crawlMaxDepth: null,
-        crawlSameHostOnly: null,
-        crawlIncludePatterns: null,
-        crawlExcludePatterns: null,
-        crawlConcurrency: null,
+        crawlStrategy: null,
+        crawlGlobs: null,
+        crawlExcludeGlobs: null,
         status: ScanStatus.PENDING,
       });
       expect(mockRepo.save).toHaveBeenCalledWith(saved);
@@ -122,10 +120,9 @@ describe('ScanService', () => {
         targets: ['https://example.com/'],
         crawlMaxPages: 250,
         crawlMaxDepth: 4,
-        crawlSameHostOnly: true,
-        crawlIncludePatterns: null,
-        crawlExcludePatterns: null,
-        crawlConcurrency: 4,
+        crawlStrategy: 'same-hostname',
+        crawlGlobs: null,
+        crawlExcludeGlobs: null,
       });
 
       mockRepo.create.mockReturnValue(saved);
@@ -142,16 +139,6 @@ describe('ScanService', () => {
         mode: ScanMode.SINGLE_URL,
         url: 'https://example.com',
         crawlOptions: { maxPages: 20 },
-      };
-
-      await expect(service.create(dto)).rejects.toThrow(BadRequestException);
-    });
-
-    it('throws for invalid crawl regex patterns', async () => {
-      const dto: CreateScanDto = {
-        mode: ScanMode.CRAWL,
-        startUrls: ['https://example.com'],
-        crawlOptions: { includePatterns: ['['] },
       };
 
       await expect(service.create(dto)).rejects.toThrow(BadRequestException);
@@ -249,6 +236,72 @@ describe('ScanService', () => {
     it('throws NotFoundException when scan does not exist', async () => {
       mockRepo.findOne.mockResolvedValue(null);
       await expect(service.findOne(999)).rejects.toThrow(NotFoundException);
+    });
+
+    it('filters issues to exact pageUrl when a single-element pageUrl array is provided', async () => {
+      const issues = [
+        makeIssue({ id: 1, pageUrl: 'https://example.com/about', selector: '.a' }),
+        makeIssue({ id: 2, pageUrl: 'https://example.com/contact', selector: '.b' }),
+        makeIssue({ id: 3, pageUrl: 'https://example.com/about', selector: '.c' }),
+      ];
+      mockRepo.findOne.mockResolvedValue(
+        makeScan({ status: ScanStatus.COMPLETED, issues }),
+      );
+
+      const result = await service.findOne(1, ['https://example.com/about']);
+
+      expect(result.violations).toHaveLength(1);
+      expect(result.violations[0].issues).toHaveLength(2);
+      expect(result.violations[0].issues.every((i) => i.pageUrl === 'https://example.com/about')).toBe(true);
+      expect(result.totalIssueCount).toBe(2);
+    });
+
+    it('filters issues to any of the given URLs when multiple pageUrls are provided', async () => {
+      const issues = [
+        makeIssue({ id: 1, pageUrl: 'https://example.com/about', selector: '.a' }),
+        makeIssue({ id: 2, pageUrl: 'https://example.com/contact', selector: '.b' }),
+        makeIssue({ id: 3, pageUrl: 'https://example.com/pricing', selector: '.c' }),
+      ];
+      mockRepo.findOne.mockResolvedValue(
+        makeScan({ status: ScanStatus.COMPLETED, issues }),
+      );
+
+      const result = await service.findOne(1, [
+        'https://example.com/about',
+        'https://example.com/contact',
+      ]);
+
+      expect(result.totalIssueCount).toBe(2);
+      const pageUrls = result.violations.flatMap((v) => v.issues.map((i) => i.pageUrl));
+      expect(pageUrls).not.toContain('https://example.com/pricing');
+    });
+
+    it('omits violation groups entirely when no issues match the pageUrl filter', async () => {
+      const issues = [
+        makeIssue({ id: 1, pageUrl: 'https://example.com/other', selector: '.a' }),
+      ];
+      mockRepo.findOne.mockResolvedValue(
+        makeScan({ status: ScanStatus.COMPLETED, issues }),
+      );
+
+      const result = await service.findOne(1, ['https://example.com/about']);
+
+      expect(result.violations).toHaveLength(0);
+      expect(result.totalIssueCount).toBe(0);
+    });
+
+    it('returns all issues when pageUrl option is omitted', async () => {
+      const issues = [
+        makeIssue({ id: 1, pageUrl: 'https://example.com/' }),
+        makeIssue({ id: 2, pageUrl: 'https://example.com/about' }),
+      ];
+      mockRepo.findOne.mockResolvedValue(
+        makeScan({ status: ScanStatus.COMPLETED, issues }),
+      );
+
+      const result = await service.findOne(1);
+
+      expect(result.totalIssueCount).toBe(2);
     });
 
     it('groups same rule+impact into one violation', async () => {

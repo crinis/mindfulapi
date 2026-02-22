@@ -136,10 +136,9 @@ describe('ScanProcessor real URL integration', () => {
       targets: [indexUrl],
       crawlMaxPages: 10,
       crawlMaxDepth: 3,
-      crawlSameHostOnly: true,
-      crawlIncludePatterns: null,
-      crawlExcludePatterns: null,
-      crawlConcurrency: 2,
+      crawlStrategy: 'same-hostname',
+      crawlGlobs: null,
+      crawlExcludeGlobs: null,
     });
 
     await processor.process({ data: { scanId: scan.id } } as Job);
@@ -180,10 +179,9 @@ describe('ScanProcessor real URL integration', () => {
       ruleIds: null,
       crawlMaxPages: null,
       crawlMaxDepth: null,
-      crawlSameHostOnly: null,
-      crawlIncludePatterns: null,
-      crawlExcludePatterns: null,
-      crawlConcurrency: null,
+      crawlStrategy: null,
+      crawlGlobs: null,
+      crawlExcludeGlobs: null,
       status: ScanStatus.PENDING,
       pagesDiscovered: 0,
       pagesScanned: 0,

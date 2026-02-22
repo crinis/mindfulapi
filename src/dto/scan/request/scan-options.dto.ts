@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   ArrayUnique,
   IsArray,
@@ -29,10 +30,12 @@ export class ScanOptionsDto {
       'Specific axe rule IDs to run. All rules run when omitted. See GET /rules for available IDs.',
     uniqueItems: true,
     minItems: 1,
+    maxItems: 200,
   })
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1)
+  @ArrayMaxSize(200)
   @ArrayUnique()
   @IsString({ each: true })
   ruleIds?: string[];
