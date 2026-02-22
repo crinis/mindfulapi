@@ -59,6 +59,20 @@ export class Scan {
   @Column({ type: 'simple-json', nullable: true })
   ruleIds?: string[] | null;
 
+  /**
+   * Encrypted username for optional HTTP Basic Authentication.
+   * Excluded from default selects to avoid accidental exposure.
+   */
+  @Column({ type: 'text', nullable: true, select: false })
+  basicAuthUsernameEncrypted?: string | null;
+
+  /**
+   * Encrypted password for optional HTTP Basic Authentication.
+   * Excluded from default selects to avoid accidental exposure.
+   */
+  @Column({ type: 'text', nullable: true, select: false })
+  basicAuthPasswordEncrypted?: string | null;
+
   /** Crawl page limit (only applies to crawl mode). */
   @Column({ type: 'integer', nullable: true })
   crawlMaxPages?: number | null;

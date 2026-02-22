@@ -36,6 +36,7 @@ jest.mock('@crawlee/memory-storage', () => ({
 }));
 
 import { ScanProcessor } from './scan.processor';
+import { BasicAuthCryptoService } from './basic-auth-crypto.service';
 import { Scan } from '../entities/scan.entity';
 import { ScanMode } from '../enums/scan-mode.enum';
 import { ScanStatus } from '../enums/scan-status.enum';
@@ -44,9 +45,9 @@ import { IssueImpact } from '../enums/issue-impact.enum';
 type MockRepo = {
   findOne: jest.Mock;
   update: jest.Mock;
+  createQueryBuilder?: jest.Mock;
   create?: jest.Mock;
   save?: jest.Mock;
-  createQueryBuilder?: jest.Mock;
 };
 
 const makeScan = (overrides: Partial<Scan> = {}): Scan =>
@@ -57,6 +58,8 @@ const makeScan = (overrides: Partial<Scan> = {}): Scan =>
     targets: ['https://example.com'],
     rootElement: undefined,
     ruleIds: null,
+    basicAuthUsernameEncrypted: null,
+    basicAuthPasswordEncrypted: null,
     crawlMaxPages: null,
     crawlMaxDepth: null,
     crawlStrategy: null,
@@ -76,11 +79,19 @@ describe('ScanProcessor', () => {
   let processor: ScanProcessor;
   let mockScanRepo: MockRepo;
   let mockIssueRepo: MockRepo;
+  let mockScanQb: {
+    addSelect: jest.Mock;
+    where: jest.Mock;
+    getOne: jest.Mock;
+  };
   let mockBrowserService: { getBrowser: jest.Mock };
   let mockScanner: {
     createContext: jest.Mock;
     scanPage: jest.Mock;
   };
+  let mockBasicAuthCrypto: jest.Mocked<
+    Pick<BasicAuthCryptoService, 'decryptCredentials'>
+  >;
   let mockContext: { close: jest.Mock; newPage: jest.Mock };
 
   beforeEach(() => {
@@ -103,6 +114,12 @@ describe('ScanProcessor', () => {
       findOne: jest.fn(),
       update: jest.fn().mockResolvedValue(undefined),
     };
+    mockScanQb = {
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getOne: jest.fn(),
+    };
+    mockScanRepo.createQueryBuilder = jest.fn().mockReturnValue(mockScanQb);
 
     mockIssueRepo = {
       findOne: jest.fn(),
@@ -116,20 +133,21 @@ describe('ScanProcessor', () => {
 
     mockContext = {
       close: jest.fn().mockResolvedValue(undefined),
-      newPage: jest
-        .fn()
-        .mockImplementation(() =>
-          Promise.resolve({
-            url: jest.fn().mockReturnValue('https://example.com/'),
-            evaluate: jest.fn().mockResolvedValue([]),
-            close: jest.fn().mockResolvedValue(undefined),
-          }),
-        ),
+      newPage: jest.fn().mockImplementation(() =>
+        Promise.resolve({
+          url: jest.fn().mockReturnValue('https://example.com/'),
+          evaluate: jest.fn().mockResolvedValue([]),
+          close: jest.fn().mockResolvedValue(undefined),
+        }),
+      ),
     };
 
     mockScanner = {
       createContext: jest.fn().mockResolvedValue(mockContext),
       scanPage: jest.fn(),
+    };
+    mockBasicAuthCrypto = {
+      decryptCredentials: jest.fn(),
     };
 
     processor = new ScanProcessor(
@@ -137,11 +155,12 @@ describe('ScanProcessor', () => {
       mockIssueRepo as any,
       mockBrowserService as any,
       mockScanner as any,
+      mockBasicAuthCrypto as any,
     );
   });
 
   it('throws when scan does not exist', async () => {
-    mockScanRepo.findOne.mockResolvedValue(null);
+    mockScanQb.getOne.mockResolvedValue(null);
 
     await expect(
       processor.process({ data: { scanId: 999 } } as any),
@@ -150,7 +169,7 @@ describe('ScanProcessor', () => {
   });
 
   it('processes single_url runs and stores issues', async () => {
-    mockScanRepo.findOne.mockResolvedValue(
+    mockScanQb.getOne.mockResolvedValue(
       makeScan({
         targets: ['https://example.com'],
         rootElement: 'main',
@@ -177,7 +196,10 @@ describe('ScanProcessor', () => {
 
     expect(mockScanner.createContext).toHaveBeenCalledWith(
       {},
-      { rootElement: 'main', ruleIds: ['image-alt'] },
+      expect.objectContaining({
+        rootElement: 'main',
+        ruleIds: ['image-alt'],
+      }),
     );
     expect(mockScanner.scanPage).toHaveBeenCalledTimes(1);
     expect(mockScanner.scanPage.mock.calls[0][1]).toBe('https://example.com/');
@@ -199,7 +221,7 @@ describe('ScanProcessor', () => {
   });
 
   it('tracks page failures for url_list runs and still completes', async () => {
-    mockScanRepo.findOne.mockResolvedValue(
+    mockScanQb.getOne.mockResolvedValue(
       makeScan({
         mode: ScanMode.URL_LIST,
         targets: ['https://example.com/a', 'https://example.com/b'],
@@ -227,7 +249,7 @@ describe('ScanProcessor', () => {
   });
 
   it('uses Crawlee BasicCrawler with BrowserService for crawl mode', async () => {
-    mockScanRepo.findOne.mockResolvedValue(
+    mockScanQb.getOne.mockResolvedValue(
       makeScan({
         mode: ScanMode.CRAWL,
         targets: ['https://example.com'],
@@ -301,7 +323,7 @@ describe('ScanProcessor', () => {
             if (
               options.exclude &&
               options.exclude.some((g: string) =>
-                href.includes(g.replace('**/','').replace('/**', '')),
+                href.includes(g.replace('**/', '').replace('/**', '')),
               )
             ) {
               continue;
@@ -358,7 +380,7 @@ describe('ScanProcessor', () => {
   });
 
   it('tracks failed crawl pages via failedRequestHandler', async () => {
-    mockScanRepo.findOne.mockResolvedValue(
+    mockScanQb.getOne.mockResolvedValue(
       makeScan({
         mode: ScanMode.CRAWL,
         targets: ['https://example.com'],
@@ -384,7 +406,7 @@ describe('ScanProcessor', () => {
   });
 
   it('does not increment pagesFailed when only link extraction fails after a successful scan', async () => {
-    mockScanRepo.findOne.mockResolvedValue(
+    mockScanQb.getOne.mockResolvedValue(
       makeScan({ mode: ScanMode.CRAWL, targets: ['https://example.com'] }),
     );
 
@@ -419,5 +441,38 @@ describe('ScanProcessor', () => {
       pagesScanned: 1,
       pagesFailed: 0,
     });
+  });
+
+  it('decrypts basic auth credentials and passes them to scanner context', async () => {
+    mockScanQb.getOne.mockResolvedValue(
+      makeScan({
+        basicAuthUsernameEncrypted: 'enc-user',
+        basicAuthPasswordEncrypted: 'enc-pass',
+      }),
+    );
+    mockBasicAuthCrypto.decryptCredentials.mockReturnValue({
+      username: 'scanner-user',
+      password: 'scanner-password',
+    });
+    mockScanner.scanPage.mockResolvedValue({
+      finalUrl: 'https://example.com/',
+      issues: [],
+    });
+
+    await processor.process({ data: { scanId: 1 } } as any);
+
+    expect(mockBasicAuthCrypto.decryptCredentials).toHaveBeenCalledWith(
+      'enc-user',
+      'enc-pass',
+    );
+    expect(mockScanner.createContext).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({
+        basicAuth: {
+          username: 'scanner-user',
+          password: 'scanner-password',
+        },
+      }),
+    );
   });
 });

@@ -16,6 +16,8 @@ import { ScanStatus } from '../enums/scan-status.enum';
 import { ScanMode } from '../enums/scan-mode.enum';
 import { CrawlStrategy } from '../enums/crawl-strategy.enum';
 import { ScanQueueService } from './scan-queue.service';
+import { BasicAuth } from './axe-accessibility-scanner.service';
+import { BasicAuthCryptoService } from './basic-auth-crypto.service';
 import { ScanResponseDto } from '../dto/scan/response';
 import { DEFAULT_CRAWL_OPTIONS } from '../constants/crawl-options.constants';
 import {
@@ -32,7 +34,11 @@ interface NormalizedCreateInput {
   /** Normalized URL targets (single/list/crawl seeds). */
   targets: string[];
   /** Sanitized axe scan options. */
-  scanOptions: Required<Pick<ScanOptionsDto, 'rootElement' | 'ruleIds'>>;
+  scanOptions: {
+    rootElement: string;
+    ruleIds: string[];
+    basicAuth: BasicAuth | null;
+  };
   /** Effective crawl options or `null` for non-crawl runs. */
   crawlOptions: Required<CrawlOptionsDto> | null;
 }
@@ -50,6 +56,7 @@ export class ScanService {
     @InjectRepository(Scan)
     private readonly scanRepository: Repository<Scan>,
     private readonly scanQueueService: ScanQueueService,
+    private readonly basicAuthCryptoService: BasicAuthCryptoService,
   ) {}
 
   /**
@@ -60,6 +67,11 @@ export class ScanService {
    */
   async create(createScanDto: CreateScanDto): Promise<ScanResponseDto> {
     const normalized = this.normalizeCreateInput(createScanDto);
+    const encryptedBasicAuth = normalized.scanOptions.basicAuth
+      ? this.basicAuthCryptoService.encryptCredentials(
+          normalized.scanOptions.basicAuth,
+        )
+      : null;
     const scan = this.scanRepository.create({
       url: normalized.targets[0],
       mode: normalized.mode,
@@ -68,6 +80,8 @@ export class ScanService {
       ruleIds: normalized.scanOptions.ruleIds.length
         ? normalized.scanOptions.ruleIds
         : null,
+      basicAuthUsernameEncrypted: encryptedBasicAuth?.encryptedUsername ?? null,
+      basicAuthPasswordEncrypted: encryptedBasicAuth?.encryptedPassword ?? null,
       crawlMaxPages: normalized.crawlOptions?.maxPages ?? null,
       crawlMaxDepth: normalized.crawlOptions?.maxDepth ?? null,
       crawlStrategy: normalized.crawlOptions?.strategy ?? null,
@@ -183,12 +197,28 @@ export class ScanService {
   /**
    * Sanitizes optional scan options into a predictable internal shape.
    */
-  private sanitizeScanOptions(
-    scanOptions?: ScanOptionsDto,
-  ): Required<Pick<ScanOptionsDto, 'rootElement' | 'ruleIds'>> {
+  private sanitizeScanOptions(scanOptions?: ScanOptionsDto): {
+    rootElement: string;
+    ruleIds: string[];
+    basicAuth: BasicAuth | null;
+  } {
     return {
       rootElement: scanOptions?.rootElement?.trim() || '',
       ruleIds: this.dedupeStrings(scanOptions?.ruleIds || []),
+      basicAuth: this.sanitizeBasicAuth(scanOptions?.basicAuth),
+    };
+  }
+
+  /**
+   * Returns normalized basic-auth credentials or `null` when not configured.
+   */
+  private sanitizeBasicAuth(
+    basicAuth: ScanOptionsDto['basicAuth'],
+  ): BasicAuth | null {
+    if (!basicAuth) return null;
+    return {
+      username: basicAuth.username.trim(),
+      password: basicAuth.password,
     };
   }
 
@@ -197,7 +227,7 @@ export class ScanService {
    */
   private normalizeSingleUrlMode(
     dto: CreateScanDto,
-    scanOptions: Required<Pick<ScanOptionsDto, 'rootElement' | 'ruleIds'>>,
+    scanOptions: NormalizedCreateInput['scanOptions'],
   ): NormalizedCreateInput {
     if (!dto.url) {
       throw new BadRequestException(
@@ -224,7 +254,7 @@ export class ScanService {
    */
   private normalizeUrlListMode(
     dto: CreateScanDto,
-    scanOptions: Required<Pick<ScanOptionsDto, 'rootElement' | 'ruleIds'>>,
+    scanOptions: NormalizedCreateInput['scanOptions'],
   ): NormalizedCreateInput {
     if (!dto.urls || dto.urls.length < 2) {
       throw new BadRequestException(
@@ -251,7 +281,7 @@ export class ScanService {
    */
   private normalizeCrawlMode(
     dto: CreateScanDto,
-    scanOptions: Required<Pick<ScanOptionsDto, 'rootElement' | 'ruleIds'>>,
+    scanOptions: NormalizedCreateInput['scanOptions'],
   ): NormalizedCreateInput {
     if (!dto.startUrls || dto.startUrls.length === 0) {
       throw new BadRequestException(

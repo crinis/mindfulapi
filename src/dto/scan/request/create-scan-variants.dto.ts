@@ -126,6 +126,10 @@ export const createScanRequestExamples: Record<string, OpenApiExampleObject> = {
       url: 'https://example.com',
       scanOptions: {
         rootElement: 'main',
+        basicAuth: {
+          username: 'scanner-user',
+          password: 'scanner-password',
+        },
       },
     },
   },

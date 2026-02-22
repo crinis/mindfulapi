@@ -3,6 +3,7 @@ import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ScanService } from './scan.service';
 import { ScanQueueService } from './scan-queue.service';
+import { BasicAuthCryptoService } from './basic-auth-crypto.service';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 import { ScanStatus } from '../enums/scan-status.enum';
@@ -32,6 +33,8 @@ const makeScan = (overrides: Partial<Scan> = {}): Scan =>
     targets: ['https://example.com'],
     rootElement: undefined,
     ruleIds: null,
+    basicAuthUsernameEncrypted: null,
+    basicAuthPasswordEncrypted: null,
     crawlMaxPages: null,
     crawlMaxDepth: null,
     crawlStrategy: null,
@@ -51,6 +54,9 @@ describe('ScanService', () => {
   let service: ScanService;
   let mockRepo: jest.Mocked<Record<string, jest.Mock>>;
   let mockQueue: jest.Mocked<Pick<ScanQueueService, 'addScanJob'>>;
+  let mockBasicAuthCrypto: jest.Mocked<
+    Pick<BasicAuthCryptoService, 'encryptCredentials'>
+  >;
 
   beforeEach(async () => {
     mockRepo = {
@@ -62,12 +68,16 @@ describe('ScanService', () => {
     };
 
     mockQueue = { addScanJob: jest.fn().mockResolvedValue(undefined) };
+    mockBasicAuthCrypto = {
+      encryptCredentials: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ScanService,
         { provide: getRepositoryToken(Scan), useValue: mockRepo },
         { provide: ScanQueueService, useValue: mockQueue },
+        { provide: BasicAuthCryptoService, useValue: mockBasicAuthCrypto },
       ],
     }).compile();
 
@@ -94,6 +104,8 @@ describe('ScanService', () => {
         targets: ['https://example.com/'],
         rootElement: undefined,
         ruleIds: null,
+        basicAuthUsernameEncrypted: null,
+        basicAuthPasswordEncrypted: null,
         crawlMaxPages: null,
         crawlMaxDepth: null,
         crawlStrategy: null,
@@ -103,6 +115,7 @@ describe('ScanService', () => {
       });
       expect(mockRepo.save).toHaveBeenCalledWith(saved);
       expect(mockQueue.addScanJob).toHaveBeenCalledWith(saved.id);
+      expect(mockBasicAuthCrypto.encryptCredentials).not.toHaveBeenCalled();
       expect(result.id).toBe(saved.id);
       expect(result.mode).toBe(ScanMode.SINGLE_URL);
       expect(result.targets).toEqual(['https://example.com']);
@@ -132,6 +145,47 @@ describe('ScanService', () => {
       await service.create(dto);
 
       expect(mockQueue.addScanJob).toHaveBeenCalledWith(saved.id);
+    });
+
+    it('encrypts and stores basic auth credentials without returning them', async () => {
+      const dto: CreateScanDto = {
+        mode: ScanMode.SINGLE_URL,
+        url: 'https://example.com',
+        scanOptions: {
+          basicAuth: {
+            username: 'scanner-user',
+            password: 'scanner-password',
+          },
+        },
+      };
+      const saved = makeScan({
+        basicAuthUsernameEncrypted: 'enc-user',
+        basicAuthPasswordEncrypted: 'enc-pass',
+      });
+      mockBasicAuthCrypto.encryptCredentials.mockReturnValue({
+        encryptedUsername: 'enc-user',
+        encryptedPassword: 'enc-pass',
+      });
+
+      mockRepo.create.mockReturnValue(saved);
+      mockRepo.save.mockResolvedValue(saved);
+      mockRepo.findOne.mockResolvedValue({ ...saved, issues: [] });
+
+      const result = await service.create(dto);
+
+      expect(mockBasicAuthCrypto.encryptCredentials).toHaveBeenCalledWith({
+        username: 'scanner-user',
+        password: 'scanner-password',
+      });
+      expect(mockRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          basicAuthUsernameEncrypted: 'enc-user',
+          basicAuthPasswordEncrypted: 'enc-pass',
+        }),
+      );
+      expect(
+        Object.prototype.hasOwnProperty.call(result.scanOptions, 'basicAuth'),
+      ).toBe(false);
     });
 
     it('throws when mode-specific fields are invalid', async () => {
@@ -240,9 +294,21 @@ describe('ScanService', () => {
 
     it('filters issues to exact pageUrl when a single-element pageUrl array is provided', async () => {
       const issues = [
-        makeIssue({ id: 1, pageUrl: 'https://example.com/about', selector: '.a' }),
-        makeIssue({ id: 2, pageUrl: 'https://example.com/contact', selector: '.b' }),
-        makeIssue({ id: 3, pageUrl: 'https://example.com/about', selector: '.c' }),
+        makeIssue({
+          id: 1,
+          pageUrl: 'https://example.com/about',
+          selector: '.a',
+        }),
+        makeIssue({
+          id: 2,
+          pageUrl: 'https://example.com/contact',
+          selector: '.b',
+        }),
+        makeIssue({
+          id: 3,
+          pageUrl: 'https://example.com/about',
+          selector: '.c',
+        }),
       ];
       mockRepo.findOne.mockResolvedValue(
         makeScan({ status: ScanStatus.COMPLETED, issues }),
@@ -252,15 +318,31 @@ describe('ScanService', () => {
 
       expect(result.violations).toHaveLength(1);
       expect(result.violations[0].issues).toHaveLength(2);
-      expect(result.violations[0].issues.every((i) => i.pageUrl === 'https://example.com/about')).toBe(true);
+      expect(
+        result.violations[0].issues.every(
+          (i) => i.pageUrl === 'https://example.com/about',
+        ),
+      ).toBe(true);
       expect(result.totalIssueCount).toBe(2);
     });
 
     it('filters issues to any of the given URLs when multiple pageUrls are provided', async () => {
       const issues = [
-        makeIssue({ id: 1, pageUrl: 'https://example.com/about', selector: '.a' }),
-        makeIssue({ id: 2, pageUrl: 'https://example.com/contact', selector: '.b' }),
-        makeIssue({ id: 3, pageUrl: 'https://example.com/pricing', selector: '.c' }),
+        makeIssue({
+          id: 1,
+          pageUrl: 'https://example.com/about',
+          selector: '.a',
+        }),
+        makeIssue({
+          id: 2,
+          pageUrl: 'https://example.com/contact',
+          selector: '.b',
+        }),
+        makeIssue({
+          id: 3,
+          pageUrl: 'https://example.com/pricing',
+          selector: '.c',
+        }),
       ];
       mockRepo.findOne.mockResolvedValue(
         makeScan({ status: ScanStatus.COMPLETED, issues }),
@@ -272,13 +354,19 @@ describe('ScanService', () => {
       ]);
 
       expect(result.totalIssueCount).toBe(2);
-      const pageUrls = result.violations.flatMap((v) => v.issues.map((i) => i.pageUrl));
+      const pageUrls = result.violations.flatMap((v) =>
+        v.issues.map((i) => i.pageUrl),
+      );
       expect(pageUrls).not.toContain('https://example.com/pricing');
     });
 
     it('omits violation groups entirely when no issues match the pageUrl filter', async () => {
       const issues = [
-        makeIssue({ id: 1, pageUrl: 'https://example.com/other', selector: '.a' }),
+        makeIssue({
+          id: 1,
+          pageUrl: 'https://example.com/other',
+          selector: '.a',
+        }),
       ];
       mockRepo.findOne.mockResolvedValue(
         makeScan({ status: ScanStatus.COMPLETED, issues }),

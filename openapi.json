@@ -39,7 +39,11 @@
                     "mode": "single_url",
                     "url": "https://example.com",
                     "scanOptions": {
-                      "rootElement": "main"
+                      "rootElement": "main",
+                      "basicAuth": {
+                        "username": "scanner-user",
+                        "password": "scanner-password"
+                      }
                     }
                   }
                 },
@@ -660,6 +664,29 @@
       }
     },
     "schemas": {
+      "BasicAuthCredentialsDto": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "example": "scanner-user",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Username for HTTP Basic Authentication."
+          },
+          "password": {
+            "type": "string",
+            "example": "scanner-password",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Password for HTTP Basic Authentication. Stored encrypted at rest."
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ]
+      },
       "ScanOptionsDto": {
         "type": "object",
         "properties": {
@@ -682,6 +709,14 @@
             "items": {
               "type": "string"
             }
+          },
+          "basicAuth": {
+            "description": "Optional HTTP Basic Authentication credentials used during page loading. Credentials are encrypted at rest and never returned in API responses.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BasicAuthCredentialsDto"
+              }
+            ]
           }
         }
       },

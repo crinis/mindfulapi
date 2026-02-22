@@ -15,6 +15,7 @@ MindfulAPI was built to serve as the external accessibility scanner backend for 
 - **Asynchronous processing** — scans run in the background via a Redis-backed queue (BullMQ)
 - **Scoped scanning** — target a specific CSS selector instead of the whole page
 - **Rule filtering** — run only the axe rules you care about
+- **Basic auth support** — optionally provide per-scan HTTP Basic credentials for protected targets
 - **Scan history** — results are persisted in SQLite and queryable via the API
 - **HTML & PDF reports** — generate accessible, print-ready reports directly from scan results
 - **Optional authentication** — protect the API with a Bearer token, or leave it open
@@ -83,10 +84,17 @@ All configuration is done via environment variables. Copy `.env.example` for a f
 | `REDIS_PASSWORD` | _(unset)_ | Redis password |
 | `PLAYWRIGHT_WS_URL` | _(unset)_ | WebSocket URL of a remote Playwright server (e.g. `ws://playwright:3000`). When unset, a local Chromium instance is launched. |
 | `IGNORE_HTTPS_ERRORS` | `false` | Ignore TLS errors (useful for self-signed certificates) |
+| `ENCRYPTION_KEY` | _(unset)_ | General 32-byte encryption key (base64 or hex) for sensitive persisted data (currently scan `basicAuth` credentials). Required only when encrypted fields are used. |
 | `CLEANUP_ENABLED` | `true` | Enable scheduled deletion of old scans |
 | `CLEANUP_RETENTION_DAYS` | `30` | How many days to keep scans |
 | `CLEANUP_INTERVAL` | `0 2 * * *` | Cron schedule for cleanup |
 | `CRAWL_CONCURRENCY` | `4` | Maximum pages analyzed in parallel for crawl and url_list modes (clamped to 1–16) |
+
+Generate a secure encryption key (required when using encrypted fields such as `scanOptions.basicAuth`):
+
+```bash
+openssl rand -base64 32
+```
 
 ---
 
@@ -124,10 +132,22 @@ Queues a new asynchronous scan run. The request supports three modes through an 
   "url": "https://example.com",
   "scanOptions": {
     "rootElement": "main",
-    "ruleIds": ["color-contrast", "image-alt"]
+    "ruleIds": ["color-contrast", "image-alt"],
+    "basicAuth": {
+      "username": "scanner-user",
+      "password": "scanner-password"
+    }
   }
 }
 ```
+
+**`scanOptions` fields**
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `rootElement` | _(unset)_ | CSS selector limiting the scan scope |
+| `ruleIds` | _(unset)_ | Axe rule IDs to execute. Omit to run all rules |
+| `basicAuth` | _(unset)_ | Optional `{ "username", "password" }` for HTTP Basic Authentication on protected pages. Stored encrypted and never returned in API responses. Requires `ENCRYPTION_KEY` to be configured |
 
 **Request body — `url_list`**
 

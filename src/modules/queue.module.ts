@@ -5,6 +5,7 @@ import { ScanProcessor } from '../services/scan.processor';
 import { ScanQueueService } from '../services/scan-queue.service';
 import { BrowserService } from '../services/browser.service';
 import { AxeAccessibilityScanner } from '../services/axe-accessibility-scanner.service';
+import { BasicAuthCryptoService } from '../services/basic-auth-crypto.service';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 
@@ -36,7 +37,8 @@ import { Issue } from '../entities/issue.entity';
     ScanQueueService,
     BrowserService,
     AxeAccessibilityScanner,
+    BasicAuthCryptoService,
   ],
-  exports: [ScanQueueService, BrowserService],
+  exports: [ScanQueueService, BrowserService, BasicAuthCryptoService],
 })
 export class QueueModule {}

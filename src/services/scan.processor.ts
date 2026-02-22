@@ -18,9 +18,11 @@ import { ScanJobData } from './scan-queue.service';
 import { BrowserService } from './browser.service';
 import {
   AxeAccessibilityScanner,
+  BasicAuth,
   ScanOptions,
   ScannedIssue,
 } from './axe-accessibility-scanner.service';
+import { BasicAuthCryptoService } from './basic-auth-crypto.service';
 import {
   normalizeAndDedupeHttpUrls,
   normalizeHttpUrl,
@@ -84,6 +86,7 @@ export class ScanProcessor extends WorkerHost {
     private readonly issueRepository: Repository<Issue>,
     private readonly browserService: BrowserService,
     private readonly scanner: AxeAccessibilityScanner,
+    private readonly basicAuthCryptoService: BasicAuthCryptoService,
   ) {
     super();
   }
@@ -95,7 +98,14 @@ export class ScanProcessor extends WorkerHost {
    */
   async process(job: Job<ScanJobData>): Promise<void> {
     const { scanId } = job.data;
-    const scan = await this.scanRepository.findOne({ where: { id: scanId } });
+    const scan = await this.scanRepository
+      .createQueryBuilder('scan')
+      .addSelect([
+        'scan.basicAuthUsernameEncrypted',
+        'scan.basicAuthPasswordEncrypted',
+      ])
+      .where('scan.id = :scanId', { scanId })
+      .getOne();
 
     if (!scan) {
       throw new Error(`Scan ${scanId} not found`);
@@ -109,6 +119,7 @@ export class ScanProcessor extends WorkerHost {
       const scanOptions: ScanOptions = {
         rootElement: scan.rootElement || undefined,
         ruleIds: scan.ruleIds?.length ? scan.ruleIds : undefined,
+        basicAuth: this.resolveBasicAuth(scan),
       };
 
       const progress =
@@ -343,6 +354,26 @@ export class ScanProcessor extends WorkerHost {
    */
   private resolveScanTargets(scan: Scan): string[] {
     return normalizeAndDedupeHttpUrls(scan.targets || [scan.url]);
+  }
+
+  /**
+   * Decrypts persisted basic-auth credentials for runtime use when configured.
+   */
+  private resolveBasicAuth(scan: Scan): BasicAuth | undefined {
+    const { basicAuthUsernameEncrypted, basicAuthPasswordEncrypted } = scan;
+    if (!basicAuthUsernameEncrypted && !basicAuthPasswordEncrypted) {
+      return undefined;
+    }
+    if (!basicAuthUsernameEncrypted || !basicAuthPasswordEncrypted) {
+      throw new Error(
+        `Scan ${scan.id} has incomplete encrypted basic-auth credentials`,
+      );
+    }
+
+    return this.basicAuthCryptoService.decryptCredentials(
+      basicAuthUsernameEncrypted,
+      basicAuthPasswordEncrypted,
+    );
   }
 
   /**
