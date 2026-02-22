@@ -1,9 +1,9 @@
 import {
   Controller,
   Get,
+  Header,
   Param,
   ParseIntPipe,
-  Res,
   StreamableFile,
 } from '@nestjs/common';
 import {
@@ -14,7 +14,6 @@ import {
   ApiResponse,
   ApiProduces,
 } from '@nestjs/swagger';
-import { Response } from 'express';
 import { ScanService } from '../services/scan.service';
 import { ReportService } from '../services/report.service';
 import { ErrorResponseDto } from '../dto/error-response.dto';
@@ -45,8 +44,13 @@ export class ReportController {
     content: { 'text/html': { schema: { type: 'string' } } },
   })
   @ApiResponse({
+    status: 400,
+    description: 'ID must be a positive integer',
+    type: ErrorResponseDto,
+  })
+  @ApiResponse({
     status: 401,
-    description: 'Authentication required',
+    description: 'Missing or invalid Bearer token',
     type: ErrorResponseDto,
   })
   @ApiResponse({
@@ -54,17 +58,18 @@ export class ReportController {
     description: 'Scan not found',
     type: ErrorResponseDto,
   })
+  @ApiResponse({
+    status: 500,
+    description: 'Unexpected server error',
+    type: ErrorResponseDto,
+  })
+  @Header('Content-Type', 'text/html; charset=utf-8')
   /**
    * Returns a complete standalone HTML accessibility report for the given scan.
    */
-  async getHtmlReport(
-    @Param('id', ParseIntPipe) id: number,
-    @Res() res: Response,
-  ): Promise<void> {
+  async getHtmlReport(@Param('id', ParseIntPipe) id: number): Promise<string> {
     const scan = await this.scanService.findOne(id);
-    const html = this.reportService.generateHtml(scan);
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(html);
+    return this.reportService.generateHtml(scan);
   }
 
   @Get('pdf')
@@ -82,8 +87,13 @@ export class ReportController {
     },
   })
   @ApiResponse({
+    status: 400,
+    description: 'ID must be a positive integer',
+    type: ErrorResponseDto,
+  })
+  @ApiResponse({
     status: 401,
-    description: 'Authentication required',
+    description: 'Missing or invalid Bearer token',
     type: ErrorResponseDto,
   })
   @ApiResponse({
@@ -91,12 +101,16 @@ export class ReportController {
     description: 'Scan not found',
     type: ErrorResponseDto,
   })
+  @ApiResponse({
+    status: 500,
+    description: 'Unexpected server error',
+    type: ErrorResponseDto,
+  })
   /**
    * Returns a PDF accessibility report for the given scan as a downloadable file.
    */
   async getPdfReport(
     @Param('id', ParseIntPipe) id: number,
-    @Res({ passthrough: true }) _res: Response,
   ): Promise<StreamableFile> {
     const scan = await this.scanService.findOne(id);
     const buffer = await this.reportService.generatePdf(scan);

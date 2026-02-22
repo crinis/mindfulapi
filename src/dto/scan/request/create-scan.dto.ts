@@ -12,6 +12,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ScanMode } from '../../../enums/scan-mode.enum';
+import { HTTP_URL_VALIDATION_OPTIONS } from '../../../constants/url-validation.constants';
 import { CrawlOptionsDto } from './crawl-options.dto';
 import { ScanOptionsDto } from './scan-options.dto';
 
@@ -34,11 +35,7 @@ export class CreateScanDto {
     description: 'Used when mode is single_url.',
   })
   @ValidateIf((o: CreateScanDto) => o.mode === ScanMode.SINGLE_URL)
-  @IsUrl({
-    require_tld: false,
-    require_protocol: true,
-    protocols: ['http', 'https'],
-  })
+  @IsUrl(HTTP_URL_VALIDATION_OPTIONS)
   url?: string;
 
   /** Explicit list of page URLs used only when `mode` is `url_list`. */
@@ -54,14 +51,7 @@ export class CreateScanDto {
   @ArrayMinSize(2)
   @ArrayMaxSize(500)
   @ArrayUnique()
-  @IsUrl(
-    {
-      require_tld: false,
-      require_protocol: true,
-      protocols: ['http', 'https'],
-    },
-    { each: true },
-  )
+  @IsUrl(HTTP_URL_VALIDATION_OPTIONS, { each: true })
   urls?: string[];
 
   /** Seed URLs used only when `mode` is `crawl`. */
@@ -77,14 +67,7 @@ export class CreateScanDto {
   @ArrayMinSize(1)
   @ArrayMaxSize(50)
   @ArrayUnique()
-  @IsUrl(
-    {
-      require_tld: false,
-      require_protocol: true,
-      protocols: ['http', 'https'],
-    },
-    { each: true },
-  )
+  @IsUrl(HTTP_URL_VALIDATION_OPTIONS, { each: true })
   startUrls?: string[];
 
   /** Mode-agnostic scan settings forwarded to axe-core execution. */

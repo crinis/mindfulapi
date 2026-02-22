@@ -117,6 +117,7 @@ export class ScanService {
    * Retrieves one scan run by ID.
    *
    * @param id Scan run identifier.
+   * @param pageUrls Optional page URL filters used to include only matching issues.
    * @throws NotFoundException When no run exists for the given ID.
    */
   async findOne(id: number, pageUrls?: string[]): Promise<ScanResponseDto> {
@@ -129,9 +130,14 @@ export class ScanService {
       throw new NotFoundException(`Scan with ID ${id} not found`);
     }
 
-    if (pageUrls?.length) {
-      const urlSet = new Set(pageUrls);
-      scan.issues = scan.issues.filter((issue) => issue.pageUrl != null && urlSet.has(issue.pageUrl));
+    const pageUrlSet = pageUrls?.length
+      ? new Set(normalizeAndDedupeHttpUrls(pageUrls))
+      : null;
+
+    if (pageUrlSet?.size) {
+      scan.issues = scan.issues.filter(
+        (issue) => issue.pageUrl != null && pageUrlSet.has(issue.pageUrl),
+      );
     }
 
     return this.enrichScanData(scan);
@@ -241,7 +247,6 @@ export class ScanService {
   }
 
   /**
-     /**
    * Validates and normalizes `crawl` mode payload.
    */
   private normalizeCrawlMode(
@@ -323,10 +328,12 @@ export class ScanService {
     const rulesMap = new Map<string, Issue[]>();
     scan.issues.forEach((issue) => {
       const key = `${issue.ruleId}::${issue.impact}`;
-      if (!rulesMap.has(key)) {
-        rulesMap.set(key, []);
+      let group = rulesMap.get(key);
+      if (!group) {
+        group = [];
+        rulesMap.set(key, group);
       }
-      rulesMap.get(key)!.push(issue);
+      group.push(issue);
     });
 
     const violations = Array.from(rulesMap.values()).map((issues) => {
@@ -362,7 +369,9 @@ export class ScanService {
           ? {
               maxPages: scan.crawlMaxPages ?? DEFAULT_CRAWL_OPTIONS.maxPages,
               maxDepth: scan.crawlMaxDepth ?? DEFAULT_CRAWL_OPTIONS.maxDepth,
-              strategy: (scan.crawlStrategy as CrawlStrategy) ?? DEFAULT_CRAWL_OPTIONS.strategy,
+              strategy:
+                (scan.crawlStrategy as CrawlStrategy) ??
+                DEFAULT_CRAWL_OPTIONS.strategy,
               globs: scan.crawlGlobs || [],
               excludeGlobs: scan.crawlExcludeGlobs || [],
             }

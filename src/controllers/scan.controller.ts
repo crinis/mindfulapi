@@ -188,5 +188,6 @@ export class ScanController {
     @Param('id', ParseIntPipe) id: number,
     @Query() query: ScanByIdQueryDto,
   ): Promise<ScanResponseDto> {
-    return this.scanService.findOne(id, query.pageUrl);  }
+    return this.scanService.findOne(id, query.pageUrl);
+  }
 }

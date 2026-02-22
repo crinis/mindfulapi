@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsUrl } from 'class-validator';
+import { HTTP_URL_VALIDATION_OPTIONS } from '../constants/url-validation.constants';
 
 /**
  * Query parameters for the GET /scans list endpoint.
@@ -14,10 +15,6 @@ export class ScanQueryDto {
       'Filter runs by exact match in normalized input targets. When omitted, all scan runs are returned.',
   })
   @IsOptional()
-  @IsUrl({
-    require_tld: false,
-    require_protocol: true,
-    protocols: ['http', 'https'],
-  })
+  @IsUrl(HTTP_URL_VALIDATION_OPTIONS)
   target?: string;
 }

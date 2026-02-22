@@ -33,12 +33,10 @@ export class BrowserService implements OnApplicationShutdown {
    */
   private async initBrowser(): Promise<Browser> {
     const playwrightUrl = process.env.PLAYWRIGHT_WS_URL;
-    if (playwrightUrl) {
-      await this.connectToExternalPlaywright(playwrightUrl);
-    } else {
-      await this.launchLocalBrowser();
-    }
-    return this.browser!;
+    this.browser = playwrightUrl
+      ? await this.connectToExternalPlaywright(playwrightUrl)
+      : await this.launchLocalBrowser();
+    return this.browser;
   }
 
   /**
@@ -46,15 +44,16 @@ export class BrowserService implements OnApplicationShutdown {
    *
    * @param wsUrl External Playwright endpoint URL.
    */
-  private async connectToExternalPlaywright(wsUrl: string): Promise<void> {
+  private async connectToExternalPlaywright(wsUrl: string): Promise<Browser> {
     this.logger.log(
       `Connecting to external Playwright via WebSocket: ${wsUrl}`,
     );
 
     try {
-      this.browser = await chromium.connect(wsUrl);
+      const browser = await chromium.connect(wsUrl);
       this.connectionType = 'external';
       this.logger.log('Connected to external Playwright instance');
+      return browser;
     } catch (error) {
       this.logger.error(
         `Failed to connect to external Playwright at ${wsUrl}:`,
@@ -69,13 +68,14 @@ export class BrowserService implements OnApplicationShutdown {
   /**
    * Launches a local headless Chromium instance.
    */
-  private async launchLocalBrowser(): Promise<void> {
+  private async launchLocalBrowser(): Promise<Browser> {
     this.logger.log('Launching local Chromium browser instance');
 
     try {
-      this.browser = await chromium.launch({ headless: true });
+      const browser = await chromium.launch({ headless: true });
       this.connectionType = 'local';
       this.logger.log('Local Chromium browser instance launched successfully');
+      return browser;
     } catch (error) {
       this.logger.error('Failed to launch local Chromium browser:', error);
       throw new Error(

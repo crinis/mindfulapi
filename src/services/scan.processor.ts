@@ -172,30 +172,26 @@ export class ScanProcessor extends WorkerHost {
     const context = await this.scanner.createContext(browser, scanOptions);
 
     try {
-      await this.processTaskQueue(
-        tasks,
-        resolveConcurrency(),
-        async (task) => {
-          const page = await context.newPage();
-          try {
-            const { issues } = await this.scanner.scanPage(
-              page,
-              task.url,
-              scanOptions,
-            );
-            await this.saveIssues(scan.id, issues);
-            progress.pagesScanned += 1;
-          } catch (error) {
-            progress.pagesFailed += 1;
-            this.logger.warn(
-              `Failed page ${task.url} in scan ${scan.id}: ${String(error)}`,
-            );
-          } finally {
-            await page.close();
-            await this.persistProgress(scan.id, progress);
-          }
-        },
-      );
+      await this.processTaskQueue(tasks, resolveConcurrency(), async (task) => {
+        const page = await context.newPage();
+        try {
+          const { issues } = await this.scanner.scanPage(
+            page,
+            task.url,
+            scanOptions,
+          );
+          await this.saveIssues(scan.id, issues);
+          progress.pagesScanned += 1;
+        } catch (error) {
+          progress.pagesFailed += 1;
+          this.logger.warn(
+            `Failed page ${task.url} in scan ${scan.id}: ${String(error)}`,
+          );
+        } finally {
+          await page.close();
+          await this.persistProgress(scan.id, progress);
+        }
+      });
     } finally {
       await context.close();
     }
@@ -268,7 +264,7 @@ export class ScanProcessor extends WorkerHost {
             } catch (error) {
               progress.pagesFailed += 1;
               this.logger.warn(
-                `Failed page ${request.url} in crawl scan ${scan.id}: ${String(error)}`,
+                `Failed page ${request.url} in scan ${scan.id}: ${String(error)}`,
               );
             }
 
@@ -281,8 +277,10 @@ export class ScanProcessor extends WorkerHost {
                     document.querySelectorAll<HTMLAnchorElement>('a[href]'),
                   ).map((a) => a.href),
                 );
-              } catch {
-                // Page may have navigated or crashed during the scan; skip link discovery.
+              } catch (error) {
+                this.logger.debug(
+                  `Skipped link discovery for ${request.url} in scan ${scan.id}: ${String(error)}`,
+                );
               }
 
               if (hrefs.length > 0) {
@@ -318,7 +316,7 @@ export class ScanProcessor extends WorkerHost {
         failedRequestHandler: async ({ request }) => {
           progress.pagesFailed += 1;
           this.logger.warn(
-            `Failed page ${request.url} in crawl scan ${scan.id} after retries`,
+            `Failed page ${request.url} in scan ${scan.id} after retries`,
           );
           await this.persistProgress(scan.id, progress);
         },
@@ -359,11 +357,8 @@ export class ScanProcessor extends WorkerHost {
     const workerCount = Math.max(1, concurrency);
 
     const runner = async () => {
-      while (true) {
-        const currentIndex = cursor;
-        cursor += 1;
-        if (currentIndex >= queue.length) return;
-        await worker(queue[currentIndex]);
+      while (cursor < queue.length) {
+        await worker(queue[cursor++]);
       }
     };
 

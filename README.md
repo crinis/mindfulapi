@@ -4,6 +4,10 @@ A self-hosted REST API for automated web accessibility scanning, powered by [axe
 
 MindfulAPI was built to serve as the external accessibility scanner backend for the TYPO3 extension [crinis/mindfula11y](https://github.com/crinis/mindfula11y), but it can be used standalone or integrated with any other client.
 
+> **Disclaimer**
+> - Significant parts of this application were generated or refined with the help of AI tools.
+> - Run MindfulAPI only in a secure environment and apply proper hardening before exposing it publicly.
+
 ## Features
 
 - **Axe-core scanning** — industry-standard accessibility rules mapped to WCAG 2 / Section 508

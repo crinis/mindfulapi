@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
+import * as express from 'express';
 import { AppModule } from './app.module';
 
 /**
@@ -10,7 +11,11 @@ import { AppModule } from './app.module';
  * Initializes security middleware, validation, OpenAPI documentation, and HTTP server startup.
  */
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
+
+  // Explicit body size limits to prevent oversized payloads.
+  app.use(express.json({ limit: '1mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
   // Security headers: X-Content-Type-Options, X-Frame-Options, HSTS, etc.
   app.use(helmet());
