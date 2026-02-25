@@ -6,7 +6,6 @@ import { ScanStatus } from '../enums/scan-status.enum';
 
 const makeScan = (id: number): Partial<Scan> => ({
   id,
-  url: 'https://example.com',
   status: ScanStatus.COMPLETED,
   createdAt: new Date('2020-01-01'),
   updatedAt: new Date('2020-01-01'),

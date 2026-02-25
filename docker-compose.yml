@@ -2,7 +2,6 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    # user: "1001:1001" # Removed to avoid permission issues with /data volume
     volumes:
       - redis_data:/data
     healthcheck:
@@ -15,27 +14,26 @@ services:
   playwright:
     image: mcr.microsoft.com/playwright:v1.56.1-noble
     restart: unless-stopped
-    # user: "1001:1001"
-    # Based on guidance for Docker deployment: https://playwright.dev/docs/docker.
-    # Not needed for podman as it seems.
-    #security_opt:
-    #  - "seccomp=./seccomp_profile.json"
     command:
       - /bin/sh
       - -c
       - "npx -y playwright@1.56.1 run-server --port 3000 --host 0.0.0.0"
-    networks:
-      - default
-      - ddev_default
+    healthcheck:
+      # The Playwright server accepts WebSocket upgrades; a plain HTTP request
+      # returns 400 (not 200), which is enough to confirm it is alive.
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   mindfulapi:
     image: ghcr.io/crinis/mindfulapi:latest
     build:
       context: .
       dockerfile: Dockerfile
-    # user: "1001:1001"
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:3000"
     environment:
       - NODE_ENV=production
       - DATABASE_PATH=/data/database.sqlite
@@ -44,26 +42,20 @@ services:
       - REDIS_PORT=6379
       - PORT=3000
       - AUTH_TOKEN=${AUTH_TOKEN:-changeme}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      - IGNORE_HTTPS_ERRORS=${IGNORE_HTTPS_ERRORS:-false}
       - CLEANUP_ENABLED=${CLEANUP_ENABLED:-true}
       - CLEANUP_RETENTION_DAYS=${CLEANUP_RETENTION_DAYS:-30}
       - CLEANUP_INTERVAL=${CLEANUP_INTERVAL:-0 2 * * *}
-      - IGNORE_HTTPS_ERRORS=true
+      - CRAWL_CONCURRENCY=${CRAWL_CONCURRENCY:-4}
     volumes:
       - mindfulapi_data:/data
     depends_on:
       redis:
         condition: service_healthy
       playwright:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
-    networks:
-      - default
-      - ddev_default
-
-networks:
-  ddev_default:
-    external: true
-    name: ddev_default
 
 volumes:
   redis_data:

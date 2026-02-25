@@ -17,7 +17,8 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config ./test/jest-e2e.json --forceExit",
-    "test:e2e:cov": "jest --config ./test/jest-e2e.json --forceExit --coverage --collectCoverageFrom='src/controllers/**/*.ts' --collectCoverageFrom='src/services/scan.service.ts' --collectCoverageFrom='src/services/rules.service.ts' --collectCoverageFrom='src/services/cleanup.service.ts'"
+    "test:e2e:cov": "jest --config ./test/jest-e2e.json --forceExit --coverage --collectCoverageFrom='src/controllers/**/*.ts' --collectCoverageFrom='src/services/scan.service.ts' --collectCoverageFrom='src/services/rules.service.ts' --collectCoverageFrom='src/services/cleanup.service.ts'",
+    "generate:openapi": "DATABASE_PATH=:memory: ts-node -r tsconfig-paths/register scripts/generate-openapi.ts"
   },
   "dependencies": {
     "@axe-core/playwright": "^4.11.1",

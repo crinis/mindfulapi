@@ -8,6 +8,7 @@ import {
 } from 'typeorm';
 import { ScanStatus } from '../enums/scan-status.enum';
 import { ScanMode } from '../enums/scan-mode.enum';
+import { CrawlStrategy } from '../enums/crawl-strategy.enum';
 import { Issue } from './issue.entity';
 
 /**
@@ -18,13 +19,6 @@ export class Scan {
   /** Primary key for the scan run. */
   @PrimaryGeneratedColumn()
   id: number;
-
-  /**
-   * Legacy-friendly primary target URL used for filtering and quick display.
-   * For single URL mode this matches the only entry in `targets`.
-   */
-  @Column()
-  url: string;
 
   /**
    * How this run resolves the set of pages to analyze.
@@ -42,8 +36,8 @@ export class Scan {
    * - url_list: explicit list
    * - crawl: seed URLs
    */
-  @Column({ type: 'simple-json', nullable: true })
-  targets?: string[];
+  @Column({ type: 'simple-json' })
+  targets: string[];
 
   /**
    * CSS selector defining the root element scope for scanning.
@@ -86,7 +80,7 @@ export class Scan {
    * Null when crawl mode is not used.
    */
   @Column({ type: 'varchar', nullable: true })
-  crawlStrategy?: string | null;
+  crawlStrategy?: CrawlStrategy | null;
 
   /**
    * Glob patterns that discovered URLs must match to be enqueued.

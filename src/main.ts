@@ -1,9 +1,10 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import * as express from 'express';
 import { AppModule } from './app.module';
+import { createOpenApiConfig } from './config/openapi.config';
 
 /**
  * Bootstrap the NestJS application.
@@ -28,26 +29,7 @@ async function bootstrap() {
     }),
   );
 
-  const config = new DocumentBuilder()
-    .setTitle('MindfulAPI')
-    .setDescription(
-      'Automated web accessibility scanning API powered by axe-core and Playwright. ' +
-        'Built for use with the [mindfula11y](https://github.com/crinis/mindfula11y) TYPO3 extension.',
-    )
-    .setVersion('1.0')
-    .addTag('Scans', 'Create and inspect accessibility scan runs')
-    .addTag('Rules', 'List available axe-core rules and metadata')
-    .addTag('Cleanup', 'Manage retention cleanup lifecycle')
-    .addBearerAuth({
-      description:
-        'Set the AUTH_TOKEN environment variable to enable authentication. Leave unset for open access.',
-      type: 'http',
-      scheme: 'bearer',
-    })
-    .addServer('/', 'Current environment')
-    .build();
-
-  const document = SwaggerModule.createDocument(app, config);
+  const document = SwaggerModule.createDocument(app, createOpenApiConfig());
   SwaggerModule.setup('api', app, document, {
     jsonDocumentUrl: 'api-json',
     yamlDocumentUrl: 'api-yaml',

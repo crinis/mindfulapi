@@ -225,7 +225,7 @@ export class ScanProcessor extends WorkerHost {
     const maxPages = scan.crawlMaxPages ?? DEFAULT_CRAWL_OPTIONS.maxPages;
     const maxDepth = scan.crawlMaxDepth ?? DEFAULT_CRAWL_OPTIONS.maxDepth;
     const strategy = (scan.crawlStrategy ??
-      DEFAULT_CRAWL_OPTIONS.strategy) as EnqueueStrategy;
+      DEFAULT_CRAWL_OPTIONS.strategy) as unknown as EnqueueStrategy;
     const globs = scan.crawlGlobs || [];
     const excludeGlobs = scan.crawlExcludeGlobs || [];
     const concurrency = resolveConcurrency();
@@ -353,7 +353,7 @@ export class ScanProcessor extends WorkerHost {
    * Returns normalized target URLs for the scan regardless of stored shape.
    */
   private resolveScanTargets(scan: Scan): string[] {
-    return normalizeAndDedupeHttpUrls(scan.targets || [scan.url]);
+    return normalizeAndDedupeHttpUrls(scan.targets);
   }
 
   /**

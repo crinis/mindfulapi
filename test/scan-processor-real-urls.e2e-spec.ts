@@ -5,9 +5,11 @@ import { Scan } from '../src/entities/scan.entity';
 import { Issue } from '../src/entities/issue.entity';
 import { ScanMode } from '../src/enums/scan-mode.enum';
 import { ScanStatus } from '../src/enums/scan-status.enum';
+import { CrawlStrategy } from '../src/enums/crawl-strategy.enum';
 import { BrowserService } from '../src/services/browser.service';
 import { AxeAccessibilityScanner } from '../src/services/axe-accessibility-scanner.service';
 import { ScanProcessor } from '../src/services/scan.processor';
+import { BasicAuthCryptoService } from '../src/services/basic-auth-crypto.service';
 import {
   FixtureSiteServer,
   startFixtureSiteServer,
@@ -50,6 +52,7 @@ describe('ScanProcessor real URL integration', () => {
       issueRepository,
       browserService,
       scanner,
+      new BasicAuthCryptoService(),
     );
   });
 
@@ -68,7 +71,6 @@ describe('ScanProcessor real URL integration', () => {
     const indexUrl = localUrl('/index.html');
     const scan = await createPendingScan({
       mode: ScanMode.SINGLE_URL,
-      url: indexUrl,
       targets: [indexUrl],
     });
 
@@ -100,7 +102,6 @@ describe('ScanProcessor real URL integration', () => {
     const aboutUrl = localUrl('/about.html');
     const scan = await createPendingScan({
       mode: ScanMode.URL_LIST,
-      url: indexUrl,
       targets: [indexUrl, aboutUrl],
     });
 
@@ -132,11 +133,10 @@ describe('ScanProcessor real URL integration', () => {
 
     const scan = await createPendingScan({
       mode: ScanMode.CRAWL,
-      url: indexUrl,
       targets: [indexUrl],
       crawlMaxPages: 10,
       crawlMaxDepth: 3,
-      crawlStrategy: 'same-hostname',
+      crawlStrategy: CrawlStrategy.SameHostname,
       crawlGlobs: null,
       crawlExcludeGlobs: null,
     });
@@ -172,7 +172,6 @@ describe('ScanProcessor real URL integration', () => {
 
   async function createPendingScan(overrides: Partial<Scan>): Promise<Scan> {
     const scan = scanRepository.create({
-      url: localUrl('/index.html'),
       mode: ScanMode.SINGLE_URL,
       targets: [localUrl('/index.html')],
       rootElement: undefined,

@@ -41,6 +41,7 @@ import { Scan } from '../entities/scan.entity';
 import { ScanMode } from '../enums/scan-mode.enum';
 import { ScanStatus } from '../enums/scan-status.enum';
 import { IssueImpact } from '../enums/issue-impact.enum';
+import { CrawlStrategy } from '../enums/crawl-strategy.enum';
 
 type MockRepo = {
   findOne: jest.Mock;
@@ -53,7 +54,6 @@ type MockRepo = {
 const makeScan = (overrides: Partial<Scan> = {}): Scan =>
   ({
     id: 1,
-    url: 'https://example.com',
     mode: ScanMode.SINGLE_URL,
     targets: ['https://example.com'],
     rootElement: undefined,
@@ -255,7 +255,7 @@ describe('ScanProcessor', () => {
         targets: ['https://example.com'],
         crawlMaxPages: 2,
         crawlMaxDepth: 1,
-        crawlStrategy: 'same-hostname',
+        crawlStrategy: CrawlStrategy.SameHostname,
         crawlGlobs: ['https://example.com/**'],
         crawlExcludeGlobs: ['**/admin/**'],
       }),

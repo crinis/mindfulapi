@@ -10,6 +10,7 @@ import { ScanStatus } from '../enums/scan-status.enum';
 import { IssueImpact } from '../enums/issue-impact.enum';
 import { CreateScanDto } from '../dto/scan/request';
 import { ScanMode } from '../enums/scan-mode.enum';
+import { CrawlStrategy } from '../enums/crawl-strategy.enum';
 
 const makeIssue = (overrides: Partial<Issue> = {}): Issue =>
   ({
@@ -28,7 +29,6 @@ const makeIssue = (overrides: Partial<Issue> = {}): Issue =>
 const makeScan = (overrides: Partial<Scan> = {}): Scan =>
   ({
     id: 1,
-    url: 'https://example.com',
     mode: ScanMode.SINGLE_URL,
     targets: ['https://example.com'],
     rootElement: undefined,
@@ -99,7 +99,6 @@ describe('ScanService', () => {
       const result = await service.create(dto);
 
       expect(mockRepo.create).toHaveBeenCalledWith({
-        url: 'https://example.com/',
         mode: ScanMode.SINGLE_URL,
         targets: ['https://example.com/'],
         rootElement: undefined,
@@ -133,7 +132,7 @@ describe('ScanService', () => {
         targets: ['https://example.com/'],
         crawlMaxPages: 250,
         crawlMaxDepth: 4,
-        crawlStrategy: 'same-hostname',
+        crawlStrategy: CrawlStrategy.SameHostname,
         crawlGlobs: null,
         crawlExcludeGlobs: null,
       });
@@ -222,7 +221,6 @@ describe('ScanService', () => {
         expect.objectContaining({
           mode: ScanMode.URL_LIST,
           targets: ['https://example.com/', 'https://example.com/about'],
-          url: 'https://example.com/',
         }),
       );
     });

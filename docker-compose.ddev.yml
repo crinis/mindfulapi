@@ -1,0 +1,27 @@
+# Compose override for DDEV / TYPO3 integration.
+#
+# Attaches the playwright and mindfulapi services to the external `ddev_default`
+# network so that the API can scan pages served at *.ddev.site addresses.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.ddev.yml up -d
+#
+# Or set the COMPOSE_FILE variable in your shell so plain `docker compose` picks
+# both files up automatically:
+#   export COMPOSE_FILE=docker-compose.yml:docker-compose.ddev.yml
+
+services:
+  playwright:
+    networks:
+      - default
+      - ddev_default
+
+  mindfulapi:
+    networks:
+      - default
+      - ddev_default
+
+networks:
+  ddev_default:
+    external: true
+    name: ddev_default

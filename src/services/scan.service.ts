@@ -14,7 +14,6 @@ import {
 } from '../dto/scan/request';
 import { ScanStatus } from '../enums/scan-status.enum';
 import { ScanMode } from '../enums/scan-mode.enum';
-import { CrawlStrategy } from '../enums/crawl-strategy.enum';
 import { ScanQueueService } from './scan-queue.service';
 import { BasicAuth } from './axe-accessibility-scanner.service';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
@@ -73,7 +72,6 @@ export class ScanService {
         )
       : null;
     const scan = this.scanRepository.create({
-      url: normalized.targets[0],
       mode: normalized.mode,
       targets: normalized.targets,
       rootElement: normalized.scanOptions.rootElement || undefined,
@@ -388,7 +386,7 @@ export class ScanService {
     return {
       id: scan.id,
       mode: scan.mode,
-      targets: scan.targets || [scan.url],
+      targets: scan.targets,
       status: scan.status,
       scanOptions: {
         rootElement: scan.rootElement ?? null,
@@ -400,7 +398,7 @@ export class ScanService {
               maxPages: scan.crawlMaxPages ?? DEFAULT_CRAWL_OPTIONS.maxPages,
               maxDepth: scan.crawlMaxDepth ?? DEFAULT_CRAWL_OPTIONS.maxDepth,
               strategy:
-                (scan.crawlStrategy as CrawlStrategy) ??
+                scan.crawlStrategy ??
                 DEFAULT_CRAWL_OPTIONS.strategy,
               globs: scan.crawlGlobs || [],
               excludeGlobs: scan.crawlExcludeGlobs || [],
