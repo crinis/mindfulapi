@@ -12,6 +12,9 @@ services:
     command: redis-server --appendonly yes
 
   playwright:
+    # IMPORTANT: keep this image version and the playwright@x.y.z in the
+    # command below in sync with the "playwright" dependency in package.json.
+    # A version mismatch will lead to failures.
     image: mcr.microsoft.com/playwright:v1.56.1-noble
     restart: unless-stopped
     command:
