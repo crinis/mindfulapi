@@ -9,7 +9,7 @@ import { Issue } from '../entities/issue.entity';
  * @returns Fully resolved TypeORM module options.
  */
 export const createDatabaseConfig = (): TypeOrmModuleOptions => ({
-  type: 'sqlite',
+  type: 'better-sqlite3',
   database: process.env.DATABASE_PATH || './data/database.sqlite',
   entities: [Scan, Issue],
   synchronize: true,

@@ -110,7 +110,7 @@ export class ScanService {
       : null;
 
     const scans = await this.scanRepository.find({
-      relations: ['issues'],
+      relations: { issues: true },
       order: { createdAt: 'DESC' },
     });
 
@@ -135,7 +135,7 @@ export class ScanService {
   async findOne(id: number, pageUrls?: string[]): Promise<ScanResponseDto> {
     const scan = await this.scanRepository.findOne({
       where: { id },
-      relations: ['issues'],
+      relations: { issues: true },
     });
 
     if (!scan) {
@@ -147,9 +147,15 @@ export class ScanService {
       : null;
 
     if (pageUrlSet?.size) {
-      scan.issues = scan.issues.filter(
-        (issue) => issue.pageUrl != null && pageUrlSet.has(issue.pageUrl),
-      );
+      scan.issues = scan.issues.filter((issue) => {
+        const normalizedIssuePageUrl = issue.pageUrl
+          ? normalizeHttpUrl(issue.pageUrl)
+          : null;
+        return (
+          normalizedIssuePageUrl != null &&
+          pageUrlSet.has(normalizedIssuePageUrl)
+        );
+      });
     }
 
     return this.enrichScanData(scan);
@@ -164,7 +170,7 @@ export class ScanService {
   async remove(id: number): Promise<void> {
     const scan = await this.scanRepository.findOne({
       where: { id },
-      relations: ['issues'],
+      relations: { issues: true },
     });
 
     if (!scan) {

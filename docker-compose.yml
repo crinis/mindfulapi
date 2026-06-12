@@ -15,12 +15,12 @@ services:
     # IMPORTANT: keep this image version and the playwright@x.y.z in the
     # command below in sync with the "playwright" dependency in package.json.
     # A version mismatch will lead to failures.
-    image: mcr.microsoft.com/playwright:v1.56.1-noble
+    image: mcr.microsoft.com/playwright:v1.60.0-noble
     restart: unless-stopped
     command:
       - /bin/sh
       - -c
-      - "npx -y playwright@1.56.1 run-server --port 3000 --host 0.0.0.0"
+      - "npx -y playwright@1.60.0 run-server --port 3000 --host 0.0.0.0"
     healthcheck:
       # The Playwright server accepts WebSocket upgrades; a plain HTTP request
       # returns 400 (not 200), which is enough to confirm it is alive.

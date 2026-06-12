@@ -77,7 +77,7 @@ describe('CleanupService', () => {
       expect(mockRepo.find).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ createdAt: expect.any(Object) }),
-          select: ['id'],
+          select: { id: true },
         }),
       );
       expect(mockRepo.delete).toHaveBeenCalledWith([1, 2]);

@@ -9,6 +9,7 @@ import { AppModule } from '../src/app.module';
 import { QueueModule } from '../src/modules/queue.module';
 import { ScanQueueService } from '../src/services/scan-queue.service';
 import { BrowserService } from '../src/services/browser.service';
+import { BasicAuthCryptoService } from '../src/services/basic-auth-crypto.service';
 import { Scan } from '../src/entities/scan.entity';
 import { Issue } from '../src/entities/issue.entity';
 import { ScanStatus } from '../src/enums/scan-status.enum';
@@ -36,8 +37,9 @@ const mockPage = {
         getBrowser: jest.fn().mockResolvedValue({ newPage: jest.fn().mockResolvedValue(mockPage) }),
       },
     },
+    BasicAuthCryptoService,
   ],
-  exports: [ScanQueueService, BrowserService],
+  exports: [ScanQueueService, BrowserService, BasicAuthCryptoService],
 })
 class MockQueueModule {}
 
@@ -401,7 +403,7 @@ describe('MindfulAPI (e2e)', () => {
     it('filters violations to a single matching pageUrl', async () => {
       const url = 'https://seeded.example.com';
       const { body } = await request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}?pageUrl=${encodeURIComponent(url)}`)
+        .get(`/scans/${seededScan.id}?pageUrls=${encodeURIComponent(url)}`)
         .set(authHeader())
         .expect(200);
 
@@ -417,7 +419,7 @@ describe('MindfulAPI (e2e)', () => {
       const url2 = 'https://seeded.example.com/about';
       const { body } = await request(app.getHttpServer())
         .get(
-          `/scans/${seededScan.id}?pageUrl=${encodeURIComponent(url1)}&pageUrl=${encodeURIComponent(url2)}`,
+          `/scans/${seededScan.id}?pageUrls=${encodeURIComponent(url1)}&pageUrls=${encodeURIComponent(url2)}`,
         )
         .set(authHeader())
         .expect(200);
@@ -432,7 +434,7 @@ describe('MindfulAPI (e2e)', () => {
 
     it('returns empty violations when pageUrl matches no issues', async () => {
       const { body } = await request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}?pageUrl=https://no-match.example.com/`)
+        .get(`/scans/${seededScan.id}?pageUrls=https://no-match.example.com/`)
         .set(authHeader())
         .expect(200);
 
@@ -442,7 +444,7 @@ describe('MindfulAPI (e2e)', () => {
 
     it('returns 400 for invalid pageUrl query param', () =>
       request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}?pageUrl=not-a-url`)
+        .get(`/scans/${seededScan.id}?pageUrls=not-a-url`)
         .set(authHeader())
         .expect(400));
   });

@@ -67,7 +67,7 @@ export class CleanupService {
 
     const scans = await this.scanRepository.find({
       where: { createdAt: LessThan(cutoffDate) },
-      select: ['id'],
+      select: { id: true },
     });
 
     if (scans.length === 0) {

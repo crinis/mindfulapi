@@ -34,7 +34,7 @@ describe('ScanProcessor real URL integration', () => {
     );
 
     dataSource = new DataSource({
-      type: 'sqlite',
+      type: 'better-sqlite3',
       database: ':memory:',
       entities: [Scan, Issue],
       synchronize: true,
@@ -78,7 +78,7 @@ describe('ScanProcessor real URL integration', () => {
 
     const completed = await scanRepository.findOne({
       where: { id: scan.id },
-      relations: ['issues'],
+      relations: { issues: true },
     });
 
     expect(completed).toBeTruthy();
@@ -109,7 +109,7 @@ describe('ScanProcessor real URL integration', () => {
 
     const completed = await scanRepository.findOne({
       where: { id: scan.id },
-      relations: ['issues'],
+      relations: { issues: true },
     });
 
     expect(completed).toBeTruthy();
@@ -145,7 +145,7 @@ describe('ScanProcessor real URL integration', () => {
 
     const completed = await scanRepository.findOne({
       where: { id: scan.id },
-      relations: ['issues'],
+      relations: { issues: true },
     });
 
     expect(completed).toBeTruthy();

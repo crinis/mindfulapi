@@ -234,7 +234,7 @@ describe('ScanService', () => {
       const result = await service.findAll();
 
       expect(mockRepo.find).toHaveBeenCalledWith({
-        relations: ['issues'],
+        relations: { issues: true },
         order: { createdAt: 'DESC' },
       });
       expect(result).toHaveLength(2);
