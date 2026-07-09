@@ -33,7 +33,11 @@ import {
 import { DiscriminatedBodyPipe } from '../pipes/discriminated-body.pipe';
 import { ScanQueryDto } from '../dto/scan-query.dto';
 import { ScanByIdQueryDto } from '../dto/scan-by-id-query.dto';
-import { ScanResponseDto } from '../dto/scan/response';
+import { ScanResponseDto, ScanSummaryResponseDto } from '../dto/scan/response';
+import {
+  ApiPaginatedResponse,
+  PaginatedResponseDto,
+} from '../dto/pagination/paginated-response.dto';
 import { ApiProblemResponses } from '../decorators/api-problem-responses.decorator';
 import { Response } from 'express';
 
@@ -94,24 +98,23 @@ export class ScanController {
   @Get()
   @ApiOperation({
     operationId: 'listScans',
-    summary: 'List all scan runs',
+    summary: 'List scan runs',
     description:
-      'Returns all scan runs ordered by creation date, newest first. Use the optional `target` query parameter to filter runs by one of their input targets.',
+      'Returns a page of scan run summaries ordered by creation date, newest first. Summaries omit per-issue detail and expose per-severity issue counts instead. Use `limit`/`offset` to paginate and the optional `target` query parameter to filter runs by one of their input targets.',
   })
-  @ApiResponse({
-    status: 200,
-    description: 'Array of scans',
-    type: ScanResponseDto,
-    isArray: true,
-  })
+  @ApiPaginatedResponse(ScanSummaryResponseDto)
   @ApiProblemResponses(400, 401, 429, 500)
   /**
-   * Returns all scan runs, optionally filtered by a normalized target URL.
+   * Returns a page of scan summaries, optionally filtered by a normalized target URL.
    */
-  async findAll(@Query() query: ScanQueryDto): Promise<ScanResponseDto[]> {
-    return this.scanService.findAll(
-      query.target ? { target: query.target } : undefined,
-    );
+  async findAll(
+    @Query() query: ScanQueryDto,
+  ): Promise<PaginatedResponseDto<ScanSummaryResponseDto>> {
+    return this.scanService.findAll({
+      limit: query.limit,
+      offset: query.offset,
+      target: query.target,
+    });
   }
 
   @Get(':id')

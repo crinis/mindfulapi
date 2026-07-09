@@ -27,6 +27,7 @@ import { Issue } from '../src/entities/issue.entity';
 import { ScanStatus } from '../src/enums/scan-status.enum';
 import { IssueImpact } from '../src/enums/issue-impact.enum';
 import { ScanMode } from '../src/enums/scan-mode.enum';
+import { normalizeHttpUrl } from '../src/utils/url-normalization.util';
 
 const mockAddScanJob = jest.fn().mockResolvedValue(undefined);
 
@@ -74,13 +75,16 @@ function authHeader(token = 'testtoken') {
 
 async function seedCompletedScan(
   dataSource: DataSource,
-  url = 'https://seeded.example.com',
+  rawUrl = 'https://seeded.example.com',
 ): Promise<Scan> {
   const scanRepo = dataSource.getRepository(Scan);
   const issueRepo = dataSource.getRepository(Issue);
 
+  // Mirror production, which normalizes targets and issue pageUrls at insert.
+  const url = normalizeHttpUrl(rawUrl)!;
+  const aboutUrl = normalizeHttpUrl(`${rawUrl}/about`)!;
+
   const scan = await scanRepo.save({
-    url,
     mode: ScanMode.SINGLE_URL,
     targets: [url],
     status: ScanStatus.COMPLETED,
@@ -117,7 +121,7 @@ async function seedCompletedScan(
       ruleId: 'image-alt',
       description: 'Images must have alternative text',
       impact: IssueImpact.CRITICAL,
-      pageUrl: `${url}/about`,
+      pageUrl: aboutUrl,
       selector: 'img',
       context: '<img src="logo.png">',
       helpUrl:
@@ -399,28 +403,63 @@ describe('MindfulAPI (e2e)', () => {
   });
 
   describe('GET /scans', () => {
-    it('returns runs with the unified response shape', async () => {
+    it('returns a paginated envelope of summaries', async () => {
       const { body } = await request(app.getHttpServer())
         .get('/v1/scans')
         .set(authHeader())
         .expect(200);
 
-      expect(body.length).toBeGreaterThan(0);
-      for (const run of body) {
+      expect(body).toHaveProperty('items');
+      expect(body).toHaveProperty('total');
+      expect(body).toHaveProperty('limit');
+      expect(body).toHaveProperty('offset');
+      expect(Array.isArray(body.items)).toBe(true);
+      expect(body.items.length).toBeGreaterThan(0);
+      for (const run of body.items) {
         expect(run).toHaveProperty('id');
         expect(run).toHaveProperty('mode');
         expect(run).toHaveProperty('targets');
         expect(run).toHaveProperty('status');
         expect(run).toHaveProperty('scanOptions');
         expect(run).toHaveProperty('progress');
-        expect(run).toHaveProperty('violations');
+        expect(run).toHaveProperty('issueCounts');
         expect(run).toHaveProperty('totalIssueCount');
         expect(run).toHaveProperty('createdAt');
         expect(run).toHaveProperty('updatedAt');
-        expect(run).not.toHaveProperty('language');
-        expect(run).not.toHaveProperty('scannerType');
+        // Summaries omit the heavy per-issue violations array.
+        expect(run).not.toHaveProperty('violations');
       }
     });
+
+    it('reports issue counts by severity for the seeded scan', async () => {
+      const { body } = await request(app.getHttpServer())
+        .get('/v1/scans?target=https://seeded.example.com')
+        .set(authHeader())
+        .expect(200);
+
+      const seeded = body.items.find(
+        (run: { id: number }) => run.id === seededScan.id,
+      );
+      expect(seeded.issueCounts.serious).toBe(2);
+      expect(seeded.issueCounts.critical).toBe(1);
+      expect(seeded.totalIssueCount).toBe(3);
+    });
+
+    it('honors limit and offset', async () => {
+      const { body } = await request(app.getHttpServer())
+        .get('/v1/scans?limit=1&offset=0')
+        .set(authHeader())
+        .expect(200);
+
+      expect(body.limit).toBe(1);
+      expect(body.items).toHaveLength(1);
+    });
+
+    it('returns 400 for an out-of-range limit', () =>
+      request(app.getHttpServer())
+        .get('/v1/scans?limit=9999')
+        .set(authHeader())
+        .expect(400));
 
     it('filters by target URL', async () => {
       const { body } = await request(app.getHttpServer())
@@ -428,9 +467,9 @@ describe('MindfulAPI (e2e)', () => {
         .set(authHeader())
         .expect(200);
 
-      expect(body.length).toBeGreaterThanOrEqual(1);
-      for (const run of body) {
-        expect(run.targets).toContain('https://seeded.example.com');
+      expect(body.items.length).toBeGreaterThanOrEqual(1);
+      for (const run of body.items) {
+        expect(run.targets).toContain('https://seeded.example.com/');
       }
     });
 
@@ -479,6 +518,7 @@ describe('MindfulAPI (e2e)', () => {
 
     it('filters violations to a single matching pageUrl', async () => {
       const url = 'https://seeded.example.com';
+      const normalized = normalizeHttpUrl(url);
       const { body } = await request(app.getHttpServer())
         .get(`/v1/scans/${seededScan.id}?pageUrls=${encodeURIComponent(url)}`)
         .set(authHeader())
@@ -486,7 +526,7 @@ describe('MindfulAPI (e2e)', () => {
 
       for (const violation of body.violations) {
         for (const issue of violation.issues) {
-          expect(issue.pageUrl).toBe(url);
+          expect(issue.pageUrl).toBe(normalized);
         }
       }
     });
@@ -494,6 +534,7 @@ describe('MindfulAPI (e2e)', () => {
     it('filters violations to any of multiple pageUrls when repeated params are provided', async () => {
       const url1 = 'https://seeded.example.com';
       const url2 = 'https://seeded.example.com/about';
+      const normalized = [normalizeHttpUrl(url1), normalizeHttpUrl(url2)];
       const { body } = await request(app.getHttpServer())
         .get(
           `/v1/scans/${seededScan.id}?pageUrls=${encodeURIComponent(url1)}&pageUrls=${encodeURIComponent(url2)}`,
@@ -504,7 +545,7 @@ describe('MindfulAPI (e2e)', () => {
       expect(body.totalIssueCount).toBe(3);
       for (const violation of body.violations) {
         for (const issue of violation.issues) {
-          expect([url1, url2]).toContain(issue.pageUrl);
+          expect(normalized).toContain(issue.pageUrl);
         }
       }
     });

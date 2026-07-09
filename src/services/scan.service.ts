@@ -4,9 +4,10 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
+import { IssueImpact } from '../enums/issue-impact.enum';
 import {
   CreateScanRequest,
   CreateSingleUrlScanDto,
@@ -21,7 +22,12 @@ import { ScanQueueService } from './scan-queue.service';
 import { BasicAuth } from './axe-accessibility-scanner.service';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
 import { UrlPolicyService } from './url-policy.service';
-import { ScanResponseDto } from '../dto/scan/response';
+import {
+  ScanResponseDto,
+  ScanSummaryResponseDto,
+  IssueCountsDto,
+} from '../dto/scan/response';
+import { PaginatedResponseDto } from '../dto/pagination/paginated-response.dto';
 import { DEFAULT_CRAWL_OPTIONS } from '../constants/crawl-options.constants';
 import {
   normalizeAndDedupeHttpUrls,
@@ -58,6 +64,8 @@ export class ScanService {
   constructor(
     @InjectRepository(Scan)
     private readonly scanRepository: Repository<Scan>,
+    @InjectRepository(Issue)
+    private readonly issueRepository: Repository<Issue>,
     private readonly scanQueueService: ScanQueueService,
     private readonly basicAuthCryptoService: BasicAuthCryptoService,
     private readonly urlPolicyService: UrlPolicyService,
@@ -105,22 +113,38 @@ export class ScanService {
   }
 
   /**
-   * Lists scan runs, optionally filtered by a specific target URL.
+   * Lists scan runs as lightweight summaries (no per-issue detail), paginated
+   * and ordered by creation date descending.
    *
-   * @param options Optional list filters.
-   * @returns Enriched scan response objects sorted by creation date descending.
+   * @param options Pagination bounds and optional target filter.
+   * @returns A page of scan summaries with per-severity issue counts.
    */
-  async findAll(options?: { target?: string }): Promise<ScanResponseDto[]> {
-    const normalizedTarget = options?.target
+  async findAll(options: {
+    limit: number;
+    offset: number;
+    target?: string;
+  }): Promise<PaginatedResponseDto<ScanSummaryResponseDto>> {
+    const normalizedTarget = options.target
       ? normalizeHttpUrl(options.target)
       : null;
 
-    const scans = await this.scanRepository.find({
-      relations: { issues: true },
-      order: { createdAt: 'DESC' },
-    });
+    const query = this.scanRepository
+      .createQueryBuilder('scan')
+      .orderBy('scan.createdAt', 'DESC')
+      .skip(options.offset)
+      .take(options.limit);
 
-    const filtered = normalizedTarget
+    if (normalizedTarget) {
+      // Narrow in SQL against the simple-json text column, then confirm the
+      // exact normalized match in JS to eliminate LIKE false positives.
+      query.andWhere('scan.targets LIKE :target', {
+        target: `%${normalizedTarget}%`,
+      });
+    }
+
+    const [scans, total] = await query.getManyAndCount();
+
+    const confirmed = normalizedTarget
       ? scans.filter((scan) =>
           (scan.targets || []).some(
             (target) => normalizeHttpUrl(target) === normalizedTarget,
@@ -128,43 +152,141 @@ export class ScanService {
         )
       : scans;
 
-    return filtered.map((scan) => this.enrichScanData(scan));
+    const countsByScan = await this.issueCountsForScans(
+      confirmed.map((scan) => scan.id),
+    );
+
+    return {
+      items: confirmed.map((scan) =>
+        this.toSummary(scan, countsByScan.get(scan.id)),
+      ),
+      total,
+      limit: options.limit,
+      offset: options.offset,
+    };
   }
 
   /**
-   * Retrieves one scan run by ID.
+   * Retrieves one scan run by ID with full grouped violations.
    *
    * @param id Scan run identifier.
    * @param pageUrls Optional page URL filters used to include only matching issues.
    * @throws NotFoundException When no run exists for the given ID.
    */
   async findOne(id: number, pageUrls?: string[]): Promise<ScanResponseDto> {
-    const scan = await this.scanRepository.findOne({
-      where: { id },
-      relations: { issues: true },
-    });
+    const scan = await this.scanRepository.findOne({ where: { id } });
 
     if (!scan) {
       throw new NotFoundException(`Scan with ID ${id} not found`);
     }
 
-    const pageUrlSet = pageUrls?.length
-      ? new Set(normalizeAndDedupeHttpUrls(pageUrls))
+    const normalizedPageUrls = pageUrls?.length
+      ? normalizeAndDedupeHttpUrls(pageUrls)
       : null;
 
-    if (pageUrlSet?.size) {
-      scan.issues = scan.issues.filter((issue) => {
-        const normalizedIssuePageUrl = issue.pageUrl
-          ? normalizeHttpUrl(issue.pageUrl)
-          : null;
-        return (
-          normalizedIssuePageUrl != null &&
-          pageUrlSet.has(normalizedIssuePageUrl)
-        );
+    // Issues are persisted with normalized pageUrls, so the filter runs in SQL.
+    scan.issues = await this.issueRepository.find({
+      where: {
+        scan: { id },
+        ...(normalizedPageUrls?.length
+          ? { pageUrl: In(normalizedPageUrls) }
+          : {}),
+      },
+    });
+
+    return this.enrichScanData(scan);
+  }
+
+  /**
+   * Aggregates issue counts per scan and severity in a single grouped query.
+   *
+   * @param scanIds Scans to count issues for.
+   * @returns Map of scanId → severity counts.
+   */
+  private async issueCountsForScans(
+    scanIds: number[],
+  ): Promise<Map<number, IssueCountsDto>> {
+    const result = new Map<number, IssueCountsDto>();
+    if (scanIds.length === 0) {
+      return result;
+    }
+
+    const rows = await this.issueRepository
+      .createQueryBuilder('issue')
+      .select('issue.scanId', 'scanId')
+      .addSelect('issue.impact', 'impact')
+      .addSelect('COUNT(*)', 'count')
+      .where('issue.scanId IN (:...scanIds)', { scanIds })
+      .groupBy('issue.scanId')
+      .addGroupBy('issue.impact')
+      .getRawMany<{ scanId: number; impact: IssueImpact; count: string }>();
+
+    for (const scanId of scanIds) {
+      result.set(scanId, {
+        critical: 0,
+        serious: 0,
+        moderate: 0,
+        minor: 0,
       });
     }
 
-    return this.enrichScanData(scan);
+    for (const row of rows) {
+      const counts = result.get(Number(row.scanId));
+      if (counts && row.impact in counts) {
+        counts[row.impact] = Number(row.count);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Builds a list-view summary from a scan and its precomputed issue counts.
+   */
+  private toSummary(
+    scan: Scan,
+    counts: IssueCountsDto | undefined,
+  ): ScanSummaryResponseDto {
+    const issueCounts = counts ?? {
+      critical: 0,
+      serious: 0,
+      moderate: 0,
+      minor: 0,
+    };
+
+    return {
+      id: scan.id,
+      mode: scan.mode,
+      targets: scan.targets,
+      status: scan.status,
+      scanOptions: {
+        rootElement: scan.rootElement ?? null,
+        ruleIds: scan.ruleIds?.length ? scan.ruleIds : null,
+      },
+      crawlOptions:
+        scan.mode === ScanMode.CRAWL
+          ? {
+              maxPages: scan.crawlMaxPages ?? DEFAULT_CRAWL_OPTIONS.maxPages,
+              maxDepth: scan.crawlMaxDepth ?? DEFAULT_CRAWL_OPTIONS.maxDepth,
+              strategy: scan.crawlStrategy ?? DEFAULT_CRAWL_OPTIONS.strategy,
+              globs: scan.crawlGlobs || [],
+              excludeGlobs: scan.crawlExcludeGlobs || [],
+            }
+          : null,
+      progress: {
+        pagesDiscovered: scan.pagesDiscovered ?? 0,
+        pagesScanned: scan.pagesScanned ?? 0,
+        pagesFailed: scan.pagesFailed ?? 0,
+      },
+      issueCounts,
+      totalIssueCount:
+        issueCounts.critical +
+        issueCounts.serious +
+        issueCounts.moderate +
+        issueCounts.minor,
+      createdAt: scan.createdAt,
+      updatedAt: scan.updatedAt,
+    };
   }
 
   /**

@@ -1,12 +1,13 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsUrl } from 'class-validator';
 import { HTTP_URL_VALIDATION_OPTIONS } from '../constants/url-validation.constants';
+import { PageQueryDto } from './pagination/page-query.dto';
 
 /**
- * Query parameters for the GET /scans list endpoint.
- * All fields are optional — omitting them returns all scans.
+ * Query parameters for the GET /scans list endpoint. Extends pagination with
+ * an optional target filter.
  */
-export class ScanQueryDto {
+export class ScanQueryDto extends PageQueryDto {
   /** Filter results to scan runs containing a specific target URL. */
   @ApiPropertyOptional({
     example: 'https://example.com',

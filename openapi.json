@@ -164,9 +164,32 @@
         ]
       },
       "get": {
-        "description": "Returns all scan runs ordered by creation date, newest first. Use the optional `target` query parameter to filter runs by one of their input targets.",
+        "description": "Returns a page of scan run summaries ordered by creation date, newest first. Summaries omit per-issue detail and expose per-severity issue counts instead. Use `limit`/`offset` to paginate and the optional `target` query parameter to filter runs by one of their input targets.",
         "operationId": "listScans",
         "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Maximum number of items to return (1-100).",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "description": "Number of items to skip.",
+            "schema": {
+              "minimum": 0,
+              "default": 0,
+              "type": "integer"
+            }
+          },
           {
             "name": "target",
             "required": false,
@@ -181,14 +204,25 @@
         ],
         "responses": {
           "200": {
-            "description": "Array of scans",
+            "description": "A page of results",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ScanResponseDto"
-                  }
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/PaginatedResponseDto"
+                    },
+                    {
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ScanSummaryResponseDto"
+                          }
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -239,7 +273,7 @@
             "bearer": []
           }
         ],
-        "summary": "List all scan runs",
+        "summary": "List scan runs",
         "tags": [
           "Scans"
         ]
@@ -1426,6 +1460,150 @@
           "type",
           "title",
           "status"
+        ]
+      },
+      "PaginatedResponseDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "example": 42,
+            "minimum": 0,
+            "description": "Total number of items matching the query."
+          },
+          "limit": {
+            "type": "integer",
+            "example": 20,
+            "minimum": 1,
+            "description": "Maximum number of items returned per page."
+          },
+          "offset": {
+            "type": "integer",
+            "example": 0,
+            "minimum": 0,
+            "description": "Number of items skipped before this page."
+          }
+        },
+        "required": [
+          "total",
+          "limit",
+          "offset"
+        ]
+      },
+      "IssueCountsDto": {
+        "type": "object",
+        "properties": {
+          "critical": {
+            "type": "integer",
+            "example": 1,
+            "minimum": 0
+          },
+          "serious": {
+            "type": "integer",
+            "example": 2,
+            "minimum": 0
+          },
+          "moderate": {
+            "type": "integer",
+            "example": 0,
+            "minimum": 0
+          },
+          "minor": {
+            "type": "integer",
+            "example": 0,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "critical",
+          "serious",
+          "moderate",
+          "minor"
+        ]
+      },
+      "ScanSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "example": 1,
+            "minimum": 1
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "single_url",
+              "url_list",
+              "crawl"
+            ],
+            "example": "crawl"
+          },
+          "targets": {
+            "type": "array",
+            "example": [
+              "https://example.com"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed"
+            ],
+            "example": "completed"
+          },
+          "scanOptions": {
+            "$ref": "#/components/schemas/ScanOptionsResponseDto"
+          },
+          "crawlOptions": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CrawlOptionsResponseDto"
+              }
+            ]
+          },
+          "progress": {
+            "$ref": "#/components/schemas/ScanProgressResponseDto"
+          },
+          "issueCounts": {
+            "$ref": "#/components/schemas/IssueCountsDto"
+          },
+          "totalIssueCount": {
+            "type": "integer",
+            "example": 3,
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string",
+            "example": "2025-06-14T10:30:00.000Z",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "example": "2025-06-14T10:31:00.000Z",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "mode",
+          "targets",
+          "status",
+          "scanOptions",
+          "crawlOptions",
+          "progress",
+          "issueCounts",
+          "totalIssueCount",
+          "createdAt",
+          "updatedAt"
         ]
       },
       "CleanupResultDto": {
