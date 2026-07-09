@@ -45,8 +45,13 @@ export interface AgentFindingDraft {
   selector?: string;
   /** Fixed per-skill verdict category. */
   category: string;
+  /** WCAG success criterion this finding maps to (e.g. `1.1.1`), if any. */
+  wcag?: string | null;
   severity: IssueImpact;
   confidence: number;
+  /** True when the verdict is low-confidence/unjudgeable and needs review. */
+  needsHumanReview?: boolean;
+  /** Human-readable description of the problem. */
   message: string;
   suggestion?: string;
   details?: Record<string, unknown> | null;
@@ -75,9 +80,16 @@ export interface AuditSkill<E extends Evidence = Evidence> {
   /** Extract + trigger-filter work units from a live page. */
   collect(page: Page, ctx: CollectContext): Promise<E[]>;
 
-  /** Judge one work unit with a single structured request. */
+  /**
+   * Judge one work unit with a single structured request, returning zero or
+   * more findings. A page-level unit (e.g. a heading outline) may surface
+   * several problems from one request; an element-level unit typically returns
+   * one. The request's token `usage` must be attributed to exactly one draft
+   * (the first) — any further drafts in the array carry zero usage — so the
+   * runner can sum `usage` across the array without double-counting one request.
+   */
   evaluate(
     evidence: E,
     harness: AgentHarnessService,
-  ): Promise<AgentFindingDraft | null>;
+  ): Promise<AgentFindingDraft[]>;
 }

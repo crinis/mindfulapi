@@ -659,8 +659,10 @@ export class ScanService {
     return {
       skill: finding.skill,
       category: finding.category,
+      wcag: finding.wcag ?? null,
       severity: finding.severity,
       confidence: finding.confidence,
+      needsHumanReview: finding.needsHumanReview ?? false,
       pageUrl: finding.pageUrl ?? null,
       selector: finding.selector ?? null,
       message: finding.message,

@@ -21,7 +21,7 @@ MindfulAPI was built to serve as the external accessibility scanner backend for 
 - **Optional authentication** — protect the API with a Bearer token, or leave it open
 - **Automated cleanup** — configurable scheduled deletion of old scan data
 - **Flexible browser setup** — connects to a remote Playwright server via WebSocket (required in Docker); falls back to a locally installed Chromium when `PLAYWRIGHT_WS_URL` is unset (local development only)
-- **Optional AI audit** — opt-in LLM-agent skills that judge what axe-core cannot (e.g. image alt-text _quality_), returned alongside the deterministic results ([details](#ai-accessibility-audit-optional))
+- **Optional AI audit** — opt-in LLM-agent skills that judge what axe-core cannot (image alt-text _quality_; heading _semantics_ up to WCAG AAA), returned alongside the deterministic results ([details](#ai-accessibility-audit-optional))
 
 ## Getting Started
 
@@ -208,7 +208,7 @@ All configuration is done via environment variables. Copy `.env.example` for a f
 | `AGENT_MODEL` | _(unset)_ | Model identifier passed to the provider (e.g. `gpt-4.1-mini`) |
 | `AGENT_API_KEY` | _(unset)_ | Provider API key; validated lazily, never logged |
 | `AGENT_BASE_URL` | _(unset)_ | Base URL for the `openai-compatible` provider (OpenRouter or a local server) |
-| `AGENT_SKILLS` | `image_alt_text` | Comma-separated skills clients may request |
+| `AGENT_SKILLS` | `image_alt_text,heading_structure,link_purpose` | Comma-separated skills clients may request |
 | `AGENT_SKILL_<ID>_{PROVIDER,MODEL,API_KEY,BASE_URL}` | _(inherits `AGENT_*`)_ | Optional per-skill model override (e.g. `AGENT_SKILL_IMAGE_ALT_TEXT_MODEL`). See [Per-skill model selection](#per-skill-model-selection) |
 | `AGENT_CONCURRENCY` | `4` | Concurrent per-image requests during evaluation (1–16) |
 | `AGENT_MAX_UNITS_PER_PAGE` | `30` | Cap on collected work units per page |
@@ -244,10 +244,20 @@ The feature is **disabled by default**. When enabled server-side, each scan stil
 
 ### How it works
 
-- **Deterministic-first triggering.** A skill only evaluates what axe cannot. The first skill, `image_alt_text`, ignores any image that axe already flags for a missing name and only judges images that _have_ an accessible name — so there is no duplicate reporting and no wasted tokens.
-- **Minimal, structured evidence.** For each candidate image the scanner collects a cropped element screenshot plus its accessible-name attributes (`alt`, `aria-label`, `aria-labelledby`, `title`, `figcaption`) while the page is live, then sends one request per image.
-- **Forced structured output.** Every request returns a fixed verdict (`appropriate`, `inaccurate`, `redundant`, `decorative_but_meaningful`, or `insufficient_evidence`) with a confidence score. Low-confidence or unjudgeable cases become `insufficient_evidence` findings flagged for human review — the model never fabricates a verdict.
+- **Deterministic-first triggering.** A skill only evaluates what axe cannot, so there is no duplicate reporting and no wasted tokens. `image_alt_text` ignores any image axe already flags for a missing name; `heading_structure` never reports skipped levels, empty headings, or a missing `<h1>` (all covered by axe); `link_purpose` only judges links that already have a name and skips identical-name/different-target links (axe's `identical-links-same-purpose`) — each judges only _semantics_.
+- **Minimal, structured evidence.** Evidence is gathered while the page is live and kept as small as possible. `image_alt_text` sends a cropped element screenshot plus accessible-name attributes, one request per image. `heading_structure` sends the page's heading outline (levels, text, a short content snippet each) plus styled-block and unheaded-section candidates as text — one request per page, no screenshot. `link_purpose` sends a deduplicated inventory of named links (accessible name, compact destination, surrounding context) — repeated nav/footer links collapse to a single line — again one text-only request per page.
+- **Forced structured output.** Every request returns a fixed verdict with a confidence score, and each finding records the WCAG success criterion it maps to. Low-confidence or unjudgeable cases become `insufficient_evidence` findings flagged for human review — the model never fabricates a verdict.
 - **New lifecycle status.** With AI audit requested, a scan progresses `pending → running` (axe) `→ analyzing` (agents) `→ completed`. Clients must tolerate the new `analyzing` status.
+
+### Skills
+
+| Skill | Granularity | Judges (WCAG) | Axe already covers (not re-reported) |
+| --- | --- | --- | --- |
+| `image_alt_text` | per image (vision) | Accuracy / redundancy / decorative correctness of an _existing_ accessible name (1.1.1) | Missing alt / accessible name |
+| `heading_structure` | per page (text-only) | Non-descriptive & vague/generic headings, confusing duplicates, `h1`↔topic mismatch (2.4.6); content sections with no heading (**2.4.10, AAA**); headings faked with styled `<p>`/`<div>` (1.3.1) | Skipped/out-of-order levels, empty headings, missing `<h1>` |
+| `link_purpose` | per page (text-only) | Generic filler / non-descriptive / raw-URL link text (2.4.4, A); link names that only make sense with surrounding context (**2.4.9, AAA**) | Missing link name, identical names pointing to different destinations |
+
+`heading_structure` and `link_purpose` both target Level **AAA** conformance — they cover the judgment-based criteria (2.4.6 / 2.4.10 / 1.3.1 for headings; 2.4.4 / 2.4.9 for links) that deterministic tooling structurally cannot evaluate.
 
 ### Requesting an audit
 
@@ -261,6 +271,22 @@ POST /v1/scans
 ```
 
 Scan responses gain an `aiAudit` summary (`status`, `requestedSkills`, task counters) and an `agentFindings` array; list summaries gain `agentFindingCount`. Requesting the audit when it is disabled server-side, or requesting a non-whitelisted skill, returns a `400` problem.
+
+Every `agentFindings` entry has the **same shape regardless of skill**, so clients render them uniformly:
+
+| Field | Meaning |
+| --- | --- |
+| `skill` | Which skill produced it (`image_alt_text`, `heading_structure`, …) |
+| `category` | Per-skill verdict (e.g. `redundant`, `vague_or_generic`) |
+| `wcag` | WCAG success criterion the finding maps to (e.g. `1.1.1`, `2.4.10`) |
+| `severity` | Shared axe impact scale (`minor`…`critical`) |
+| `confidence` | Model confidence, 0–1 |
+| `needsHumanReview` | `true` when low-confidence/unjudgeable — triage flag |
+| `message` | **Human-readable problem description** |
+| `suggestion` | Concrete fix, when offered |
+| `pageUrl`, `selector` | Where the problem is |
+| `details` | Skill-specific extras (e.g. `currentAlt`, `suggestedLevel`) |
+| `model` | Provenance — the model that produced the finding |
 
 ### Choosing an API/gateway and model
 
@@ -281,14 +307,14 @@ AGENT_PROVIDER=openai-compatible
 AGENT_BASE_URL=https://openrouter.ai/api/v1
 AGENT_MODEL=openai/gpt-4o-mini
 AGENT_API_KEY=sk-or-...
-AGENT_SKILLS=image_alt_text        # skills clients may request
+AGENT_SKILLS=image_alt_text,heading_structure,link_purpose   # skills clients may request
 ```
 
-**Picking a model.** The `image_alt_text` skill needs a **vision-capable** model (it sends screenshots) that is good at structured JSON output. A useful reference point: `gpt-4.1-mini` reliably distinguishes accurate, inaccurate, and redundant alt text and suggests fixes, at low cost. Beware going *too* small — the very cheapest tier (e.g. `gpt-4.1-nano`) tends to **rubber-stamp** images as "appropriate" and silently miss real problems rather than admit uncertainty, so validate any downgrade against known-bad examples before trusting it. Note that reasoning models (OpenAI's GPT-5 / o-series) currently reject the harness's `AGENT_TEMPERATURE=0` and will fall back to `insufficient_evidence` unless you set `AGENT_TEMPERATURE=1`. The harness validates every response and falls back to `insufficient_evidence` on hard failures, so a scan never breaks — but a weak model fails by *under-reporting* (false "appropriate"), which is easy to miss. Using OpenRouter as the gateway lets you switch models by changing one string, which makes this tuning easy.
+**Picking a model.** The `image_alt_text` skill needs a **vision-capable** model (it sends screenshots) that is good at structured JSON output; `heading_structure` and `link_purpose` are text-only, so any capable structured-output model works for them (route them separately with per-skill overrides if you like — see below). A useful reference point: `gpt-4.1-mini` reliably distinguishes accurate, inaccurate, and redundant alt text and suggests fixes, at low cost. Beware going *too* small — the very cheapest tier (e.g. `gpt-4.1-nano`) tends to **rubber-stamp** content as "appropriate" and silently miss real problems rather than admit uncertainty, so validate any downgrade against known-bad examples before trusting it. Note that reasoning models (OpenAI's GPT-5 / o-series) currently reject the harness's `AGENT_TEMPERATURE=0` and will fall back to `insufficient_evidence` unless you set `AGENT_TEMPERATURE=1`. The harness validates every response and falls back to `insufficient_evidence` on hard failures, so a scan never breaks — but a weak model fails by *under-reporting* (false "appropriate"), which is easy to miss. Using OpenRouter as the gateway lets you switch models by changing one string, which makes this tuning easy.
 
 ### Per-skill model selection
 
-The `AGENT_*` values above are the **defaults for every skill**. Any skill can point at a different API/model with `AGENT_SKILL_<SKILL_ID>_{PROVIDER,MODEL,API_KEY,BASE_URL}` — each field independently falls back to the corresponding `AGENT_*` default, so you only set what differs. This lets you route each audit task to the model that is cheapest/most accurate for it.
+The `AGENT_*` values above are the **defaults for every skill**. Any skill can point at a different API/model with `AGENT_SKILL_<SKILL_ID>_{PROVIDER,MODEL,API_KEY,BASE_URL}` — each field independently falls back to the corresponding `AGENT_*` default, so you only set what differs. This matters because skills have **widely different requirements**: `image_alt_text` needs a vision model, while `heading_structure` and `link_purpose` are text-only and can run on a cheaper, faster model.
 
 ```bash
 # Global default (used by any skill without an override):
@@ -296,14 +322,18 @@ AGENT_PROVIDER=openai
 AGENT_MODEL=gpt-4.1-mini
 AGENT_API_KEY=sk-...
 
-# Override just the image skill to run on OpenRouter with a vision model:
+# image_alt_text → a strong vision model on OpenRouter:
 AGENT_SKILL_IMAGE_ALT_TEXT_PROVIDER=openai-compatible
 AGENT_SKILL_IMAGE_ALT_TEXT_BASE_URL=https://openrouter.ai/api/v1
 AGENT_SKILL_IMAGE_ALT_TEXT_MODEL=meta-llama/llama-3.2-90b-vision-instruct
 AGENT_SKILL_IMAGE_ALT_TEXT_API_KEY=sk-or-...
+
+# heading_structure & link_purpose → a cheap text-only model (no vision needed):
+AGENT_SKILL_HEADING_STRUCTURE_MODEL=gpt-4.1-nano
+AGENT_SKILL_LINK_PURPOSE_MODEL=gpt-4.1-nano
 ```
 
-The `<SKILL_ID>` is the upper-cased skill value (e.g. `image_alt_text` → `IMAGE_ALT_TEXT`). Each finding records the model that actually produced it, so you can audit which model judged what. (Tuning knobs like token/temperature limits below remain global.)
+The `<SKILL_ID>` is the upper-cased skill value (e.g. `image_alt_text` → `IMAGE_ALT_TEXT`, `heading_structure` → `HEADING_STRUCTURE`, `link_purpose` → `LINK_PURPOSE`). Each finding records the model that actually produced it, so you can audit which model judged what. (Tuning knobs like token/temperature limits below remain global.)
 
 Cost/behaviour controls (all optional, global): `AGENT_CONCURRENCY`, `AGENT_MAX_UNITS_PER_PAGE`, `AGENT_MAX_UNITS_PER_SCAN`, `AGENT_MAX_TOKENS_PER_REQUEST`, `AGENT_TOKEN_BUDGET_PER_SCAN`, `AGENT_REQUEST_TIMEOUT_MS`, `AGENT_MAX_IMAGE_BYTES`, `AGENT_TEMPERATURE`. See [`.env.example`](.env.example) for defaults.
 

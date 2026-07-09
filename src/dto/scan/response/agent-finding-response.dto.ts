@@ -15,6 +15,14 @@ export class AgentFindingResponseDto {
   @ApiProperty({ example: 'redundant', description: 'Per-skill verdict.' })
   category: string;
 
+  /** WCAG success criterion the finding maps to (consistent across skills). */
+  @ApiProperty({
+    nullable: true,
+    example: '1.1.1',
+    description: 'WCAG success criterion this finding maps to.',
+  })
+  wcag: string | null;
+
   /** Severity on the shared axe impact scale. */
   @ApiProperty({ enum: IssueImpact, example: IssueImpact.MODERATE })
   severity: IssueImpact;
@@ -22,6 +30,14 @@ export class AgentFindingResponseDto {
   /** Model-reported confidence in the verdict, 0–1. */
   @ApiProperty({ type: 'number', example: 0.82, minimum: 0, maximum: 1 })
   confidence: number;
+
+  /** Whether a human should confirm this verdict (low confidence/unjudgeable). */
+  @ApiProperty({
+    type: 'boolean',
+    example: false,
+    description: 'True when the finding is low-confidence and needs review.',
+  })
+  needsHumanReview: boolean;
 
   /** URL of the page the finding relates to. */
   @ApiProperty({
@@ -35,9 +51,11 @@ export class AgentFindingResponseDto {
   @ApiProperty({ nullable: true, example: 'img.hero' })
   selector: string | null;
 
-  /** Human-readable summary of the finding. */
+  /** Human-readable description of the problem (present on every finding). */
   @ApiProperty({
     example: 'The alt text repeats the adjacent caption verbatim.',
+    description:
+      'Human-readable problem description, consistent across skills.',
   })
   message: string;
 

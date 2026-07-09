@@ -43,7 +43,9 @@ describe('imageAltVerdictSchema (OpenAI strict compatibility)', () => {
       properties: Record<string, unknown>;
       required?: string[];
     };
-    expect(new Set(json.required)).toEqual(new Set(Object.keys(json.properties)));
+    expect(new Set(json.required)).toEqual(
+      new Set(Object.keys(json.properties)),
+    );
   });
 });
 
@@ -109,7 +111,7 @@ describe('ImageAltTextSkill.evaluate', () => {
   const skill = new ImageAltTextSkill();
 
   it('returns no problem finding for an appropriate name', async () => {
-    const draft = await skill.evaluate(
+    const [draft] = await skill.evaluate(
       baseEvidence(),
       harnessReturning({
         verdict: 'appropriate',
@@ -121,7 +123,7 @@ describe('ImageAltTextSkill.evaluate', () => {
   });
 
   it('maps a confident problem verdict to the right category/severity', async () => {
-    const draft = await skill.evaluate(
+    const [draft] = await skill.evaluate(
       baseEvidence(),
       harnessReturning({
         verdict: 'inaccurate',
@@ -133,11 +135,12 @@ describe('ImageAltTextSkill.evaluate', () => {
     expect(draft?.category).toBe('inaccurate');
     expect(draft?.severity).toBe(IssueImpact.SERIOUS);
     expect(draft?.suggestion).toBe('A dog');
-    expect(draft?.details).toMatchObject({ needsHumanReview: false });
+    expect(draft?.wcag).toBe('1.1.1');
+    expect(draft?.needsHumanReview).toBe(false);
   });
 
   it('maps redundant to moderate severity', async () => {
-    const draft = await skill.evaluate(
+    const [draft] = await skill.evaluate(
       baseEvidence(),
       harnessReturning({
         verdict: 'redundant',
@@ -150,7 +153,7 @@ describe('ImageAltTextSkill.evaluate', () => {
   });
 
   it('downgrades a low-confidence problem to human review', async () => {
-    const draft = await skill.evaluate(
+    const [draft] = await skill.evaluate(
       baseEvidence(),
       harnessReturning({
         verdict: 'inaccurate',
@@ -160,14 +163,12 @@ describe('ImageAltTextSkill.evaluate', () => {
     );
     expect(draft?.category).toBe('insufficient_evidence');
     expect(draft?.severity).toBe(IssueImpact.MINOR);
-    expect(draft?.details).toMatchObject({
-      verdict: 'inaccurate',
-      needsHumanReview: true,
-    });
+    expect(draft?.needsHumanReview).toBe(true);
+    expect(draft?.details).toMatchObject({ verdict: 'inaccurate' });
   });
 
   it('surfaces insufficient_evidence as a human-review finding', async () => {
-    const draft = await skill.evaluate(
+    const [draft] = await skill.evaluate(
       baseEvidence(),
       harnessReturning({
         verdict: 'insufficient_evidence',
@@ -176,6 +177,6 @@ describe('ImageAltTextSkill.evaluate', () => {
       }),
     );
     expect(draft?.category).toBe('insufficient_evidence');
-    expect(draft?.details).toMatchObject({ needsHumanReview: true });
+    expect(draft?.needsHumanReview).toBe(true);
   });
 });

@@ -96,4 +96,33 @@ describe('ModelProviderFactory.getModel', () => {
       'default-model',
     );
   });
+
+  it('resolves a distinct model per skill in one configuration', () => {
+    const factory = makeFactory({
+      provider: 'openai',
+      model: 'shared-default',
+      apiKey: 'sk-default',
+      skillModels: {
+        image_alt_text: {
+          provider: null,
+          model: 'vision-model',
+          apiKey: null,
+          baseUrl: null,
+        },
+        heading_structure: {
+          provider: null,
+          model: 'cheap-text-model',
+          apiKey: null,
+          baseUrl: null,
+        },
+      },
+    });
+
+    expect(factory.resolveModelConfig('image_alt_text').model).toBe(
+      'vision-model',
+    );
+    expect(factory.resolveModelConfig('heading_structure').model).toBe(
+      'cheap-text-model',
+    );
+  });
 });

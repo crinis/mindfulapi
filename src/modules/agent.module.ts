@@ -6,6 +6,8 @@ import { ModelProviderFactory } from '../agent/harness/model-provider.factory';
 import { AgentHarnessService } from '../agent/harness/agent-harness.service';
 import { SkillRegistry } from '../agent/skills/skill-registry';
 import { ImageAltTextSkill } from '../agent/skills/image-alt-text.skill';
+import { HeadingStructureSkill } from '../agent/skills/heading-structure.skill';
+import { LinkPurposeSkill } from '../agent/skills/link-purpose.skill';
 import { AgentAuditService } from '../agent/agent-audit.service';
 
 /**
@@ -21,6 +23,8 @@ import { AgentAuditService } from '../agent/agent-audit.service';
     AgentHarnessService,
     SkillRegistry,
     ImageAltTextSkill,
+    HeadingStructureSkill,
+    LinkPurposeSkill,
     AgentAuditService,
   ],
   exports: [AgentAuditService, TypeOrmModule],

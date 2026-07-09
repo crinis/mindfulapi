@@ -135,10 +135,12 @@ export const agentConfig = registerAs('agent', () => ({
       .map((skill) => [skill, readSkillModelOverride(skill)] as const)
       .filter(([, override]) => override !== null),
   ) as Record<string, AgentModelConfig>,
-  /** Skills the server permits clients to request; defaults to image alt text. */
+  /** Skills the server permits clients to request; defaults to all built-ins. */
   allowedSkills: ((): string[] => {
     const configured = splitList(process.env.AGENT_SKILLS);
-    return configured.length > 0 ? configured : ['image_alt_text'];
+    return configured.length > 0
+      ? configured
+      : ['image_alt_text', 'heading_structure', 'link_purpose'];
   })(),
   /** Concurrent per-unit requests (subagent fan-out) during evaluation. */
   concurrency: clampInt(process.env.AGENT_CONCURRENCY, 4, 1, 16),

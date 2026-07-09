@@ -18,6 +18,9 @@ const MIN_RENDERED_PX = 24;
 /** Confidence below which a problem verdict is downgraded to human review. */
 const MIN_CONFIDENCE = 0.5;
 
+/** WCAG success criterion this skill evaluates (Non-text Content). */
+const IMAGE_ALT_WCAG = '1.1.1';
+
 /** Axe rules that already report a missing/invalid accessible name. */
 const AXE_ALT_RULES = [
   'image-alt',
@@ -183,7 +186,7 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
   async evaluate(
     evidence: ImageEvidence,
     harness: AgentHarnessService,
-  ): Promise<AgentFindingDraft | null> {
+  ): Promise<AgentFindingDraft[]> {
     const {
       data: verdict,
       usage,
@@ -206,7 +209,9 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
 
     // An accurate accessible name is not a finding — surface only problems.
     if (verdict.verdict === 'appropriate') {
-      return { ...emptyDraft(evidence, usage), model, category: 'appropriate' };
+      return [
+        { ...emptyDraft(evidence, usage), model, category: 'appropriate' },
+      ];
     }
 
     const lowConfidence = verdict.confidence < MIN_CONFIDENCE;
@@ -215,23 +220,26 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
         ? 'insufficient_evidence'
         : verdict.verdict;
 
-    return {
-      skill: this.id,
-      pageUrl: evidence.pageUrl,
-      selector: evidence.selector,
-      category,
-      severity: severityForVerdict(category),
-      confidence: verdict.confidence,
-      message: verdict.rationale,
-      suggestion: verdict.suggestedAlt ?? undefined,
-      details: {
-        verdict: verdict.verdict,
-        currentAlt: evidence.alt,
+    return [
+      {
+        skill: this.id,
+        pageUrl: evidence.pageUrl,
+        selector: evidence.selector,
+        category,
+        wcag: IMAGE_ALT_WCAG,
+        severity: severityForVerdict(category),
+        confidence: verdict.confidence,
         needsHumanReview: category === 'insufficient_evidence' || lowConfidence,
+        message: verdict.rationale,
+        suggestion: verdict.suggestedAlt ?? undefined,
+        details: {
+          verdict: verdict.verdict,
+          currentAlt: evidence.alt,
+        },
+        usage,
+        model,
       },
-      usage,
-      model,
-    };
+    ];
   }
 
   /**

@@ -91,7 +91,7 @@ describe('AgentAuditService.evaluate', () => {
     const { service, findingRepository, scanRepository } = makeService();
     const skill = {
       id: AgentSkill.IMAGE_ALT_TEXT,
-      evaluate: jest.fn().mockResolvedValue(problemDraft()),
+      evaluate: jest.fn().mockResolvedValue([problemDraft()]),
     } as unknown as AuditSkill;
 
     await service.evaluate({ id: 1 } as Scan, [{ skill, evidence }], () =>
@@ -114,10 +114,12 @@ describe('AgentAuditService.evaluate', () => {
     const { service, findingRepository } = makeService();
     const skill = {
       id: AgentSkill.IMAGE_ALT_TEXT,
-      evaluate: jest.fn().mockResolvedValue({
-        ...problemDraft(),
-        category: 'appropriate',
-      }),
+      evaluate: jest.fn().mockResolvedValue([
+        {
+          ...problemDraft(),
+          category: 'appropriate',
+        },
+      ]),
     } as unknown as AuditSkill;
 
     await service.evaluate({ id: 1 } as Scan, [{ skill, evidence }], () =>
@@ -125,6 +127,40 @@ describe('AgentAuditService.evaluate', () => {
     );
 
     expect(findingRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('persists every problem draft from a multi-finding page unit', async () => {
+    const { service, findingRepository, scanRepository } = makeService();
+    // A page-level unit returns several drafts from one request: the first
+    // carries the token usage, the rest zero, plus a non-persisted appropriate.
+    const skill = {
+      id: AgentSkill.IMAGE_ALT_TEXT,
+      evaluate: jest.fn().mockResolvedValue([
+        { ...problemDraft(), usage: { inputTokens: 40, outputTokens: 12 } },
+        {
+          ...problemDraft(),
+          category: 'vague_or_generic',
+          usage: { inputTokens: 0, outputTokens: 0 },
+        },
+        {
+          ...problemDraft(),
+          category: 'appropriate',
+          usage: { inputTokens: 0, outputTokens: 0 },
+        },
+      ]),
+    } as unknown as AuditSkill;
+
+    await service.evaluate({ id: 1 } as Scan, [{ skill, evidence }], () =>
+      Promise.resolve(false),
+    );
+
+    // Two problem drafts persisted, the appropriate one skipped; the unit
+    // counts as a single completed task despite yielding multiple findings.
+    expect(findingRepository.save).toHaveBeenCalledTimes(2);
+    expect(scanRepository.update).toHaveBeenLastCalledWith(1, {
+      aiTasksCompleted: 1,
+      aiTasksFailed: 0,
+    });
   });
 
   it('is a no-op with no units', async () => {
@@ -135,7 +171,7 @@ describe('AgentAuditService.evaluate', () => {
 
   it('stops evaluating once cancellation is observed', async () => {
     const { service, findingRepository } = makeService({ concurrency: 1 });
-    const evaluate = jest.fn().mockResolvedValue(problemDraft());
+    const evaluate = jest.fn().mockResolvedValue([problemDraft()]);
     const skill = {
       id: AgentSkill.IMAGE_ALT_TEXT,
       evaluate,

@@ -47,6 +47,14 @@ export class AgentFinding {
   @Column({ type: 'varchar' })
   category: string;
 
+  /**
+   * WCAG success criterion the finding maps to (e.g. `1.1.1`, `2.4.10`).
+   * Consistent across skills so clients can group/filter by criterion.
+   */
+  @Index()
+  @Column({ type: 'varchar', nullable: true })
+  wcag?: string;
+
   /** Severity, reusing the axe impact scale for a consistent client view. */
   @Column({ type: 'text' })
   severity: IssueImpact;
@@ -54,6 +62,13 @@ export class AgentFinding {
   /** Model-reported confidence in the verdict, 0–1. */
   @Column({ type: 'float', default: 0 })
   confidence: number;
+
+  /**
+   * True when the verdict is low-confidence or unjudgeable and a person should
+   * confirm it. A consistent triage flag across every skill.
+   */
+  @Column({ type: 'boolean', default: false })
+  needsHumanReview: boolean;
 
   /** Human-readable summary of the finding. */
   @Column({ type: 'text' })

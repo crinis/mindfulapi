@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { AgentSkill } from '../../enums/agent-skill.enum';
 import type { AuditSkill } from './audit-skill.interface';
 import { ImageAltTextSkill } from './image-alt-text.skill';
+import { HeadingStructureSkill } from './heading-structure.skill';
+import { LinkPurposeSkill } from './link-purpose.skill';
 
 /**
  * Central registry of available audit skills. Resolves a client's requested
@@ -11,9 +13,15 @@ import { ImageAltTextSkill } from './image-alt-text.skill';
 export class SkillRegistry {
   private readonly skills: Map<AgentSkill, AuditSkill>;
 
-  constructor(imageAltTextSkill: ImageAltTextSkill) {
+  constructor(
+    imageAltTextSkill: ImageAltTextSkill,
+    headingStructureSkill: HeadingStructureSkill,
+    linkPurposeSkill: LinkPurposeSkill,
+  ) {
     this.skills = new Map<AgentSkill, AuditSkill>([
       [imageAltTextSkill.id, imageAltTextSkill],
+      [headingStructureSkill.id, headingStructureSkill],
+      [linkPurposeSkill.id, linkPurposeSkill],
     ]);
   }
 

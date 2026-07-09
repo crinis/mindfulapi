@@ -1077,7 +1077,9 @@
             "items": {
               "type": "string",
               "enum": [
-                "image_alt_text"
+                "image_alt_text",
+                "heading_structure",
+                "link_purpose"
               ]
             }
           }
@@ -1491,7 +1493,9 @@
             "items": {
               "type": "string",
               "enum": [
-                "image_alt_text"
+                "image_alt_text",
+                "heading_structure",
+                "link_purpose"
               ]
             }
           },
@@ -1525,7 +1529,9 @@
           "skill": {
             "type": "string",
             "enum": [
-              "image_alt_text"
+              "image_alt_text",
+              "heading_structure",
+              "link_purpose"
             ],
             "example": "image_alt_text"
           },
@@ -1533,6 +1539,12 @@
             "type": "string",
             "example": "redundant",
             "description": "Per-skill verdict."
+          },
+          "wcag": {
+            "type": "object",
+            "nullable": true,
+            "example": "1.1.1",
+            "description": "WCAG success criterion this finding maps to."
           },
           "severity": {
             "type": "string",
@@ -1550,6 +1562,11 @@
             "minimum": 0,
             "maximum": 1
           },
+          "needsHumanReview": {
+            "type": "boolean",
+            "example": false,
+            "description": "True when the finding is low-confidence and needs review."
+          },
           "pageUrl": {
             "type": "object",
             "nullable": true,
@@ -1563,7 +1580,8 @@
           },
           "message": {
             "type": "string",
-            "example": "The alt text repeats the adjacent caption verbatim."
+            "example": "The alt text repeats the adjacent caption verbatim.",
+            "description": "Human-readable problem description, consistent across skills."
           },
           "suggestion": {
             "type": "object",
@@ -1585,8 +1603,10 @@
         "required": [
           "skill",
           "category",
+          "wcag",
           "severity",
           "confidence",
+          "needsHumanReview",
           "pageUrl",
           "selector",
           "message",

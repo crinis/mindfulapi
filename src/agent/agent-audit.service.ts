@@ -170,8 +170,10 @@ export class AgentAuditService {
 
         const unit = units[i];
         try {
-          const draft = await unit.skill.evaluate(unit.evidence, this.harness);
-          if (draft) {
+          const drafts = await unit.skill.evaluate(unit.evidence, this.harness);
+          for (const draft of drafts) {
+            // Usage is attributed to one draft per request (see AuditSkill),
+            // so summing across the array counts each request's tokens once.
             tokensSpent += draft.usage.inputTokens + draft.usage.outputTokens;
             if (draft.category !== 'appropriate') {
               await this.persist(scan.id, draft);
@@ -210,8 +212,10 @@ export class AgentAuditService {
       pageUrl: draft.pageUrl,
       selector: truncate(draft.selector, MAX_SELECTOR_LENGTH),
       category: draft.category,
+      wcag: draft.wcag ?? undefined,
       severity: draft.severity,
       confidence: draft.confidence,
+      needsHumanReview: draft.needsHumanReview ?? false,
       message: truncate(draft.message, MAX_MESSAGE_LENGTH) ?? '',
       suggestion: truncate(draft.suggestion, MAX_SUGGESTION_LENGTH),
       details: draft.details ?? null,
