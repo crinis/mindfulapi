@@ -2,11 +2,13 @@ import { ApiProperty } from '@nestjs/swagger';
 import { AgentSkill } from '../../../enums/agent-skill.enum';
 
 /**
- * Status of the optional AI-audit phase.
- * - `skipped`: not requested or not enabled.
+ * Status of the optional AI-audit phase. The object is present only when the
+ * audit was requested; scans that never requested it omit `aiAudit` entirely.
  * - `pending`: requested but the analyzing phase has not started.
  * - `running`: agent evaluation in progress.
- * - `completed`: agent evaluation finished.
+ * - `completed`: agent evaluation finished with at least one work unit.
+ * - `skipped`: nothing eligible to evaluate, or the scan failed/was canceled
+ *   before the audit finished.
  */
 export enum AiAuditStatus {
   SKIPPED = 'skipped',

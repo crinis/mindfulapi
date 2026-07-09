@@ -15,6 +15,7 @@ import { Issue } from '../entities/issue.entity';
 import { AgentFinding } from '../entities/agent-finding.entity';
 import { agentConfig } from '../config/configuration';
 import { AgentSkill } from '../enums/agent-skill.enum';
+import { AiAuditStatus } from '../dto/scan/response/ai-audit-response.dto';
 import { ScanStatus } from '../enums/scan-status.enum';
 import { IssueImpact } from '../enums/issue-impact.enum';
 import {
@@ -456,6 +457,63 @@ describe('ScanService', () => {
     it('throws NotFoundException when scan does not exist', async () => {
       mockRepo.findOne.mockResolvedValue(null);
       await expect(service.findOne(999)).rejects.toThrow(NotFoundException);
+    });
+
+    it('omits aiAudit when the audit was not requested', async () => {
+      mockRepo.findOne.mockResolvedValue(
+        makeScan({ status: ScanStatus.COMPLETED, aiAuditSkills: null }),
+      );
+      mockIssueRepo.find.mockResolvedValue([]);
+
+      const result = await service.findOne(1);
+
+      expect(result.aiAudit).toBeNull();
+    });
+
+    it('reports aiAudit completed when work units were evaluated', async () => {
+      mockRepo.findOne.mockResolvedValue(
+        makeScan({
+          status: ScanStatus.COMPLETED,
+          aiAuditSkills: [AgentSkill.IMAGE_ALT_TEXT],
+          aiTasksTotal: 3,
+          aiTasksCompleted: 3,
+        }),
+      );
+      mockIssueRepo.find.mockResolvedValue([]);
+
+      const result = await service.findOne(1);
+
+      expect(result.aiAudit?.status).toBe(AiAuditStatus.COMPLETED);
+    });
+
+    it('reports aiAudit skipped when requested but nothing was eligible', async () => {
+      mockRepo.findOne.mockResolvedValue(
+        makeScan({
+          status: ScanStatus.COMPLETED,
+          aiAuditSkills: [AgentSkill.IMAGE_ALT_TEXT],
+          aiTasksTotal: 0,
+        }),
+      );
+      mockIssueRepo.find.mockResolvedValue([]);
+
+      const result = await service.findOne(1);
+
+      expect(result.aiAudit?.status).toBe(AiAuditStatus.SKIPPED);
+    });
+
+    it('reports aiAudit skipped when the scan failed before finishing', async () => {
+      mockRepo.findOne.mockResolvedValue(
+        makeScan({
+          status: ScanStatus.FAILED,
+          aiAuditSkills: [AgentSkill.IMAGE_ALT_TEXT],
+          aiTasksTotal: 2,
+        }),
+      );
+      mockIssueRepo.find.mockResolvedValue([]);
+
+      const result = await service.findOne(1);
+
+      expect(result.aiAudit?.status).toBe(AiAuditStatus.SKIPPED);
     });
 
     it('filters issues in SQL using a normalized pageUrl IN clause', async () => {

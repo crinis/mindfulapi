@@ -282,6 +282,11 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
             ariaLabelledbyText,
             title,
           };
+          // Trigger gate — must mirror imageNeedsAgentReview() exactly. It is
+          // inlined here (not called) because page.evaluate runs in the browser
+          // and cannot reference Node closures; the exported helper is the
+          // canonical, unit-tested spec and both are covered by the real-browser
+          // collect e2e. Keep the two in sync.
           const hasAltAttr = descriptor.alt !== null;
           const hasAria = !!ariaLabel?.trim() || !!ariaLabelledbyText?.trim();
           const declaredDecorative = role === 'presentation' || role === 'none';

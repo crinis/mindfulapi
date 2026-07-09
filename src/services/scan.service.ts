@@ -679,23 +679,35 @@ export class ScanService {
     if (!skills?.length) {
       return null;
     }
-    let status: AiAuditStatus;
-    switch (scan.status) {
-      case ScanStatus.COMPLETED:
-        status = AiAuditStatus.COMPLETED;
-        break;
-      case ScanStatus.ANALYZING:
-        status = AiAuditStatus.RUNNING;
-        break;
-      default:
-        status = AiAuditStatus.PENDING;
-    }
     return {
-      status,
+      status: this.aiAuditStatus(scan),
       requestedSkills: skills,
       tasksTotal: scan.aiTasksTotal ?? 0,
       tasksCompleted: scan.aiTasksCompleted ?? 0,
       tasksFailed: scan.aiTasksFailed ?? 0,
     };
+  }
+
+  /**
+   * Derives the AI-audit phase status from the scan lifecycle. A completed scan
+   * that produced no work units (nothing eligible, or the feature/skill was
+   * disabled after creation) reports `skipped` rather than `completed`; a scan
+   * that failed or was canceled likewise reports `skipped` since the audit
+   * never finished.
+   */
+  private aiAuditStatus(scan: Scan): AiAuditStatus {
+    switch (scan.status) {
+      case ScanStatus.COMPLETED:
+        return (scan.aiTasksTotal ?? 0) > 0
+          ? AiAuditStatus.COMPLETED
+          : AiAuditStatus.SKIPPED;
+      case ScanStatus.ANALYZING:
+        return AiAuditStatus.RUNNING;
+      case ScanStatus.FAILED:
+      case ScanStatus.CANCELED:
+        return AiAuditStatus.SKIPPED;
+      default:
+        return AiAuditStatus.PENDING;
+    }
   }
 }
