@@ -213,8 +213,8 @@ All configuration is done via environment variables. Copy `.env.example` for a f
 | `AGENT_CONCURRENCY` | `4` | Concurrent per-image requests during evaluation (1–16) |
 | `AGENT_MAX_UNITS_PER_PAGE` | `30` | Cap on collected work units per page |
 | `AGENT_MAX_UNITS_PER_SCAN` | `200` | Cap on evaluated work units per scan |
-| `AGENT_MAX_TOKENS` | `1000` | Output-token cap per request |
-| `AGENT_SCAN_TOKEN_BUDGET` | `2000000` | Total token budget per scan (`0` disables the check) |
+| `AGENT_MAX_TOKENS_PER_REQUEST` | `1000` | Output-token cap per request |
+| `AGENT_TOKEN_BUDGET_PER_SCAN` | `2000000` | Total token budget per scan (`0` disables the check) |
 | `AGENT_REQUEST_TIMEOUT_MS` | `60000` | Per-request timeout |
 | `AGENT_MAX_IMAGE_BYTES` | `1500000` | Skip element screenshots larger than this |
 | `AGENT_TEMPERATURE` | `0` | Sampling temperature (0–2) |
@@ -305,7 +305,7 @@ AGENT_SKILL_IMAGE_ALT_TEXT_API_KEY=sk-or-...
 
 The `<SKILL_ID>` is the upper-cased skill value (e.g. `image_alt_text` → `IMAGE_ALT_TEXT`). Each finding records the model that actually produced it, so you can audit which model judged what. (Tuning knobs like token/temperature limits below remain global.)
 
-Cost/behaviour controls (all optional, global): `AGENT_CONCURRENCY`, `AGENT_MAX_UNITS_PER_PAGE`, `AGENT_MAX_UNITS_PER_SCAN`, `AGENT_MAX_TOKENS`, `AGENT_SCAN_TOKEN_BUDGET`, `AGENT_REQUEST_TIMEOUT_MS`, `AGENT_MAX_IMAGE_BYTES`, `AGENT_TEMPERATURE`. See [`.env.example`](.env.example) for defaults.
+Cost/behaviour controls (all optional, global): `AGENT_CONCURRENCY`, `AGENT_MAX_UNITS_PER_PAGE`, `AGENT_MAX_UNITS_PER_SCAN`, `AGENT_MAX_TOKENS_PER_REQUEST`, `AGENT_TOKEN_BUDGET_PER_SCAN`, `AGENT_REQUEST_TIMEOUT_MS`, `AGENT_MAX_IMAGE_BYTES`, `AGENT_TEMPERATURE`. See [`.env.example`](.env.example) for defaults.
 
 > **Privacy.** When the AI audit runs, cropped element screenshots and the associated attributes are sent to the configured LLM provider. Only enable it with a provider you trust, and consider a self-hosted/local model for sensitive sites.
 

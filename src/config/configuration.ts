@@ -152,10 +152,15 @@ export const agentConfig = registerAs('agent', () => ({
     10000,
   ),
   /** Output-token cap per individual request. */
-  perTaskMaxTokens: clampInt(process.env.AGENT_MAX_TOKENS, 1000, 1, 100000),
+  maxTokensPerRequest: clampInt(
+    process.env.AGENT_MAX_TOKENS_PER_REQUEST,
+    1000,
+    1,
+    100000,
+  ),
   /** Total token budget per scan; 0 disables the budget check. */
-  perScanTokenBudget: clampInt(
-    process.env.AGENT_SCAN_TOKEN_BUDGET,
+  tokenBudgetPerScan: clampInt(
+    process.env.AGENT_TOKEN_BUDGET_PER_SCAN,
     2_000_000,
     0,
     1_000_000_000,

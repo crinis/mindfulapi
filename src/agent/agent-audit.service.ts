@@ -146,7 +146,7 @@ export class AgentAuditService {
       aiTasksFailed: 0,
     });
 
-    const budget = this.config.perScanTokenBudget;
+    const budget = this.config.tokenBudgetPerScan;
     let index = 0;
     let completed = 0;
     let failed = 0;
