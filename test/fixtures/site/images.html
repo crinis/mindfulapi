@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Image audit fixture</title>
+  </head>
+  <body>
+    <h1>Images</h1>
+
+    <!-- Has an accessible name -> agent should review it -->
+    <img
+      id="good"
+      alt="A solid red square"
+      width="100"
+      height="100"
+      src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    />
+
+    <!-- No alt at all -> axe owns this, agent must skip -->
+    <img
+      id="missing"
+      width="100"
+      height="100"
+      src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    />
+
+    <!-- Explicitly decorative (empty alt) -> agent reviews correctness -->
+    <img
+      id="decorative"
+      alt=""
+      width="100"
+      height="100"
+      src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    />
+
+    <!-- Tracking pixel -> below the minimum size, skip -->
+    <img
+      id="pixel"
+      width="1"
+      height="1"
+      src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    />
+
+    <!-- Removed from the a11y tree -> skip -->
+    <img
+      id="hidden"
+      alt="A hidden decoration"
+      aria-hidden="true"
+      width="100"
+      height="100"
+      src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    />
+  </body>
+</html>

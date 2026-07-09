@@ -14,6 +14,7 @@ import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 import { AgentFinding } from '../entities/agent-finding.entity';
 import { agentConfig } from '../config/configuration';
+import { AgentSkill } from '../enums/agent-skill.enum';
 import { ScanStatus } from '../enums/scan-status.enum';
 import { IssueImpact } from '../enums/issue-impact.enum';
 import {
@@ -290,6 +291,67 @@ describe('ScanService', () => {
       expect(
         Object.prototype.hasOwnProperty.call(result.scanOptions, 'basicAuth'),
       ).toBe(false);
+    });
+
+    describe('AI audit gating', () => {
+      const buildService = (agentOverrides: Record<string, unknown>) =>
+        new ScanService(
+          mockRepo as never,
+          mockIssueRepo as never,
+          mockAgentFindingRepo as never,
+          mockQueue as never,
+          mockBasicAuthCrypto as never,
+          mockUrlPolicy as never,
+          { ...agentConfig(), ...agentOverrides },
+        );
+
+      it('rejects an AI-audit request when the feature is disabled', async () => {
+        // The default agentConfig() has enabled=false.
+        await expect(
+          service.create({
+            mode: ScanMode.SINGLE_URL,
+            url: 'https://example.com',
+            aiAudit: { skills: [AgentSkill.IMAGE_ALT_TEXT] },
+          }),
+        ).rejects.toThrow(BadRequestException);
+        expect(mockRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('rejects a skill that is not on the server whitelist', async () => {
+        const enabled = buildService({ enabled: true, allowedSkills: [] });
+        await expect(
+          enabled.create({
+            mode: ScanMode.SINGLE_URL,
+            url: 'https://example.com',
+            aiAudit: { skills: [AgentSkill.IMAGE_ALT_TEXT] },
+          }),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('persists requested skills when enabled and whitelisted', async () => {
+        const enabled = buildService({
+          enabled: true,
+          allowedSkills: ['image_alt_text'],
+        });
+        const saved = makeScan({
+          aiAuditSkills: [AgentSkill.IMAGE_ALT_TEXT],
+        });
+        mockRepo.create.mockReturnValue(saved);
+        mockRepo.save.mockResolvedValue(saved);
+        mockRepo.findOne.mockResolvedValue({ ...saved, issues: [] });
+
+        await enabled.create({
+          mode: ScanMode.SINGLE_URL,
+          url: 'https://example.com',
+          aiAudit: { skills: [AgentSkill.IMAGE_ALT_TEXT] },
+        });
+
+        expect(mockRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            aiAuditSkills: [AgentSkill.IMAGE_ALT_TEXT],
+          }),
+        );
+      });
     });
 
     // Cross-field rejection (e.g. crawlOptions on single_url) is now enforced

@@ -51,6 +51,14 @@ services:
       - CLEANUP_RETENTION_DAYS=${CLEANUP_RETENTION_DAYS:-30}
       - CLEANUP_INTERVAL=${CLEANUP_INTERVAL:-0 2 * * *}
       - CRAWL_CONCURRENCY=${CRAWL_CONCURRENCY:-4}
+      # Optional AI accessibility audit (disabled by default). See README.
+      # Element screenshots + attributes are sent to the configured provider.
+      - AGENT_ENABLED=${AGENT_ENABLED:-false}
+      - AGENT_PROVIDER=${AGENT_PROVIDER:-}
+      - AGENT_MODEL=${AGENT_MODEL:-}
+      - AGENT_API_KEY=${AGENT_API_KEY:-}
+      - AGENT_BASE_URL=${AGENT_BASE_URL:-}
+      - AGENT_SKILLS=${AGENT_SKILLS:-image_alt_text}
     volumes:
       - mindfulapi_data:/data
     depends_on:
