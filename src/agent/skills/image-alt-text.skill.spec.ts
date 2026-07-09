@@ -1,6 +1,8 @@
+import { z } from 'zod';
 import {
   ImageAltTextSkill,
   ImageEvidence,
+  imageAltVerdictSchema,
   imageNeedsAgentReview,
   isCoveredByAxeAltRule,
 } from './image-alt-text.skill';
@@ -31,6 +33,19 @@ const harnessReturning = (verdict: unknown): AgentHarnessService =>
       degraded: false,
     }),
   }) as unknown as AgentHarnessService;
+
+describe('imageAltVerdictSchema (OpenAI strict compatibility)', () => {
+  // OpenAI's strict structured-output mode rejects any schema whose `required`
+  // array omits a property; a `.optional()` field (vs `.nullable()`) reintroduces
+  // that break and silently degrades every request to insufficient_evidence.
+  it('marks every property required (no optional fields)', () => {
+    const json = z.toJSONSchema(imageAltVerdictSchema) as {
+      properties: Record<string, unknown>;
+      required?: string[];
+    };
+    expect(new Set(json.required)).toEqual(new Set(Object.keys(json.properties)));
+  });
+});
 
 describe('imageNeedsAgentReview (trigger)', () => {
   it('includes images with an alt attribute (even empty/decorative)', () => {

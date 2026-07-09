@@ -37,12 +37,18 @@ const IMAGE_ALT_VERDICTS = [
   'insufficient_evidence',
 ] as const;
 
-/** Zod schema forcing the model into a structured, low-hallucination verdict. */
-const imageAltVerdictSchema = z.object({
+/**
+ * Zod schema forcing the model into a structured, low-hallucination verdict.
+ *
+ * Every field is required (`suggestedAlt` is nullable, not optional): OpenAI's
+ * strict structured-output mode rejects a schema whose `required` array omits
+ * any property, so optional fields must be modeled as nullable instead.
+ */
+export const imageAltVerdictSchema = z.object({
   verdict: z.enum(IMAGE_ALT_VERDICTS),
   confidence: z.number().min(0).max(1),
   rationale: z.string().max(600),
-  suggestedAlt: z.string().max(300).optional(),
+  suggestedAlt: z.string().max(300).nullable(),
 });
 
 type ImageAltVerdictResult = z.infer<typeof imageAltVerdictSchema>;
@@ -52,6 +58,7 @@ const INSUFFICIENT_EVIDENCE: ImageAltVerdictResult = {
   verdict: 'insufficient_evidence',
   confidence: 0,
   rationale: 'The model did not return a valid structured verdict.',
+  suggestedAlt: null,
 };
 
 /** Descriptor produced in-browser for each candidate image. */
@@ -216,7 +223,7 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
       severity: severityForVerdict(category),
       confidence: verdict.confidence,
       message: verdict.rationale,
-      suggestion: verdict.suggestedAlt,
+      suggestion: verdict.suggestedAlt ?? undefined,
       details: {
         verdict: verdict.verdict,
         currentAlt: evidence.alt,
@@ -361,21 +368,26 @@ function emptyDraft(
   };
 }
 
-const IMAGE_ALT_SYSTEM_PROMPT = `You are a web accessibility expert reviewing the quality of an image's existing accessible name (its alt text, aria-label, aria-labelledby, or title).
+const IMAGE_ALT_SYSTEM_PROMPT = `You are a WCAG 2.2 accessibility expert judging the QUALITY of an image's existing accessible name (its alt, aria-label, aria-labelledby, or title). A missing name is reported by other tooling, so assume a name is present — an intentional empty alt counts as one.
 
-Rules:
-- A MISSING accessible name is already reported by automated tooling — never flag that; assume a name (or a deliberate empty alt) is present.
-- Judge only what you can see in the screenshot and the provided attributes. If the screenshot is missing or you cannot confidently assess the image, return "insufficient_evidence".
-- Be conservative and avoid speculation. Prefer "insufficient_evidence" over guessing.
+Best practices for accessible alt text:
+- Conveys the image's meaning or function in context, not its literal appearance.
+- Concise: a phrase or short sentence, with no "image of"/"picture of" prefix.
+- Functional images (inside a link or button) describe the destination or action, not the picture.
+- When the same information already appears in adjacent text or a caption, an empty alt is correct — repeating it is noise.
+- Purely decorative images should have an empty alt (or role=presentation/none).
+- Images carrying data (charts, diagrams, text) must include that essential information, not just a label.
+
+Judge only what the screenshot and attributes actually show. When the screenshot is absent or you cannot confidently assess the image, use "insufficient_evidence" rather than guess.
 
 Verdicts:
-- "appropriate": the accessible name accurately and concisely conveys the image's meaning (or the image is correctly marked decorative with an empty name).
-- "inaccurate": the accessible name does not match what the image actually shows.
-- "redundant": the name repeats adjacent visible text or adds noise like "image of"/"picture of".
-- "decorative_but_meaningful": the image is marked decorative (empty alt or role=presentation) but actually conveys information that should be described.
-- "insufficient_evidence": you cannot reliably judge from the given evidence.
+- appropriate: accurately and concisely conveys the image's meaning or function, or is correctly decorative with an empty alt.
+- inaccurate: does not match what the image shows or does.
+- redundant: repeats adjacent text/caption, or adds boilerplate like "image of".
+- decorative_but_meaningful: marked decorative yet actually carries information that should be described.
+- insufficient_evidence: the evidence does not allow a reliable judgment.
 
-Respond ONLY with the structured object. Keep "rationale" under 60 words. Provide "suggestedAlt" only when proposing a better name.`;
+Keep "rationale" under 60 words. Set "suggestedAlt" to a better name only when proposing one, otherwise null.`;
 
 /** Renders the per-image evidence into a compact prompt. */
 function buildImagePrompt(evidence: ImageEvidence): string {

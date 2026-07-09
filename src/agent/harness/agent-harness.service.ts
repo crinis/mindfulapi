@@ -89,8 +89,8 @@ export class AgentHarnessService {
         continue;
       }
       content.push({
-        type: 'image',
-        image: image.data,
+        type: 'file',
+        data: image.data,
         mediaType: image.mediaType,
       });
     }
