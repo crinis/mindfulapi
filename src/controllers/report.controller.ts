@@ -4,6 +4,7 @@ import {
   Header,
   Param,
   ParseIntPipe,
+  Res,
   StreamableFile,
 } from '@nestjs/common';
 import {
@@ -13,8 +14,10 @@ import {
   ApiParam,
   ApiResponse,
 } from '@nestjs/swagger';
+import { Response } from 'express';
 import { ScanService } from '../services/scan.service';
 import { ReportService } from '../services/report.service';
+import { ScanResponseDto } from '../dto/scan/response';
 import { ApiProblemResponses } from '../decorators/api-problem-responses.decorator';
 
 /**
@@ -29,6 +32,14 @@ export class ReportController {
     private readonly scanService: ScanService,
     private readonly reportService: ReportService,
   ) {}
+
+  /**
+   * Strong validator for a scan's report. Completed scans are immutable, so the
+   * updatedAt timestamp is a correct ETag; a match lets us skip rendering.
+   */
+  private reportEtag(scan: ScanResponseDto): string {
+    return `"scan-${scan.id}-${new Date(scan.updatedAt).getTime()}"`;
+  }
 
   @Get('html')
   @ApiOperation({
@@ -47,13 +58,24 @@ export class ReportController {
     description: 'HTML accessibility report',
     content: { 'text/html': { schema: { type: 'string' } } },
   })
+  @ApiResponse({ status: 304, description: 'Report unchanged (ETag match)' })
   @ApiProblemResponses(400, 401, 404, 429, 500)
   @Header('Content-Type', 'text/html; charset=utf-8')
   /**
    * Returns a complete standalone HTML accessibility report for the given scan.
    */
-  async getHtmlReport(@Param('id', ParseIntPipe) id: number): Promise<string> {
+  async getHtmlReport(
+    @Param('id', ParseIntPipe) id: number,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<string | undefined> {
     const scan = await this.scanService.findOne(id);
+    const etag = this.reportEtag(scan);
+    response.setHeader('ETag', etag);
+    response.setHeader('Cache-Control', 'private, no-cache');
+    if (response.req.headers['if-none-match'] === etag) {
+      response.status(304);
+      return undefined;
+    }
     return this.reportService.generateHtml(scan);
   }
 
@@ -76,14 +98,24 @@ export class ReportController {
       'application/pdf': { schema: { type: 'string', format: 'binary' } },
     },
   })
+  @ApiResponse({ status: 304, description: 'Report unchanged (ETag match)' })
   @ApiProblemResponses(400, 401, 404, 429, 500)
   /**
    * Returns a PDF accessibility report for the given scan as a downloadable file.
    */
   async getPdfReport(
     @Param('id', ParseIntPipe) id: number,
-  ): Promise<StreamableFile> {
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<StreamableFile | undefined> {
     const scan = await this.scanService.findOne(id);
+    const etag = this.reportEtag(scan);
+    response.setHeader('ETag', etag);
+    response.setHeader('Cache-Control', 'private, no-cache');
+    // Short-circuit before the expensive Playwright PDF render.
+    if (response.req.headers['if-none-match'] === etag) {
+      response.status(304);
+      return undefined;
+    }
     const buffer = await this.reportService.generatePdf(scan);
     return new StreamableFile(buffer, {
       type: 'application/pdf',

@@ -566,7 +566,7 @@
     },
     "/v1/rules": {
       "get": {
-        "description": "Returns all available axe-core accessibility rules with metadata, sorted alphabetically by ID.",
+        "description": "Returns all available axe-core accessibility rules with metadata, sorted alphabetically by ID. Cacheable; the ETag reflects the axe-core version.",
         "operationId": "listRules",
         "parameters": [],
         "responses": {
@@ -582,6 +582,9 @@
                 }
               }
             }
+          },
+          "304": {
+            "description": "Rules unchanged (ETag match)"
           },
           "401": {
             "description": "Missing or invalid Bearer token",
@@ -651,6 +654,9 @@
                 }
               }
             }
+          },
+          "304": {
+            "description": "Report unchanged (ETag match)"
           },
           "400": {
             "description": "Validation failed or malformed request",
@@ -741,6 +747,9 @@
                 }
               }
             }
+          },
+          "304": {
+            "description": "Report unchanged (ETag match)"
           },
           "400": {
             "description": "Validation failed or malformed request",

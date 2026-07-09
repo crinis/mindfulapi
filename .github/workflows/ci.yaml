@@ -1,0 +1,48 @@
+name: ci
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check Playwright version sync
+        run: node scripts/check-playwright-version.mjs
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify committed OpenAPI spec is current
+        run: |
+          npm run generate:openapi
+          git diff --exit-code openapi.json \
+            || (echo "openapi.json is out of date. Run 'npm run generate:openapi' and commit the result." && exit 1)
+
+      - name: Install Chromium for browser e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E tests
+        run: npm run test:e2e

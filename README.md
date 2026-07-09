@@ -183,7 +183,8 @@ All configuration is done via environment variables. Copy `.env.example` for a f
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3000` | HTTP server port |
-| `AUTH_TOKEN` | _(unset)_ | Bearer token for API auth. **When unset, the API is open with no authentication.** |
+| `AUTH_TOKEN` | _(unset)_ | Bearer token for API auth. **The server refuses to start when unset** unless `AUTH_DISABLED=true` is set. |
+| `AUTH_DISABLED` | `false` | Set to `true` to explicitly run without authentication (only takes effect when `AUTH_TOKEN` is unset). **Not recommended.** |
 | `DATABASE_PATH` | `./data/database.sqlite` | SQLite database file path |
 | `REDIS_HOST` | `localhost` | Redis hostname |
 | `REDIS_PORT` | `6379` | Redis port |
@@ -194,7 +195,13 @@ All configuration is done via environment variables. Copy `.env.example` for a f
 | `CLEANUP_ENABLED` | `true` | Enable scheduled deletion of old scans |
 | `CLEANUP_RETENTION_DAYS` | `30` | How many days to keep scans |
 | `CLEANUP_INTERVAL` | `0 2 * * *` | Cron schedule for cleanup |
-| `CRAWL_CONCURRENCY` | `4` | Maximum pages analyzed in parallel for crawl and url_list modes (clamped to 1–16) |
+| `CRAWL_CONCURRENCY` | `4` | Maximum pages analyzed in parallel **within a single scan** (crawl and url_list modes; clamped to 1–16) |
+| `SCAN_CONCURRENCY` | `1` | Maximum scan jobs processed in parallel by the worker (clamped to 1–8). In-flight pages ≈ `SCAN_CONCURRENCY × CRAWL_CONCURRENCY`, all sharing one browser. |
+| `SCAN_ALLOW_PRIVATE_TARGETS` | `false` | Allow scanning private/reserved network targets (see Security below) |
+| `SCAN_TARGET_ALLOW_HOSTS` | _(unset)_ | Comma-separated hostnames exempt from the private-target block |
+| `CORS_ORIGINS` | _(unset)_ | Comma-separated allowed CORS origins; unset disables CORS |
+| `THROTTLE_TTL` | `60` | Rate-limit window in seconds |
+| `THROTTLE_LIMIT` | `100` | Allowed requests per window per client |
 
 Generate a secure encryption key (required when using encrypted fields such as `scanOptions.basicAuth`):
 
@@ -204,11 +211,36 @@ openssl rand -base64 32
 
 ---
 
+## Security
+
+- **Authentication is required by default.** The server will not start unless `AUTH_TOKEN` is set (or `AUTH_DISABLED=true` is set explicitly). Tokens are compared in constant time.
+- **SSRF protection.** Scan targets that resolve to private or reserved network ranges (loopback, RFC 1918, link-local/cloud-metadata `169.254.169.254`, CGNAT, ULA, etc.) are rejected. To scan intranet/staging sites, set `SCAN_ALLOW_PRIVATE_TARGETS=true` (only when the API is not exposed to untrusted clients) or allow specific hosts with `SCAN_TARGET_ALLOW_HOSTS`. Note: targets are resolved before navigation, so a DNS-rebinding attacker with a very low TTL could still reach an internal address between the check and the fetch — acceptable for a self-hosted tool, but keep the API access-controlled.
+- **Rate limiting** is applied globally (`THROTTLE_TTL` / `THROTTLE_LIMIT`); the `/health` probe is exempt.
+- **Single replica.** SQLite and the in-process cleanup schedule assume exactly one API instance. Scale scan throughput with `SCAN_CONCURRENCY`, not by running multiple replicas. Back up the `/data` volume before upgrading, since the schema is auto-synced (no migrations).
+
+---
+
 ## API Reference
 
-The full API reference is in [API.md](API.md). It covers every endpoint, request/response shapes, query parameters, curl examples, and a complete type reference.
+The API is documented by an OpenAPI 3 specification generated directly from the code, so it never drifts from the implementation:
 
-For a live, interactive version open `http://localhost:3000/api` (Swagger UI) while the server is running.
+- **Interactive Swagger UI:** `http://localhost:3000/api` (while the server is running)
+- **OpenAPI document:** `http://localhost:3000/api-json` (or `api-yaml`), and a committed copy at [`openapi.json`](openapi.json)
+
+All endpoints are served under the `/v1` prefix (for example `POST /v1/scans`); the unauthenticated health probe is at `/health`. Errors follow [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json`.
+
+### Breaking changes vs. 0.5.0
+
+If you are upgrading a client (such as the mindfula11y TYPO3 extension):
+
+- All routes are now under `/v1`.
+- `GET /v1/scans` returns a paginated envelope `{ items, total, limit, offset }` of scan **summaries** (per-severity `issueCounts`, no `violations` array). Fetch `GET /v1/scans/:id` for full grouped violations.
+- Errors are `application/problem+json` (`{ type, title, status, detail, instance }`; validation adds an `errors` array).
+- `CrawlStrategy` values are snake_case (`same_hostname`, `same_domain`, `same_origin`).
+- Cleanup: `POST /v1/cleanup` returns `{ deletedScans, cutoffDate }`; `GET /v1/cleanup/config` is now `GET /v1/cleanup/policy`.
+- Authentication is required by default — the server refuses to start unless `AUTH_TOKEN` is set or `AUTH_DISABLED=true` is explicit.
+
+New: `DELETE /v1/scans/:id`, `POST /v1/scans/:id/cancel`, `GET /health`, response caching on rules/reports, and rate limiting.
 
 ---
 

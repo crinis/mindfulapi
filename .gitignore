@@ -66,3 +66,7 @@ storage/
 
 # Temporary output files
 output.txt
+
+# Local artifacts
+/www
+/storage

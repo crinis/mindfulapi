@@ -674,6 +674,23 @@ describe('MindfulAPI (e2e)', () => {
       expect(body[0]).toHaveProperty('description');
       expect(body[0]).toHaveProperty('tags');
     });
+
+    it('is cacheable and returns 304 on a matching ETag', async () => {
+      const first = await request(app.getHttpServer())
+        .get('/v1/rules')
+        .set(authHeader())
+        .expect(200);
+
+      expect(first.headers['cache-control']).toContain('max-age=86400');
+      const etag = first.headers['etag'];
+      expect(etag).toBeDefined();
+
+      await request(app.getHttpServer())
+        .get('/v1/rules')
+        .set(authHeader())
+        .set('If-None-Match', etag)
+        .expect(304);
+    });
   });
 
   describe('Cleanup endpoints', () => {
@@ -793,6 +810,22 @@ describe('MindfulAPI (e2e)', () => {
         .get(`/v1/scans/${seededScan.id}/reports/html`)
         .expect(401);
     });
+
+    it('sets an ETag and returns 304 on a matching If-None-Match', async () => {
+      const first = await request(app.getHttpServer())
+        .get(`/v1/scans/${seededScan.id}/reports/html`)
+        .set(authHeader())
+        .expect(200);
+
+      const etag = first.headers['etag'];
+      expect(etag).toBeDefined();
+
+      await request(app.getHttpServer())
+        .get(`/v1/scans/${seededScan.id}/reports/html`)
+        .set(authHeader())
+        .set('If-None-Match', etag)
+        .expect(304);
+    });
   });
 
   describe('GET /scans/:id/reports/pdf', () => {
@@ -806,6 +839,24 @@ describe('MindfulAPI (e2e)', () => {
       expect(res.headers['content-disposition']).toContain(
         `scan-${seededScan.id}-report.pdf`,
       );
+    });
+
+    it('skips PDF rendering and returns 304 on a matching If-None-Match', async () => {
+      const first = await request(app.getHttpServer())
+        .get(`/v1/scans/${seededScan.id}/reports/pdf`)
+        .set(authHeader())
+        .expect(200);
+
+      const etag = first.headers['etag'];
+      expect(etag).toBeDefined();
+
+      mockPage.pdf.mockClear();
+      await request(app.getHttpServer())
+        .get(`/v1/scans/${seededScan.id}/reports/pdf`)
+        .set(authHeader())
+        .set('If-None-Match', etag)
+        .expect(304);
+      expect(mockPage.pdf).not.toHaveBeenCalled();
     });
 
     it('returns 404 for unknown scan', async () => {

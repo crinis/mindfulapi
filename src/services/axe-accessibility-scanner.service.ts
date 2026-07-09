@@ -23,8 +23,6 @@ export interface BasicAuth {
 export interface ScanOptions {
   /** Specific axe rule IDs to run. When empty, all rules run. */
   ruleIds?: string[];
-  /** Custom HTTP headers to include with all page requests. */
-  headers?: Record<string, string>;
   /** HTTP Basic Authentication credentials. */
   basicAuth?: BasicAuth;
   /** CSS selector to limit scan scope. Scans entire page when omitted. */
@@ -72,7 +70,7 @@ export class AxeAccessibilityScanner {
   ) {}
 
   /**
-   * Creates a browser context configured for scan options such as auth and headers.
+   * Creates a browser context configured for scan options such as basic auth.
    *
    * @param browser Playwright browser instance.
    * @param options Optional scan configuration.
@@ -90,10 +88,6 @@ export class AxeAccessibilityScanner {
         username: options.basicAuth.username,
         password: options.basicAuth.password,
       };
-    }
-
-    if (options?.headers) {
-      contextOptions.extraHTTPHeaders = options.headers;
     }
 
     return browser.newContext(contextOptions);
