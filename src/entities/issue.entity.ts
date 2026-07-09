@@ -1,4 +1,10 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+  Index,
+} from 'typeorm';
 import { Scan } from './scan.entity';
 import { IssueImpact } from '../enums/issue-impact.enum';
 
@@ -12,6 +18,7 @@ export class Issue {
   id: number;
 
   /** Parent scan - cascade delete removes issues when scan is deleted. */
+  @Index()
   @ManyToOne(() => Scan, (scan) => scan.issues, { onDelete: 'CASCADE' })
   scan: Scan;
 
@@ -28,6 +35,7 @@ export class Issue {
   impact: IssueImpact;
 
   /** Canonical URL of the page where this issue was found. */
+  @Index()
   @Column({ nullable: true })
   pageUrl?: string;
 

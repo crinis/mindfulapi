@@ -293,8 +293,7 @@ export class ReportService {
    */
   generateHtml(scan: ScanResponseDto): string {
     const sortedViolations = [...scan.violations].sort(
-      (a, b) =>
-        IMPACT_ORDER.indexOf(a.impact) - IMPACT_ORDER.indexOf(b.impact),
+      (a, b) => IMPACT_ORDER.indexOf(a.impact) - IMPACT_ORDER.indexOf(b.impact),
     );
 
     const statusBadgeClass = `badge badge-status-${escapeHtml(scan.status)}`;
@@ -464,9 +463,7 @@ export class ReportService {
     </section>`;
   }
 
-  private renderViolationsSection(
-    violations: ViolationResponseDto[],
-  ): string {
+  private renderViolationsSection(violations: ViolationResponseDto[]): string {
     const content =
       violations.length === 0
         ? `<div class="success-box">

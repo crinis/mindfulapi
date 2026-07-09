@@ -10,6 +10,8 @@ import { BrowserService } from '../src/services/browser.service';
 import { AxeAccessibilityScanner } from '../src/services/axe-accessibility-scanner.service';
 import { ScanProcessor } from '../src/services/scan.processor';
 import { BasicAuthCryptoService } from '../src/services/basic-auth-crypto.service';
+import { scanConfig } from '../src/config/configuration';
+import { UrlPolicyService } from '../src/services/url-policy.service';
 import {
   FixtureSiteServer,
   startFixtureSiteServer,
@@ -44,8 +46,8 @@ describe('ScanProcessor real URL integration', () => {
     scanRepository = dataSource.getRepository(Scan);
     issueRepository = dataSource.getRepository(Issue);
 
-    browserService = new BrowserService();
-    scanner = new AxeAccessibilityScanner();
+    browserService = new BrowserService(scanConfig());
+    scanner = new AxeAccessibilityScanner(scanConfig());
 
     processor = new ScanProcessor(
       scanRepository,
@@ -53,6 +55,9 @@ describe('ScanProcessor real URL integration', () => {
       browserService,
       scanner,
       new BasicAuthCryptoService(),
+      scanConfig(),
+      // Fixture site runs on localhost, which the default policy blocks.
+      new UrlPolicyService({ ...scanConfig(), allowPrivateTargets: true }),
     );
   });
 

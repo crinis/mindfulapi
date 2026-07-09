@@ -20,6 +20,10 @@ services:
     networks:
       - default
       - ddev_default
+    environment:
+      # DDEV targets (*.ddev.site) resolve to private addresses, which the
+      # SSRF policy blocks by default. Allow them for local integration.
+      - SCAN_ALLOW_PRIVATE_TARGETS=true
 
 networks:
   ddev_default:

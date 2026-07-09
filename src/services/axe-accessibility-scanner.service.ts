@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigType } from '@nestjs/config';
 import {
   Browser,
   BrowserContext,
@@ -7,6 +8,7 @@ import {
 } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
 import { IssueImpact } from '../enums/issue-impact.enum';
+import { scanConfig } from '../config/configuration';
 
 export interface BasicAuth {
   /** Username used for HTTP Basic Authentication. */
@@ -62,6 +64,14 @@ export class AxeAccessibilityScanner {
   private readonly logger = new Logger(AxeAccessibilityScanner.name);
 
   /**
+   * @param config Scan namespace configuration (TLS error handling).
+   */
+  constructor(
+    @Inject(scanConfig.KEY)
+    private readonly config: ConfigType<typeof scanConfig>,
+  ) {}
+
+  /**
    * Creates a browser context configured for scan options such as auth and headers.
    *
    * @param browser Playwright browser instance.
@@ -72,7 +82,7 @@ export class AxeAccessibilityScanner {
     options?: ScanOptions,
   ): Promise<BrowserContext> {
     const contextOptions: BrowserContextOptions = {
-      ignoreHTTPSErrors: process.env.IGNORE_HTTPS_ERRORS === 'true',
+      ignoreHTTPSErrors: this.config.ignoreHttpsErrors,
     };
 
     if (options?.basicAuth) {

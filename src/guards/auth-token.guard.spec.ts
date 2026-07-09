@@ -1,5 +1,6 @@
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { AuthTokenGuard } from './auth-token.guard';
+import { securityConfig } from '../config/configuration';
 
 function mockContext(authHeader?: string): ExecutionContext {
   return {
@@ -9,20 +10,43 @@ function mockContext(authHeader?: string): ExecutionContext {
   } as ExecutionContext;
 }
 
+/** Builds a guard capturing the current process.env security settings. */
+function makeGuard(): AuthTokenGuard {
+  return new AuthTokenGuard(securityConfig());
+}
+
 describe('AuthTokenGuard', () => {
-  let guard: AuthTokenGuard;
-
-  beforeEach(() => {
-    guard = new AuthTokenGuard();
-  });
-
   afterEach(() => {
     delete process.env.AUTH_TOKEN;
+    delete process.env.AUTH_DISABLED;
+  });
+
+  describe('onApplicationBootstrap()', () => {
+    it('throws when AUTH_TOKEN is unset and AUTH_DISABLED is not true', () => {
+      delete process.env.AUTH_TOKEN;
+      delete process.env.AUTH_DISABLED;
+      expect(() => makeGuard().onApplicationBootstrap()).toThrow(/AUTH_TOKEN/);
+    });
+
+    it('does not throw when AUTH_TOKEN is set', () => {
+      process.env.AUTH_TOKEN = 'supersecret';
+      expect(() => makeGuard().onApplicationBootstrap()).not.toThrow();
+    });
+
+    it('does not throw when open access is explicitly enabled', () => {
+      delete process.env.AUTH_TOKEN;
+      process.env.AUTH_DISABLED = 'true';
+      expect(() => makeGuard().onApplicationBootstrap()).not.toThrow();
+    });
   });
 
   describe('when AUTH_TOKEN is not set', () => {
+    let guard: AuthTokenGuard;
+
     beforeEach(() => {
       delete process.env.AUTH_TOKEN;
+      process.env.AUTH_DISABLED = 'true';
+      guard = makeGuard();
     });
 
     it('allows requests with no Authorization header', () => {
@@ -39,8 +63,11 @@ describe('AuthTokenGuard', () => {
   });
 
   describe('when AUTH_TOKEN is set', () => {
+    let guard: AuthTokenGuard;
+
     beforeEach(() => {
       process.env.AUTH_TOKEN = 'supersecret';
+      guard = makeGuard();
     });
 
     it('allows request with the correct Bearer token', () => {

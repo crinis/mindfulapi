@@ -22,23 +22,23 @@ RUN npm run build
 # Production stage
 FROM node:22-alpine AS production
 
+# tini reaps zombies and forwards signals so graceful shutdown works as PID 1
+RUN apk add --no-cache tini
+
 # Set working directory
 WORKDIR /app
 
-# Create data directory and set permissions
-RUN mkdir -p /data && chmod 755 /data
+# Create data directory owned by the unprivileged runtime user
+RUN mkdir -p /data && chown node:node /data
 
 # Copy package files
 COPY package*.json ./
 
 # Install only production dependencies
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 # Copy built application from builder stage
 COPY --from=builder /app/dist ./dist
-
-# Copy other necessary files
-COPY --from=builder /app/nest-cli.json ./
 
 # Set application environment variables
 ENV NODE_ENV=production
@@ -51,4 +51,8 @@ EXPOSE 3000
 # Create volumes for persistent data
 VOLUME ["/data"]
 
+# Run as the unprivileged node user
+USER node
+
+ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "dist/main"]

@@ -1,5 +1,12 @@
-import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnApplicationShutdown,
+} from '@nestjs/common';
+import { ConfigType } from '@nestjs/config';
 import { Browser, chromium } from 'playwright';
+import { scanConfig } from '../config/configuration';
 
 /**
  * Manages a single shared Playwright browser instance for the whole app.
@@ -19,6 +26,14 @@ export class BrowserService implements OnApplicationShutdown {
   private connectionType: 'external' | 'local' | null = null;
 
   /**
+   * @param config Scan namespace configuration (Playwright endpoint).
+   */
+  constructor(
+    @Inject(scanConfig.KEY)
+    private readonly config: ConfigType<typeof scanConfig>,
+  ) {}
+
+  /**
    * Returns the shared browser instance, creating it on first access.
    * Concurrent callers await the same initialization promise.
    */
@@ -32,7 +47,7 @@ export class BrowserService implements OnApplicationShutdown {
    * Initializes the browser by connecting externally or launching locally.
    */
   private async initBrowser(): Promise<Browser> {
-    const playwrightUrl = process.env.PLAYWRIGHT_WS_URL;
+    const playwrightUrl = this.config.playwrightWsUrl;
     this.browser = playwrightUrl
       ? await this.connectToExternalPlaywright(playwrightUrl)
       : await this.launchLocalBrowser();

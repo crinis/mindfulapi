@@ -17,6 +17,7 @@ import { ScanMode } from '../enums/scan-mode.enum';
 import { ScanQueueService } from './scan-queue.service';
 import { BasicAuth } from './axe-accessibility-scanner.service';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
+import { UrlPolicyService } from './url-policy.service';
 import { ScanResponseDto } from '../dto/scan/response';
 import { DEFAULT_CRAWL_OPTIONS } from '../constants/crawl-options.constants';
 import {
@@ -56,6 +57,7 @@ export class ScanService {
     private readonly scanRepository: Repository<Scan>,
     private readonly scanQueueService: ScanQueueService,
     private readonly basicAuthCryptoService: BasicAuthCryptoService,
+    private readonly urlPolicyService: UrlPolicyService,
   ) {}
 
   /**
@@ -66,6 +68,7 @@ export class ScanService {
    */
   async create(createScanDto: CreateScanDto): Promise<ScanResponseDto> {
     const normalized = this.normalizeCreateInput(createScanDto);
+    await this.urlPolicyService.assertAllowedTargets(normalized.targets);
     const encryptedBasicAuth = normalized.scanOptions.basicAuth
       ? this.basicAuthCryptoService.encryptCredentials(
           normalized.scanOptions.basicAuth,
@@ -168,16 +171,11 @@ export class ScanService {
    * @throws NotFoundException When no run exists for the given ID.
    */
   async remove(id: number): Promise<void> {
-    const scan = await this.scanRepository.findOne({
-      where: { id },
-      relations: { issues: true },
-    });
+    const result = await this.scanRepository.delete(id);
 
-    if (!scan) {
+    if (!result.affected) {
       throw new NotFoundException(`Scan with ID ${id} not found`);
     }
-
-    await this.scanRepository.remove(scan);
   }
 
   /**
@@ -403,9 +401,7 @@ export class ScanService {
           ? {
               maxPages: scan.crawlMaxPages ?? DEFAULT_CRAWL_OPTIONS.maxPages,
               maxDepth: scan.crawlMaxDepth ?? DEFAULT_CRAWL_OPTIONS.maxDepth,
-              strategy:
-                scan.crawlStrategy ??
-                DEFAULT_CRAWL_OPTIONS.strategy,
+              strategy: scan.crawlStrategy ?? DEFAULT_CRAWL_OPTIONS.strategy,
               globs: scan.crawlGlobs || [],
               excludeGlobs: scan.crawlExcludeGlobs || [],
             }

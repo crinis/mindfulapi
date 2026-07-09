@@ -71,7 +71,9 @@ describe('ReportService', () => {
     });
 
     it('shows "No Violations Found" for clean scans', () => {
-      const html = service.generateHtml(makeScan({ violations: [], totalIssueCount: 0 }));
+      const html = service.generateHtml(
+        makeScan({ violations: [], totalIssueCount: 0 }),
+      );
       expect(html).toContain('No Violations Found');
     });
 
@@ -82,11 +84,17 @@ describe('ReportService', () => {
             rule: {
               id: 'color-contrast',
               description: 'Ensure sufficient contrast',
-              helpUrl: 'https://dequeuniversity.com/rules/axe/4.11/color-contrast',
+              helpUrl:
+                'https://dequeuniversity.com/rules/axe/4.11/color-contrast',
             },
             impact: IssueImpact.SERIOUS,
             issues: [
-              { id: 1, pageUrl: 'https://example.com', selector: '.btn', context: '<button>' },
+              {
+                id: 1,
+                pageUrl: 'https://example.com',
+                selector: '.btn',
+                context: '<button>',
+              },
             ],
           },
         ],
@@ -103,23 +111,53 @@ describe('ReportService', () => {
     it('sorts violations critical → serious → moderate → minor', () => {
       const scan = makeScan({
         violations: [
-          { rule: { id: 'rule-minor', description: '', helpUrl: null }, impact: IssueImpact.MINOR, issues: [] },
-          { rule: { id: 'rule-critical', description: '', helpUrl: null }, impact: IssueImpact.CRITICAL, issues: [] },
-          { rule: { id: 'rule-moderate', description: '', helpUrl: null }, impact: IssueImpact.MODERATE, issues: [] },
-          { rule: { id: 'rule-serious', description: '', helpUrl: null }, impact: IssueImpact.SERIOUS, issues: [] },
+          {
+            rule: { id: 'rule-minor', description: '', helpUrl: null },
+            impact: IssueImpact.MINOR,
+            issues: [],
+          },
+          {
+            rule: { id: 'rule-critical', description: '', helpUrl: null },
+            impact: IssueImpact.CRITICAL,
+            issues: [],
+          },
+          {
+            rule: { id: 'rule-moderate', description: '', helpUrl: null },
+            impact: IssueImpact.MODERATE,
+            issues: [],
+          },
+          {
+            rule: { id: 'rule-serious', description: '', helpUrl: null },
+            impact: IssueImpact.SERIOUS,
+            issues: [],
+          },
         ],
         totalIssueCount: 0,
       });
       const html = service.generateHtml(scan);
-      expect(html.indexOf('rule-critical')).toBeLessThan(html.indexOf('rule-serious'));
-      expect(html.indexOf('rule-serious')).toBeLessThan(html.indexOf('rule-moderate'));
-      expect(html.indexOf('rule-moderate')).toBeLessThan(html.indexOf('rule-minor'));
+      expect(html.indexOf('rule-critical')).toBeLessThan(
+        html.indexOf('rule-serious'),
+      );
+      expect(html.indexOf('rule-serious')).toBeLessThan(
+        html.indexOf('rule-moderate'),
+      );
+      expect(html.indexOf('rule-moderate')).toBeLessThan(
+        html.indexOf('rule-minor'),
+      );
     });
 
     it('does not mutate the original violations array ordering', () => {
       const violations = [
-        { rule: { id: 'rule-minor', description: '', helpUrl: null }, impact: IssueImpact.MINOR, issues: [] },
-        { rule: { id: 'rule-critical', description: '', helpUrl: null }, impact: IssueImpact.CRITICAL, issues: [] },
+        {
+          rule: { id: 'rule-minor', description: '', helpUrl: null },
+          impact: IssueImpact.MINOR,
+          issues: [],
+        },
+        {
+          rule: { id: 'rule-critical', description: '', helpUrl: null },
+          impact: IssueImpact.CRITICAL,
+          issues: [],
+        },
       ];
       const scan = makeScan({ violations, totalIssueCount: 0 });
       service.generateHtml(scan);
@@ -133,7 +171,12 @@ describe('ReportService', () => {
             rule: { id: 'rule-x', description: 'Desc &amp;', helpUrl: null },
             impact: IssueImpact.MINOR,
             issues: [
-              { id: 1, pageUrl: null, selector: '<script>alert(1)</script>', context: '<img onerror=alert(1)>' },
+              {
+                id: 1,
+                pageUrl: null,
+                selector: '<script>alert(1)</script>',
+                context: '<img onerror=alert(1)>',
+              },
             ],
           },
         ],
@@ -162,14 +205,21 @@ describe('ReportService', () => {
     });
 
     it('renders Scan Options section when rootElement is set', () => {
-      const html = service.generateHtml(makeScan({ scanOptions: { rootElement: 'main', ruleIds: null } }));
+      const html = service.generateHtml(
+        makeScan({ scanOptions: { rootElement: 'main', ruleIds: null } }),
+      );
       expect(html).toContain('Scan Options');
       expect(html).toContain('main');
     });
 
     it('renders Scan Options section when ruleIds are set', () => {
       const html = service.generateHtml(
-        makeScan({ scanOptions: { rootElement: null, ruleIds: ['color-contrast', 'image-alt'] } }),
+        makeScan({
+          scanOptions: {
+            rootElement: null,
+            ruleIds: ['color-contrast', 'image-alt'],
+          },
+        }),
       );
       expect(html).toContain('Scan Options');
       expect(html).toContain('color-contrast');
@@ -177,7 +227,9 @@ describe('ReportService', () => {
     });
 
     it('omits Scan Options section when both options are null', () => {
-      const html = service.generateHtml(makeScan({ scanOptions: { rootElement: null, ruleIds: null } }));
+      const html = service.generateHtml(
+        makeScan({ scanOptions: { rootElement: null, ruleIds: null } }),
+      );
       expect(html).not.toContain('Scan Options');
     });
 
@@ -200,7 +252,9 @@ describe('ReportService', () => {
     });
 
     it('omits Crawl Options section for single_url scans', () => {
-      const html = service.generateHtml(makeScan({ mode: ScanMode.SINGLE_URL, crawlOptions: null }));
+      const html = service.generateHtml(
+        makeScan({ mode: ScanMode.SINGLE_URL, crawlOptions: null }),
+      );
       expect(html).not.toContain('Crawl Options');
     });
 
@@ -208,20 +262,30 @@ describe('ReportService', () => {
       const scan = makeScan({
         violations: [
           {
-            rule: { id: 'r', description: 'D', helpUrl: 'https://dequeuniversity.com/rules' },
+            rule: {
+              id: 'r',
+              description: 'D',
+              helpUrl: 'https://dequeuniversity.com/rules',
+            },
             impact: IssueImpact.MINOR,
             issues: [],
           },
         ],
         totalIssueCount: 0,
       });
-      expect(service.generateHtml(scan)).toContain('https://dequeuniversity.com/rules');
+      expect(service.generateHtml(scan)).toContain(
+        'https://dequeuniversity.com/rules',
+      );
     });
 
     it('omits documentation link when helpUrl is null', () => {
       const scan = makeScan({
         violations: [
-          { rule: { id: 'r', description: 'D', helpUrl: null }, impact: IssueImpact.MINOR, issues: [] },
+          {
+            rule: { id: 'r', description: 'D', helpUrl: null },
+            impact: IssueImpact.MINOR,
+            issues: [],
+          },
         ],
         totalIssueCount: 0,
       });
@@ -255,6 +319,7 @@ describe('ReportService', () => {
       const scan = makeScan();
       const result = await service.generatePdf(scan);
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- jest.Mocked member access, not an unbound call
       expect(mockBrowserService.getBrowser).toHaveBeenCalledTimes(1);
       expect(mockBrowser.newPage).toHaveBeenCalledTimes(1);
       expect(mockPage.setContent).toHaveBeenCalledWith(
@@ -272,7 +337,9 @@ describe('ReportService', () => {
 
     it('closes the page even if pdf() throws', async () => {
       mockPage.pdf.mockRejectedValueOnce(new Error('PDF error'));
-      await expect(service.generatePdf(makeScan())).rejects.toThrow('PDF error');
+      await expect(service.generatePdf(makeScan())).rejects.toThrow(
+        'PDF error',
+      );
       expect(mockPage.close).toHaveBeenCalledTimes(1);
     });
   });

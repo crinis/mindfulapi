@@ -4,6 +4,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { ScanService } from './scan.service';
 import { ScanQueueService } from './scan-queue.service';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
+import { UrlPolicyService } from './url-policy.service';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 import { ScanStatus } from '../enums/scan-status.enum';
@@ -26,29 +27,28 @@ const makeIssue = (overrides: Partial<Issue> = {}): Issue =>
     ...overrides,
   }) as Issue;
 
-const makeScan = (overrides: Partial<Scan> = {}): Scan =>
-  ({
-    id: 1,
-    mode: ScanMode.SINGLE_URL,
-    targets: ['https://example.com'],
-    rootElement: undefined,
-    ruleIds: null,
-    basicAuthUsernameEncrypted: null,
-    basicAuthPasswordEncrypted: null,
-    crawlMaxPages: null,
-    crawlMaxDepth: null,
-    crawlStrategy: null,
-    crawlGlobs: null,
-    crawlExcludeGlobs: null,
-    status: ScanStatus.PENDING,
-    pagesDiscovered: 0,
-    pagesScanned: 0,
-    pagesFailed: 0,
-    issues: [],
-    createdAt: new Date('2025-01-01T00:00:00Z'),
-    updatedAt: new Date('2025-01-01T00:00:00Z'),
-    ...overrides,
-  }) as Scan;
+const makeScan = (overrides: Partial<Scan> = {}): Scan => ({
+  id: 1,
+  mode: ScanMode.SINGLE_URL,
+  targets: ['https://example.com'],
+  rootElement: undefined,
+  ruleIds: null,
+  basicAuthUsernameEncrypted: null,
+  basicAuthPasswordEncrypted: null,
+  crawlMaxPages: null,
+  crawlMaxDepth: null,
+  crawlStrategy: null,
+  crawlGlobs: null,
+  crawlExcludeGlobs: null,
+  status: ScanStatus.PENDING,
+  pagesDiscovered: 0,
+  pagesScanned: 0,
+  pagesFailed: 0,
+  issues: [],
+  createdAt: new Date('2025-01-01T00:00:00Z'),
+  updatedAt: new Date('2025-01-01T00:00:00Z'),
+  ...overrides,
+});
 
 describe('ScanService', () => {
   let service: ScanService;
@@ -56,6 +56,9 @@ describe('ScanService', () => {
   let mockQueue: jest.Mocked<Pick<ScanQueueService, 'addScanJob'>>;
   let mockBasicAuthCrypto: jest.Mocked<
     Pick<BasicAuthCryptoService, 'encryptCredentials'>
+  >;
+  let mockUrlPolicy: jest.Mocked<
+    Pick<UrlPolicyService, 'assertAllowedTargets'>
   >;
 
   beforeEach(async () => {
@@ -71,6 +74,9 @@ describe('ScanService', () => {
     mockBasicAuthCrypto = {
       encryptCredentials: jest.fn(),
     };
+    mockUrlPolicy = {
+      assertAllowedTargets: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -78,6 +84,7 @@ describe('ScanService', () => {
         { provide: getRepositoryToken(Scan), useValue: mockRepo },
         { provide: ScanQueueService, useValue: mockQueue },
         { provide: BasicAuthCryptoService, useValue: mockBasicAuthCrypto },
+        { provide: UrlPolicyService, useValue: mockUrlPolicy },
       ],
     }).compile();
 
@@ -85,6 +92,21 @@ describe('ScanService', () => {
   });
 
   describe('create()', () => {
+    it('rejects creation when the URL policy blocks a target', async () => {
+      mockUrlPolicy.assertAllowedTargets.mockRejectedValue(
+        new BadRequestException('Scan target(s) not allowed'),
+      );
+
+      await expect(
+        service.create({
+          mode: ScanMode.SINGLE_URL,
+          url: 'http://127.0.0.1/',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockRepo.save).not.toHaveBeenCalled();
+      expect(mockQueue.addScanJob).not.toHaveBeenCalled();
+    });
+
     it('saves a single_url scan, queues a job, and returns the created scan', async () => {
       const dto: CreateScanDto = {
         mode: ScanMode.SINGLE_URL,
@@ -428,17 +450,15 @@ describe('ScanService', () => {
   });
 
   describe('remove()', () => {
-    it('removes scan when it exists', async () => {
-      const scan = makeScan();
-      mockRepo.findOne.mockResolvedValue(scan);
-      mockRepo.remove = jest.fn().mockResolvedValue(undefined);
+    it('deletes scan by id relying on cascade for issues', async () => {
+      mockRepo.delete = jest.fn().mockResolvedValue({ affected: 1 });
 
       await expect(service.remove(1)).resolves.not.toThrow();
-      expect(mockRepo.remove).toHaveBeenCalledWith(scan);
+      expect(mockRepo.delete).toHaveBeenCalledWith(1);
     });
 
     it('throws NotFoundException when scan does not exist', async () => {
-      mockRepo.findOne.mockResolvedValue(null);
+      mockRepo.delete = jest.fn().mockResolvedValue({ affected: 0 });
       await expect(service.remove(999)).rejects.toThrow(NotFoundException);
     });
   });

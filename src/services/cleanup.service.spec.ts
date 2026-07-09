@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { CleanupService } from './cleanup.service';
 import { Scan } from '../entities/scan.entity';
 import { ScanStatus } from '../enums/scan-status.enum';
+import { cleanupConfig } from '../config/configuration';
 
 const makeScan = (id: number): Partial<Scan> => ({
   id,
@@ -25,6 +26,7 @@ describe('CleanupService', () => {
       providers: [
         CleanupService,
         { provide: getRepositoryToken(Scan), useValue: mockRepo },
+        { provide: cleanupConfig.KEY, useValue: cleanupConfig() },
       ],
     }).compile();
 
@@ -53,8 +55,11 @@ describe('CleanupService', () => {
 
     it('reflects CLEANUP_INTERVAL env var', () => {
       process.env.CLEANUP_INTERVAL = '0 3 * * *';
-      // Re-instantiate to pick up env var (CleanupService reads env in constructor)
-      const freshService = new (CleanupService as any)(mockRepo);
+      // Re-instantiate to pick up env var (config is captured at construction)
+      const freshService = new (CleanupService as any)(
+        mockRepo,
+        cleanupConfig(),
+      );
       const config = freshService.getCleanupConfig();
       expect(config.interval).toBe('0 3 * * *');
     });
@@ -121,7 +126,10 @@ describe('CleanupService', () => {
     it('skips cleanup when CLEANUP_ENABLED=false', async () => {
       process.env.CLEANUP_ENABLED = 'false';
       // Re-instantiate to pick up the disabled flag
-      const disabledService = new (CleanupService as any)(mockRepo);
+      const disabledService = new (CleanupService as any)(
+        mockRepo,
+        cleanupConfig(),
+      );
       const spy = jest
         .spyOn(disabledService, 'performCleanup')
         .mockResolvedValue(undefined);

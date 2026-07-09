@@ -37,6 +37,7 @@ jest.mock('@crawlee/memory-storage', () => ({
 
 import { ScanProcessor } from './scan.processor';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
+import { scanConfig } from '../config/configuration';
 import { Scan } from '../entities/scan.entity';
 import { ScanMode } from '../enums/scan-mode.enum';
 import { ScanStatus } from '../enums/scan-status.enum';
@@ -51,29 +52,28 @@ type MockRepo = {
   save?: jest.Mock;
 };
 
-const makeScan = (overrides: Partial<Scan> = {}): Scan =>
-  ({
-    id: 1,
-    mode: ScanMode.SINGLE_URL,
-    targets: ['https://example.com'],
-    rootElement: undefined,
-    ruleIds: null,
-    basicAuthUsernameEncrypted: null,
-    basicAuthPasswordEncrypted: null,
-    crawlMaxPages: null,
-    crawlMaxDepth: null,
-    crawlStrategy: null,
-    crawlGlobs: null,
-    crawlExcludeGlobs: null,
-    status: ScanStatus.PENDING,
-    pagesDiscovered: 0,
-    pagesScanned: 0,
-    pagesFailed: 0,
-    issues: [],
-    createdAt: new Date('2026-01-01T00:00:00.000Z'),
-    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-    ...overrides,
-  }) as Scan;
+const makeScan = (overrides: Partial<Scan> = {}): Scan => ({
+  id: 1,
+  mode: ScanMode.SINGLE_URL,
+  targets: ['https://example.com'],
+  rootElement: undefined,
+  ruleIds: null,
+  basicAuthUsernameEncrypted: null,
+  basicAuthPasswordEncrypted: null,
+  crawlMaxPages: null,
+  crawlMaxDepth: null,
+  crawlStrategy: null,
+  crawlGlobs: null,
+  crawlExcludeGlobs: null,
+  status: ScanStatus.PENDING,
+  pagesDiscovered: 0,
+  pagesScanned: 0,
+  pagesFailed: 0,
+  issues: [],
+  createdAt: new Date('2026-01-01T00:00:00.000Z'),
+  updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+  ...overrides,
+});
 
 describe('ScanProcessor', () => {
   let processor: ScanProcessor;
@@ -92,6 +92,7 @@ describe('ScanProcessor', () => {
   let mockBasicAuthCrypto: jest.Mocked<
     Pick<BasicAuthCryptoService, 'decryptCredentials'>
   >;
+  let mockUrlPolicy: { isAllowedTarget: jest.Mock };
   let mockContext: { close: jest.Mock; newPage: jest.Mock };
 
   beforeEach(() => {
@@ -149,6 +150,9 @@ describe('ScanProcessor', () => {
     mockBasicAuthCrypto = {
       decryptCredentials: jest.fn(),
     };
+    mockUrlPolicy = {
+      isAllowedTarget: jest.fn().mockResolvedValue({ allowed: true }),
+    };
 
     processor = new ScanProcessor(
       mockScanRepo as any,
@@ -156,6 +160,8 @@ describe('ScanProcessor', () => {
       mockBrowserService as any,
       mockScanner as any,
       mockBasicAuthCrypto as any,
+      scanConfig(),
+      mockUrlPolicy as any,
     );
   });
 
@@ -441,6 +447,102 @@ describe('ScanProcessor', () => {
       pagesScanned: 1,
       pagesFailed: 0,
     });
+  });
+
+  it('counts policy-blocked pages as failed without opening a page', async () => {
+    mockScanQb.getOne.mockResolvedValue(
+      makeScan({
+        mode: ScanMode.URL_LIST,
+        targets: ['https://example.com/a', 'https://internal.example/b'],
+      }),
+    );
+    mockUrlPolicy.isAllowedTarget.mockImplementation((url: string) =>
+      Promise.resolve(
+        url.includes('internal')
+          ? { allowed: false, reason: 'private range' }
+          : { allowed: true },
+      ),
+    );
+    mockScanner.scanPage.mockResolvedValue({
+      finalUrl: 'https://example.com/a',
+      issues: [],
+    });
+
+    await processor.process({ data: { scanId: 1 } } as any);
+
+    expect(mockScanner.scanPage).toHaveBeenCalledTimes(1);
+    expect(mockContext.newPage).toHaveBeenCalledTimes(1);
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      status: ScanStatus.COMPLETED,
+      pagesDiscovered: 2,
+      pagesScanned: 1,
+      pagesFailed: 1,
+    });
+  });
+
+  it('marks scan PENDING when a non-final attempt fails', async () => {
+    mockScanQb.getOne.mockResolvedValue(makeScan());
+    mockBrowserService.getBrowser.mockRejectedValue(
+      new Error('browser unavailable'),
+    );
+
+    await expect(
+      processor.process({
+        data: { scanId: 1 },
+        attemptsMade: 0,
+        opts: { attempts: 3 },
+      } as any),
+    ).rejects.toThrow('browser unavailable');
+
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      status: ScanStatus.PENDING,
+    });
+  });
+
+  it('marks scan FAILED only on the final attempt', async () => {
+    mockScanQb.getOne.mockResolvedValue(makeScan());
+    mockBrowserService.getBrowser.mockRejectedValue(
+      new Error('browser unavailable'),
+    );
+
+    await expect(
+      processor.process({
+        data: { scanId: 1 },
+        attemptsMade: 2,
+        opts: { attempts: 3 },
+      } as any),
+    ).rejects.toThrow('browser unavailable');
+
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      status: ScanStatus.FAILED,
+    });
+  });
+
+  it('truncates oversized issue fields and normalizes pageUrl before saving', async () => {
+    mockScanQb.getOne.mockResolvedValue(makeScan());
+    mockScanner.scanPage.mockResolvedValue({
+      finalUrl: 'https://example.com/',
+      issues: [
+        {
+          ruleId: 'color-contrast',
+          description: 'd'.repeat(5000),
+          impact: IssueImpact.SERIOUS,
+          pageUrl: 'https://example.com/page/#section',
+          selector: 's'.repeat(5000),
+          context: 'c'.repeat(10000),
+          helpUrl: 'https://example.com/help',
+        },
+      ],
+    });
+
+    await processor.process({ data: { scanId: 1 } } as any);
+
+    const saved = (mockIssueRepo.save as jest.Mock).mock.calls[0][0][0];
+    expect(saved.description.length).toBeLessThanOrEqual(1000);
+    expect(saved.selector.length).toBeLessThanOrEqual(1000);
+    expect(saved.context.length).toBeLessThanOrEqual(4000);
+    // Fragment stripped and trailing slash removed by normalization.
+    expect(saved.pageUrl).toBe('https://example.com/page');
   });
 
   it('decrypts basic auth credentials and passes them to scanner context', async () => {

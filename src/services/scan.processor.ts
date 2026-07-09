@@ -1,5 +1,6 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigType } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Job } from 'bullmq';
@@ -23,26 +24,23 @@ import {
   ScannedIssue,
 } from './axe-accessibility-scanner.service';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
+import { UrlPolicyService } from './url-policy.service';
 import {
   normalizeAndDedupeHttpUrls,
   normalizeHttpUrl,
 } from '../utils/url-normalization.util';
 import { DEFAULT_CRAWL_OPTIONS } from '../constants/crawl-options.constants';
+import { scanConfig } from '../config/configuration';
+import { truncate } from '../utils/truncate.util';
 
-/** Default concurrent page limit for both crawl and url_list modes. */
-const DEFAULT_CONCURRENCY = 4;
+/** Length caps for stored issue fields — SQLite ignores varchar lengths. */
+const MAX_DESCRIPTION_LENGTH = 1000;
+const MAX_SELECTOR_LENGTH = 1000;
+const MAX_CONTEXT_LENGTH = 4000;
 
-/**
- * Reads the `CRAWL_CONCURRENCY` environment variable and clamps it to [1, 16].
- * Falls back to {@link DEFAULT_CONCURRENCY} when the variable is absent or invalid.
- */
-function resolveConcurrency(): number {
-  const raw = parseInt(process.env.CRAWL_CONCURRENCY ?? '', 10);
-  if (Number.isFinite(raw) && raw >= 1) {
-    return Math.min(raw, 16);
-  }
-  return DEFAULT_CONCURRENCY;
-}
+/** Progress rows are rewritten at most every N ms / every N pages per scan. */
+const PROGRESS_WRITE_INTERVAL_MS = 2000;
+const PROGRESS_WRITE_PAGE_BATCH = 10;
 
 /**
  * Unit of work for scanning a single page URL.
@@ -62,6 +60,16 @@ interface ScanProgress {
   pagesScanned: number;
   /** Number of pages that failed processing. */
   pagesFailed: number;
+}
+
+/**
+ * Batched persister for scan progress counters.
+ */
+interface ProgressWriter {
+  /** Persists unconditionally (initial totals, final flush). */
+  flush(progress: ScanProgress): Promise<void>;
+  /** Persists only when the page-batch or time threshold is reached. */
+  maybePersist(progress: ScanProgress): Promise<void>;
 }
 
 /**
@@ -87,6 +95,9 @@ export class ScanProcessor extends WorkerHost {
     private readonly browserService: BrowserService,
     private readonly scanner: AxeAccessibilityScanner,
     private readonly basicAuthCryptoService: BasicAuthCryptoService,
+    @Inject(scanConfig.KEY)
+    private readonly config: ConfigType<typeof scanConfig>,
+    private readonly urlPolicyService: UrlPolicyService,
   ) {
     super();
   }
@@ -136,8 +147,18 @@ export class ScanProcessor extends WorkerHost {
 
       this.logger.log(`Completed scan ${scanId}`);
     } catch (error) {
-      this.logger.error(`Failed scan ${scanId}:`, error);
-      await this.scanRepository.update(scanId, { status: ScanStatus.FAILED });
+      // BullMQ increments attemptsMade only after an attempt finishes, so the
+      // attempt currently running is attemptsMade + 1. Marking FAILED before
+      // the final attempt would flap FAILED -> RUNNING for polling clients.
+      const configuredAttempts = job.opts.attempts ?? 1;
+      const isFinalAttempt = job.attemptsMade + 1 >= configuredAttempts;
+      this.logger.error(
+        `Failed scan ${scanId} (attempt ${job.attemptsMade + 1}/${configuredAttempts}):`,
+        error,
+      );
+      await this.scanRepository.update(scanId, {
+        status: isFinalAttempt ? ScanStatus.FAILED : ScanStatus.PENDING,
+      });
       throw error;
     }
   }
@@ -177,32 +198,48 @@ export class ScanProcessor extends WorkerHost {
       pagesScanned: 0,
       pagesFailed: 0,
     };
-    await this.persistProgress(scan.id, progress);
+    const progressWriter = this.createProgressWriter(scan.id);
+    await progressWriter.flush(progress);
 
     const browser = await this.browserService.getBrowser();
     const context = await this.scanner.createContext(browser, scanOptions);
 
     try {
-      await this.processTaskQueue(tasks, resolveConcurrency(), async (task) => {
-        const page = await context.newPage();
-        try {
-          const { issues } = await this.scanner.scanPage(
-            page,
-            task.url,
-            scanOptions,
-          );
-          await this.saveIssues(scan.id, issues);
-          progress.pagesScanned += 1;
-        } catch (error) {
-          progress.pagesFailed += 1;
-          this.logger.warn(
-            `Failed page ${task.url} in scan ${scan.id}: ${String(error)}`,
-          );
-        } finally {
-          await page.close();
-          await this.persistProgress(scan.id, progress);
-        }
-      });
+      await this.processTaskQueue(
+        tasks,
+        this.config.crawlConcurrency,
+        async (task) => {
+          // Re-checked at scan time: DNS may have changed since creation.
+          const policy = await this.urlPolicyService.isAllowedTarget(task.url);
+          if (!policy.allowed) {
+            progress.pagesFailed += 1;
+            this.logger.warn(
+              `Blocked page ${task.url} in scan ${scan.id}: ${policy.reason}`,
+            );
+            await progressWriter.maybePersist(progress);
+            return;
+          }
+          const page = await context.newPage();
+          try {
+            const { issues } = await this.scanner.scanPage(
+              page,
+              task.url,
+              scanOptions,
+            );
+            await this.saveIssues(scan.id, issues);
+            progress.pagesScanned += 1;
+          } catch (error) {
+            progress.pagesFailed += 1;
+            this.logger.warn(
+              `Failed page ${task.url} in scan ${scan.id}: ${String(error)}`,
+            );
+          } finally {
+            await page.close();
+            await progressWriter.maybePersist(progress);
+          }
+        },
+      );
+      await progressWriter.flush(progress);
     } finally {
       await context.close();
     }
@@ -228,7 +265,7 @@ export class ScanProcessor extends WorkerHost {
       DEFAULT_CRAWL_OPTIONS.strategy) as unknown as EnqueueStrategy;
     const globs = scan.crawlGlobs || [];
     const excludeGlobs = scan.crawlExcludeGlobs || [];
-    const concurrency = resolveConcurrency();
+    const concurrency = this.config.crawlConcurrency;
 
     const seen = new Set(seedUrls);
     const crawlConfig = new Configuration({
@@ -244,7 +281,8 @@ export class ScanProcessor extends WorkerHost {
       pagesScanned: 0,
       pagesFailed: 0,
     };
-    await this.persistProgress(scan.id, progress);
+    const progressWriter = this.createProgressWriter(scan.id);
+    await progressWriter.flush(progress);
 
     await requestQueue.addRequests(
       seedUrls.map((url) => ({ url, uniqueKey: url, userData: { depth: 0 } })),
@@ -261,6 +299,19 @@ export class ScanProcessor extends WorkerHost {
         requestHandler: async ({ request, enqueueLinks }) => {
           const depth = Number(request.userData.depth || 0);
           progress.pagesDiscovered += 1;
+          // Discovered links are unvetted input — enforce the target policy
+          // for every crawled page, not just the seeds.
+          const policy = await this.urlPolicyService.isAllowedTarget(
+            request.url,
+          );
+          if (!policy.allowed) {
+            progress.pagesFailed += 1;
+            this.logger.warn(
+              `Blocked page ${request.url} in scan ${scan.id}: ${policy.reason}`,
+            );
+            await progressWriter.maybePersist(progress);
+            return;
+          }
           const page = await context.newPage();
           try {
             // Scan phase — failures here count as page failures.
@@ -321,7 +372,7 @@ export class ScanProcessor extends WorkerHost {
             }
           } finally {
             await page.close();
-            await this.persistProgress(scan.id, progress);
+            await progressWriter.maybePersist(progress);
           }
         },
         failedRequestHandler: async ({ request }) => {
@@ -329,7 +380,7 @@ export class ScanProcessor extends WorkerHost {
           this.logger.warn(
             `Failed page ${request.url} in scan ${scan.id} after retries`,
           );
-          await this.persistProgress(scan.id, progress);
+          await progressWriter.maybePersist(progress);
         },
       },
       crawlConfig,
@@ -337,6 +388,7 @@ export class ScanProcessor extends WorkerHost {
 
     try {
       await crawler.run();
+      await progressWriter.flush(progress);
     } finally {
       await context.close();
       await requestQueue.drop().catch((error: unknown) => {
@@ -409,11 +461,14 @@ export class ScanProcessor extends WorkerHost {
       this.issueRepository.create({
         scan: { id: scanId } as Pick<Scan, 'id'>,
         ruleId: issue.ruleId,
-        description: issue.description,
+        description: truncate(issue.description, MAX_DESCRIPTION_LENGTH)!,
         impact: issue.impact,
-        pageUrl: issue.pageUrl,
-        selector: issue.selector,
-        context: issue.context,
+        // Stored in canonical form so page-URL filters can match in SQL.
+        pageUrl: issue.pageUrl
+          ? (normalizeHttpUrl(issue.pageUrl) ?? issue.pageUrl)
+          : issue.pageUrl,
+        selector: truncate(issue.selector, MAX_SELECTOR_LENGTH),
+        context: truncate(issue.context, MAX_CONTEXT_LENGTH),
         helpUrl: issue.helpUrl,
       }),
     );
@@ -422,12 +477,34 @@ export class ScanProcessor extends WorkerHost {
   }
 
   /**
-   * Persists current progress counters to the scan row.
+   * Creates a per-scan progress persister that batches row updates.
+   *
+   * Large crawls previously issued one UPDATE per scanned page; the writer
+   * only hits the database every {@link PROGRESS_WRITE_PAGE_BATCH} pages or
+   * {@link PROGRESS_WRITE_INTERVAL_MS} milliseconds, whichever comes first.
    */
-  private async persistProgress(
-    scanId: number,
-    progress: ScanProgress,
-  ): Promise<void> {
-    await this.scanRepository.update(scanId, progress);
+  private createProgressWriter(scanId: number): ProgressWriter {
+    let lastWriteAt = 0;
+    let pagesSinceWrite = 0;
+
+    const write = async (progress: ScanProgress): Promise<void> => {
+      lastWriteAt = Date.now();
+      pagesSinceWrite = 0;
+      await this.scanRepository.update(scanId, { ...progress });
+    };
+
+    return {
+      flush: (progress) => write(progress),
+      maybePersist: async (progress) => {
+        pagesSinceWrite += 1;
+        if (
+          Date.now() - lastWriteAt < PROGRESS_WRITE_INTERVAL_MS &&
+          pagesSinceWrite < PROGRESS_WRITE_PAGE_BATCH
+        ) {
+          return;
+        }
+        await write(progress);
+      },
+    };
   }
 }

@@ -59,6 +59,8 @@ services:
       playwright:
         condition: service_healthy
     restart: unless-stopped
+    # Give in-flight scans time to finish before SIGKILL on shutdown.
+    stop_grace_period: 30s
 
 volumes:
   redis_data:

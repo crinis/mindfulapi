@@ -10,6 +10,7 @@ import { QueueModule } from '../src/modules/queue.module';
 import { ScanQueueService } from '../src/services/scan-queue.service';
 import { BrowserService } from '../src/services/browser.service';
 import { BasicAuthCryptoService } from '../src/services/basic-auth-crypto.service';
+import { UrlPolicyService } from '../src/services/url-policy.service';
 import { Scan } from '../src/entities/scan.entity';
 import { Issue } from '../src/entities/issue.entity';
 import { ScanStatus } from '../src/enums/scan-status.enum';
@@ -34,12 +35,25 @@ const mockPage = {
     {
       provide: BrowserService,
       useValue: {
-        getBrowser: jest.fn().mockResolvedValue({ newPage: jest.fn().mockResolvedValue(mockPage) }),
+        getBrowser: jest.fn().mockResolvedValue({
+          newPage: jest.fn().mockResolvedValue(mockPage),
+        }),
       },
     },
     BasicAuthCryptoService,
+    {
+      provide: UrlPolicyService,
+      useValue: {
+        assertAllowedTargets: jest.fn().mockResolvedValue(undefined),
+      },
+    },
   ],
-  exports: [ScanQueueService, BrowserService, BasicAuthCryptoService],
+  exports: [
+    ScanQueueService,
+    BrowserService,
+    BasicAuthCryptoService,
+    UrlPolicyService,
+  ],
 })
 class MockQueueModule {}
 
@@ -100,7 +114,7 @@ async function seedCompletedScan(
     },
   ] as any[]);
 
-  return scan as Scan;
+  return scan;
 }
 
 describe('MindfulAPI (e2e)', () => {
@@ -111,6 +125,8 @@ describe('MindfulAPI (e2e)', () => {
   beforeAll(async () => {
     process.env.DATABASE_PATH = ':memory:';
     process.env.AUTH_TOKEN = 'testtoken';
+    // Keep scan creation independent of live DNS in CI.
+    process.env.SCAN_ALLOW_PRIVATE_TARGETS = 'true';
     delete process.env.NODE_ENV;
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -147,6 +163,7 @@ describe('MindfulAPI (e2e)', () => {
     await app.close();
     delete process.env.AUTH_TOKEN;
     delete process.env.DATABASE_PATH;
+    delete process.env.SCAN_ALLOW_PRIVATE_TARGETS;
   });
 
   beforeEach(() => mockAddScanJob.mockClear());
@@ -449,6 +466,36 @@ describe('MindfulAPI (e2e)', () => {
         .expect(400));
   });
 
+  describe('DELETE /scans/:id', () => {
+    it('deletes a scan and cascades its issues', async () => {
+      const scan = await seedCompletedScan(dataSource);
+
+      await request(app.getHttpServer())
+        .delete(`/scans/${scan.id}`)
+        .set(authHeader())
+        .expect(204);
+
+      await request(app.getHttpServer())
+        .get(`/scans/${scan.id}`)
+        .set(authHeader())
+        .expect(404);
+
+      const remainingIssues = await dataSource
+        .getRepository(Issue)
+        .count({ where: { scan: { id: scan.id } } });
+      expect(remainingIssues).toBe(0);
+    });
+
+    it('returns 404 for unknown ID', () =>
+      request(app.getHttpServer())
+        .delete('/scans/999999')
+        .set(authHeader())
+        .expect(404));
+
+    it('returns 401 without token', () =>
+      request(app.getHttpServer()).delete('/scans/1').expect(401));
+  });
+
   describe('GET /rules', () => {
     it('returns axe rules', async () => {
       const { body } = await request(app.getHttpServer())
@@ -540,7 +587,9 @@ describe('MindfulAPI (e2e)', () => {
       const htmlPath = body.paths['/scans/{id}/reports/html'];
       const pdfPath = body.paths['/scans/{id}/reports/pdf'];
       expect(htmlPath.get.responses['200'].content['text/html']).toBeDefined();
-      expect(pdfPath.get.responses['200'].content['application/pdf']).toBeDefined();
+      expect(
+        pdfPath.get.responses['200'].content['application/pdf'],
+      ).toBeDefined();
     });
   });
 

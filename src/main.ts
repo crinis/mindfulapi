@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import * as express from 'express';
@@ -13,6 +14,9 @@ import { createOpenApiConfig } from './config/openapi.config';
  */
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
+
+  // Required so BrowserService and the BullMQ worker shut down cleanly on SIGTERM/SIGINT.
+  app.enableShutdownHooks();
 
   // Explicit body size limits to prevent oversized payloads.
   app.use(express.json({ limit: '1mb' }));
@@ -35,7 +39,8 @@ async function bootstrap() {
     yamlDocumentUrl: 'api-yaml',
   });
 
-  await app.listen(process.env.PORT ?? 3000);
+  const configService = app.get(ConfigService);
+  await app.listen(configService.getOrThrow<number>('app.port'));
 }
 
 /**

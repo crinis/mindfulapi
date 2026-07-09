@@ -1,9 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigType } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan } from 'typeorm';
 import { Scan } from '../entities/scan.entity';
 import { CleanupConfigDto } from '../dto/cleanup.dto';
+import { cleanupConfig } from '../config/configuration';
 
 /**
  * Service for automated cleanup of old scan data.
@@ -24,13 +26,16 @@ export class CleanupService {
 
   /**
    * @param scanRepository Repository for querying/deleting old scan runs.
+   * @param config Cleanup namespace configuration.
    */
   constructor(
     @InjectRepository(Scan)
     private readonly scanRepository: Repository<Scan>,
+    @Inject(cleanupConfig.KEY)
+    private readonly config: ConfigType<typeof cleanupConfig>,
   ) {
-    this.isEnabled = process.env.CLEANUP_ENABLED !== 'false';
-    this.retentionDays = parseInt(process.env.CLEANUP_RETENTION_DAYS || '30', 10);
+    this.isEnabled = config.enabled;
+    this.retentionDays = config.retentionDays;
 
     this.logger.log(
       `Cleanup service initialized - enabled: ${this.isEnabled}, retention: ${this.retentionDays} days`,
@@ -39,6 +44,10 @@ export class CleanupService {
 
   /**
    * Scheduled cleanup entrypoint invoked by Nest scheduler.
+   *
+   * The cron expression is read directly from the environment because
+   * decorators evaluate at import time, before ConfigModule loads. The value
+   * is still validated by the env schema.
    */
   @Cron(process.env.CLEANUP_INTERVAL || CronExpression.EVERY_DAY_AT_2AM)
   async performScheduledCleanup(): Promise<void> {
@@ -95,7 +104,7 @@ export class CleanupService {
     return {
       enabled: this.isEnabled,
       retentionDays: this.retentionDays,
-      interval: process.env.CLEANUP_INTERVAL || CronExpression.EVERY_DAY_AT_2AM,
+      interval: this.config.interval,
     };
   }
 }

@@ -5,6 +5,7 @@ import {
   OneToMany,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
 } from 'typeorm';
 import { ScanStatus } from '../enums/scan-status.enum';
 import { ScanMode } from '../enums/scan-mode.enum';
@@ -95,6 +96,7 @@ export class Scan {
   crawlExcludeGlobs?: string[] | null;
 
   /** Current lifecycle status of this run. */
+  @Index()
   @Column({
     type: 'varchar',
     enum: ScanStatus,
@@ -119,6 +121,7 @@ export class Scan {
   issues: Issue[];
 
   /** Timestamp when the scan run was created. */
+  @Index()
   @CreateDateColumn()
   createdAt: Date;
 

@@ -1,11 +1,14 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
+import { ConfigType } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { redisConfig } from '../config/configuration';
 import { ScanProcessor } from '../services/scan.processor';
 import { ScanQueueService } from '../services/scan-queue.service';
 import { BrowserService } from '../services/browser.service';
 import { AxeAccessibilityScanner } from '../services/axe-accessibility-scanner.service';
 import { BasicAuthCryptoService } from '../services/basic-auth-crypto.service';
+import { UrlPolicyService } from '../services/url-policy.service';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 
@@ -14,12 +17,15 @@ import { Issue } from '../entities/issue.entity';
  */
 @Module({
   imports: [
-    BullModule.forRoot({
-      connection: {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379', 10),
-        password: process.env.REDIS_PASSWORD,
-      },
+    BullModule.forRootAsync({
+      inject: [redisConfig.KEY],
+      useFactory: (redis: ConfigType<typeof redisConfig>) => ({
+        connection: {
+          host: redis.host,
+          port: redis.port,
+          password: redis.password,
+        },
+      }),
     }),
     BullModule.registerQueue({
       name: 'scan-processing',
@@ -38,7 +44,13 @@ import { Issue } from '../entities/issue.entity';
     BrowserService,
     AxeAccessibilityScanner,
     BasicAuthCryptoService,
+    UrlPolicyService,
   ],
-  exports: [ScanQueueService, BrowserService, BasicAuthCryptoService],
+  exports: [
+    ScanQueueService,
+    BrowserService,
+    BasicAuthCryptoService,
+    UrlPolicyService,
+  ],
 })
 export class QueueModule {}

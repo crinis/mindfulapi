@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Body,
   Param,
   ParseIntPipe,
@@ -194,5 +195,49 @@ export class ScanController {
     @Query() query: ScanByIdQueryDto,
   ): Promise<ScanResponseDto> {
     return this.scanService.findOne(id, query.pageUrls);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    operationId: 'deleteScan',
+    summary: 'Delete a scan run',
+    description: 'Permanently deletes a scan run and all of its stored issues.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Scan ID',
+    schema: { type: 'integer', minimum: 1 },
+    example: 1,
+  })
+  @ApiResponse({
+    status: 204,
+    description: 'Scan deleted',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'ID must be a positive integer',
+    type: ErrorResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid Bearer token',
+    type: ErrorResponseDto,
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Scan not found',
+    type: ErrorResponseDto,
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Unexpected server error',
+    type: ErrorResponseDto,
+  })
+  /**
+   * Deletes one scan run by numeric identifier.
+   */
+  async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
+    await this.scanService.remove(id);
   }
 }
