@@ -15,6 +15,7 @@ const baseEvidence = (
   pageTitle: 'Acme Pricing',
   headings: [
     {
+      id: 'H1',
       selector: 'main > h1',
       level: 1,
       tag: 'h1',
@@ -23,6 +24,7 @@ const baseEvidence = (
       snippet: 'Our pricing plans start at $9/month.',
     },
     {
+      id: 'H2',
       selector: 'main > h2:nth-of-type(1)',
       level: 2,
       tag: 'h2',
@@ -33,6 +35,7 @@ const baseEvidence = (
   ],
   fakeHeadingCandidates: [
     {
+      id: 'F1',
       selector: 'main > p:nth-of-type(3)',
       text: 'Our Services',
       fontSizePx: 24,
@@ -41,6 +44,7 @@ const baseEvidence = (
   ],
   unheadedSections: [
     {
+      id: 'S1',
       selector: 'section:nth-of-type(2)',
       snippet: 'A long run of content with no heading...',
       textLength: 900,
@@ -83,7 +87,10 @@ describe('buildHeadingPrompt', () => {
   it('renders outline, fake-heading, and unheaded-section sections', () => {
     const prompt = buildHeadingPrompt(baseEvidence());
     expect(prompt).toContain('Acme Pricing');
-    expect(prompt).toContain('main > h1');
+    // The prompt shows short ids, not CSS selectors, so the model never has to
+    // reproduce a selector.
+    expect(prompt).toContain('[H1]');
+    expect(prompt).not.toContain('main > h1');
     expect(prompt).toContain('may be unmarked headings');
     expect(prompt).toContain('WCAG 2.4.10 candidates');
   });
@@ -108,7 +115,7 @@ describe('HeadingStructureSkill.evaluate', () => {
       harnessReturning({
         findings: [
           {
-            selector: 'main > h2:nth-of-type(1)',
+            id: 'H2',
             verdict: 'vague_or_generic',
             confidence: 0.9,
             rationale: '"More" is not descriptive.',
@@ -116,7 +123,7 @@ describe('HeadingStructureSkill.evaluate', () => {
             suggestedLevel: null,
           },
           {
-            selector: 'main > p:nth-of-type(3)',
+            id: 'F1',
             verdict: 'fake_heading',
             confidence: 0.8,
             rationale: 'Styled paragraph acting as a heading.',
@@ -124,7 +131,7 @@ describe('HeadingStructureSkill.evaluate', () => {
             suggestedLevel: 2,
           },
           {
-            selector: 'section:nth-of-type(2)',
+            id: 'S1',
             verdict: 'missing_section_heading',
             confidence: 0.7,
             rationale: 'Section has substantial content but no heading.',
@@ -142,6 +149,8 @@ describe('HeadingStructureSkill.evaluate', () => {
     expect(vague.severity).toBe(IssueImpact.MODERATE);
     expect(vague.suggestion).toBe('Enterprise plans');
     expect(vague.wcag).toBe('2.4.6');
+    // The model's id is mapped back to the real CSS selector for the client.
+    expect(vague.selector).toBe('main > h2:nth-of-type(1)');
 
     const fake = drafts[1];
     expect(fake.category).toBe('fake_heading');
@@ -160,7 +169,7 @@ describe('HeadingStructureSkill.evaluate', () => {
       harnessReturning({
         findings: [
           {
-            selector: 'main > h1',
+            id: 'H1',
             verdict: 'h1_topic_mismatch',
             confidence: 0.9,
             rationale: 'h1 says Welcome but the page is about pricing.',
@@ -168,7 +177,7 @@ describe('HeadingStructureSkill.evaluate', () => {
             suggestedLevel: null,
           },
           {
-            selector: 'main > h2:nth-of-type(1)',
+            id: 'H2',
             verdict: 'vague_or_generic',
             confidence: 0.8,
             rationale: 'vague',
@@ -189,7 +198,7 @@ describe('HeadingStructureSkill.evaluate', () => {
       harnessReturning({
         findings: [
           {
-            selector: 'main > h1',
+            id: 'H1',
             verdict: 'mis_nested',
             confidence: 0.3,
             rationale: 'maybe wrong level',
@@ -213,7 +222,7 @@ describe('HeadingStructureSkill.evaluate', () => {
       harnessReturning({
         findings: [
           {
-            selector: 'div.hallucinated',
+            id: 'nope',
             verdict: 'duplicate',
             confidence: 0.9,
             rationale: 'dup',
@@ -233,7 +242,7 @@ describe('HeadingStructureSkill.evaluate', () => {
       harnessReturning({
         findings: [
           {
-            selector: 'main > h1',
+            id: 'H1',
             verdict: 'appropriate',
             confidence: 1,
             rationale: 'fine',

@@ -78,7 +78,7 @@ export const headingStructureSchema = z.object({
   findings: z
     .array(
       z.object({
-        selector: z.string(),
+        id: z.string(),
         verdict: z.enum(HEADING_VERDICTS),
         confidence: z.number().min(0).max(1),
         rationale: z.string().max(400),
@@ -94,8 +94,17 @@ type HeadingStructureResult = z.infer<typeof headingStructureSchema>;
 /** Returned when the model fails to produce a valid verdict. */
 const NO_FINDINGS: HeadingStructureResult = { findings: [] };
 
+/**
+ * Short stable id (`H1`, `F1`, `S1`, …) the model echoes back. Models do not
+ * reliably reproduce a long CSS path verbatim, so findings are keyed by this
+ * token and mapped back to the real `selector` for the client.
+ */
+
 /** One heading in the page outline. */
 export interface HeadingDescriptor {
+  /** Short id the model references (e.g. `H1`). */
+  id: string;
+  /** Real CSS selector emitted to the client (the finding's only locator). */
   selector: string;
   level: number;
   tag: string;
@@ -106,6 +115,8 @@ export interface HeadingDescriptor {
 
 /** A styled block that may be an unmarked heading. */
 export interface FakeHeadingCandidate {
+  /** Short id the model references (e.g. `F1`). */
+  id: string;
   selector: string;
   text: string;
   fontSizePx: number;
@@ -114,6 +125,8 @@ export interface FakeHeadingCandidate {
 
 /** A sectioning element that has substantial content but no heading. */
 export interface UnheadedSection {
+  /** Short id the model references (e.g. `S1`). */
+  id: string;
   selector: string;
   snippet: string;
   textLength: number;
@@ -191,10 +204,10 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
       return [appropriateDraft(evidence, usage, model)];
     }
 
-    const knownSelectors = new Set<string>([
-      ...evidence.headings.map((h) => h.selector),
-      ...evidence.fakeHeadingCandidates.map((c) => c.selector),
-      ...evidence.unheadedSections.map((s) => s.selector),
+    const selectorById = new Map<string, string>([
+      ...evidence.headings.map((h) => [h.id, h.selector] as const),
+      ...evidence.fakeHeadingCandidates.map((c) => [c.id, c.selector] as const),
+      ...evidence.unheadedSections.map((s) => [s.id, s.selector] as const),
     ]);
 
     return problems.map((finding, index) => {
@@ -207,10 +220,8 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
       return {
         skill: this.id,
         pageUrl: evidence.pageUrl,
-        // Only trust a selector the model echoed back from the evidence.
-        selector: knownSelectors.has(finding.selector)
-          ? finding.selector
-          : undefined,
+        // Map the model's id back to the real selector; drop unknown ids.
+        selector: selectorById.get(finding.id),
         category,
         // Report the criterion of the originally judged verdict, so a
         // downgrade to insufficient_evidence still records what was assessed.
@@ -324,6 +335,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
           }
 
           return {
+            id: `H${i + 1}`,
             selector: cssPath(el),
             level,
             tag,
@@ -335,6 +347,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
 
         // --- Fake-heading candidates (styled text acting as a heading) ----
         const fakeHeadingCandidates: Array<{
+          id: string;
           selector: string;
           text: string;
           fontSizePx: number;
@@ -388,6 +401,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
           if (following.length < fakeFollowingMin) continue;
 
           fakeHeadingCandidates.push({
+            id: '',
             selector: cssPath(el),
             text,
             fontSizePx: Math.round(fontSizePx),
@@ -399,12 +413,15 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
           fakeHeadingCandidates.length,
           maxFake,
         );
+        // Assign ids after ranking so they read F1, F2, … in prompt order.
+        fakeHeadingCandidates.forEach((c, i) => (c.id = `F${i + 1}`));
 
         // --- Unheaded sections (WCAG 2.4.10) ------------------------------
         // Only semantic sectioning elements: the author declared a section but
         // gave it no heading. Plain <div>s are deliberately excluded to avoid
         // speculative findings.
         const unheadedSections: Array<{
+          id: string;
           selector: string;
           snippet: string;
           textLength: number;
@@ -419,6 +436,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
           const text = collapse(el.textContent);
           if (text.length < sectionMinText) continue;
           unheadedSections.push({
+            id: `S${unheadedSections.length + 1}`,
             selector: cssPath(el),
             snippet: text.slice(0, sectionSnippet),
             textLength: text.length,
@@ -496,7 +514,7 @@ Deterministic tooling already reports skipped/out-of-order levels, empty heading
 - mis_nested (1.3.1): the heading's level is sequential (not skipped) but misrepresents the parent/child relationship — e.g. a sub-topic marked as a sibling. Only flag when clearly wrong.
 - fake_heading (1.3.1): a styled paragraph/div that visually reads as a section title but is not a heading element. Prune false positives (bold lead sentences, emphasis) — only flag text that genuinely heads a section.
 
-Report only real problems; return an empty findings array when the outline is sound. Reference each finding by the exact "selector" given in the evidence. Prefer "insufficient_evidence" over guessing. Set "suggestedText"/"suggestedLevel" only when proposing a concrete fix, otherwise null. Keep each "rationale" under 50 words.`;
+Report only real problems; return an empty findings array when the outline is sound. Reference each finding by the exact bracketed id (e.g. H1, F1, S1) given in the evidence. Prefer "insufficient_evidence" over guessing. Set "suggestedText"/"suggestedLevel" only when proposing a concrete fix, otherwise null. Keep each "rationale" under 50 words.`;
 
 /** Renders the page evidence into a compact prompt. */
 export function buildHeadingPrompt(evidence: HeadingEvidence): string {
@@ -512,7 +530,7 @@ export function buildHeadingPrompt(evidence: HeadingEvidence): string {
     const landmark = h.landmark ? ` — in <${h.landmark}>` : '';
     const snippet = h.snippet ? ` — content: ${h.snippet}` : '';
     lines.push(
-      `[${h.selector}] level ${h.level} (${h.tag}): ${JSON.stringify(h.text)}${landmark}${snippet}`,
+      `[${h.id}] level ${h.level} (${h.tag}): ${JSON.stringify(h.text)}${landmark}${snippet}`,
     );
   }
 
@@ -520,7 +538,7 @@ export function buildHeadingPrompt(evidence: HeadingEvidence): string {
     lines.push('', 'Styled blocks that may be unmarked headings:');
     for (const c of evidence.fakeHeadingCandidates) {
       lines.push(
-        `[${c.selector}] ${JSON.stringify(c.text)} (font ${c.fontSizePx}px, weight ${c.fontWeight})`,
+        `[${c.id}] ${JSON.stringify(c.text)} (font ${c.fontSizePx}px, weight ${c.fontWeight})`,
       );
     }
   }
@@ -528,9 +546,7 @@ export function buildHeadingPrompt(evidence: HeadingEvidence): string {
   if (evidence.unheadedSections.length > 0) {
     lines.push('', 'Sections with no heading (WCAG 2.4.10 candidates):');
     for (const s of evidence.unheadedSections) {
-      lines.push(
-        `[${s.selector}] (${s.textLength} chars) content: ${s.snippet}`,
-      );
+      lines.push(`[${s.id}] (${s.textLength} chars) content: ${s.snippet}`);
     }
   }
 
