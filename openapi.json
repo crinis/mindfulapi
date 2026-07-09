@@ -78,7 +78,7 @@
                     "crawlOptions": {
                       "maxPages": 250,
                       "maxDepth": 4,
-                      "strategy": "same-hostname",
+                      "strategy": "same_hostname",
                       "globs": [
                         "https://example.com/docs/**"
                       ],
@@ -935,6 +935,7 @@
             },
             "uniqueItems": true,
             "minItems": 2,
+            "maxItems": 500,
             "description": "Explicit list of page URLs to analyze."
           },
           "scanOptions": {
@@ -969,13 +970,13 @@
             "type": "string",
             "enum": [
               "all",
-              "same-hostname",
-              "same-domain",
-              "same-origin"
+              "same_hostname",
+              "same_domain",
+              "same_origin"
             ],
-            "example": "same-hostname",
-            "default": "same-hostname",
-            "description": "URL discovery strategy. `same-hostname` restricts to the seed host, `same-domain` allows subdomains, `same-origin` also matches protocol, `all` follows any link."
+            "example": "same_hostname",
+            "default": "same_hostname",
+            "description": "URL discovery strategy. `same_hostname` restricts to the seed host, `same_domain` allows subdomains, `same_origin` also matches protocol, `all` follows any link."
           },
           "globs": {
             "example": [
@@ -1026,6 +1027,7 @@
             },
             "uniqueItems": true,
             "minItems": 1,
+            "maxItems": 50,
             "description": "One or more seed URLs used as crawl entry points for page discovery."
           },
           "scanOptions": {
@@ -1089,11 +1091,11 @@
             "type": "string",
             "enum": [
               "all",
-              "same-hostname",
-              "same-domain",
-              "same-origin"
+              "same_hostname",
+              "same_domain",
+              "same_origin"
             ],
-            "example": "same-hostname",
+            "example": "same_hostname",
             "description": "URL discovery strategy used during crawling."
           },
           "globs": {

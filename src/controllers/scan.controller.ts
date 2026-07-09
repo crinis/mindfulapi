@@ -23,13 +23,14 @@ import {
 } from '@nestjs/swagger';
 import { ScanService } from '../services/scan.service';
 import {
-  CreateScanDto,
+  CreateScanRequest,
   CreateSingleUrlScanDto,
   CreateUrlListScanDto,
   CreateCrawlScanDto,
   createScanRequestExamples,
   createScanRequestOneOfSchema,
 } from '../dto/scan/request';
+import { DiscriminatedBodyPipe } from '../pipes/discriminated-body.pipe';
 import { ScanQueryDto } from '../dto/scan-query.dto';
 import { ScanByIdQueryDto } from '../dto/scan-by-id-query.dto';
 import { ScanResponseDto } from '../dto/scan/response';
@@ -82,7 +83,7 @@ export class ScanController {
    * Creates a new scan run and sets the resource `Location` header.
    */
   async create(
-    @Body() createScanDto: CreateScanDto,
+    @Body(DiscriminatedBodyPipe) createScanDto: CreateScanRequest,
     @Res({ passthrough: true }) response: Response,
   ): Promise<ScanResponseDto> {
     const scan = await this.scanService.create(createScanDto);

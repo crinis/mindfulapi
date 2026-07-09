@@ -31,7 +31,16 @@ import {
 } from '../utils/url-normalization.util';
 import { DEFAULT_CRAWL_OPTIONS } from '../constants/crawl-options.constants';
 import { scanConfig } from '../config/configuration';
+import { CrawlStrategy } from '../enums/crawl-strategy.enum';
 import { truncate } from '../utils/truncate.util';
+
+/** Maps the API's snake_case strategy values to Crawlee's kebab-case enum. */
+const CRAWL_STRATEGY_TO_ENQUEUE: Record<CrawlStrategy, EnqueueStrategy> = {
+  [CrawlStrategy.All]: EnqueueStrategy.All,
+  [CrawlStrategy.SameHostname]: EnqueueStrategy.SameHostname,
+  [CrawlStrategy.SameDomain]: EnqueueStrategy.SameDomain,
+  [CrawlStrategy.SameOrigin]: EnqueueStrategy.SameOrigin,
+};
 
 /** Length caps for stored issue fields — SQLite ignores varchar lengths. */
 const MAX_DESCRIPTION_LENGTH = 1000;
@@ -261,8 +270,10 @@ export class ScanProcessor extends WorkerHost {
     const seedUrls = this.resolveScanTargets(scan);
     const maxPages = scan.crawlMaxPages ?? DEFAULT_CRAWL_OPTIONS.maxPages;
     const maxDepth = scan.crawlMaxDepth ?? DEFAULT_CRAWL_OPTIONS.maxDepth;
-    const strategy = (scan.crawlStrategy ??
-      DEFAULT_CRAWL_OPTIONS.strategy) as unknown as EnqueueStrategy;
+    const strategy =
+      CRAWL_STRATEGY_TO_ENQUEUE[
+        scan.crawlStrategy ?? DEFAULT_CRAWL_OPTIONS.strategy
+      ];
     const globs = scan.crawlGlobs || [];
     const excludeGlobs = scan.crawlExcludeGlobs || [];
     const concurrency = this.config.crawlConcurrency;

@@ -9,7 +9,11 @@ import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 import { ScanStatus } from '../enums/scan-status.enum';
 import { IssueImpact } from '../enums/issue-impact.enum';
-import { CreateScanDto } from '../dto/scan/request';
+import {
+  CreateSingleUrlScanDto,
+  CreateUrlListScanDto,
+  CreateCrawlScanDto,
+} from '../dto/scan/request';
 import { ScanMode } from '../enums/scan-mode.enum';
 import { CrawlStrategy } from '../enums/crawl-strategy.enum';
 
@@ -108,7 +112,7 @@ describe('ScanService', () => {
     });
 
     it('saves a single_url scan, queues a job, and returns the created scan', async () => {
-      const dto: CreateScanDto = {
+      const dto: CreateSingleUrlScanDto = {
         mode: ScanMode.SINGLE_URL,
         url: 'https://example.com',
       };
@@ -145,7 +149,7 @@ describe('ScanService', () => {
     });
 
     it('saves a crawl scan with defaults and queues a job', async () => {
-      const dto: CreateScanDto = {
+      const dto: CreateCrawlScanDto = {
         mode: ScanMode.CRAWL,
         startUrls: ['https://example.com'],
       };
@@ -169,7 +173,7 @@ describe('ScanService', () => {
     });
 
     it('encrypts and stores basic auth credentials without returning them', async () => {
-      const dto: CreateScanDto = {
+      const dto: CreateSingleUrlScanDto = {
         mode: ScanMode.SINGLE_URL,
         url: 'https://example.com',
         scanOptions: {
@@ -209,18 +213,11 @@ describe('ScanService', () => {
       ).toBe(false);
     });
 
-    it('throws when mode-specific fields are invalid', async () => {
-      const dto: CreateScanDto = {
-        mode: ScanMode.SINGLE_URL,
-        url: 'https://example.com',
-        crawlOptions: { maxPages: 20 },
-      };
-
-      await expect(service.create(dto)).rejects.toThrow(BadRequestException);
-    });
+    // Cross-field rejection (e.g. crawlOptions on single_url) is now enforced
+    // by DiscriminatedBodyPipe; see discriminated-body.pipe.spec.ts.
 
     it('normalizes and deduplicates url_list targets', async () => {
-      const dto: CreateScanDto = {
+      const dto: CreateUrlListScanDto = {
         mode: ScanMode.URL_LIST,
         urls: [
           'https://example.com/',

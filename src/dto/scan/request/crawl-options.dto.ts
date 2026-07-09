@@ -52,15 +52,15 @@ export class CrawlOptionsDto {
 
   /**
    * Crawlee link-following strategy that controls which discovered URLs are enqueued.
-   * Defaults to `same-hostname` which restricts crawling to the seed host(s).
+   * Defaults to `same_hostname` which restricts crawling to the seed host(s).
    */
   @ApiPropertyOptional({
     enum: CrawlStrategy,
     example: DEFAULT_CRAWL_OPTIONS.strategy,
     default: DEFAULT_CRAWL_OPTIONS.strategy,
     description:
-      'URL discovery strategy. `same-hostname` restricts to the seed host, ' +
-      '`same-domain` allows subdomains, `same-origin` also matches protocol, ' +
+      'URL discovery strategy. `same_hostname` restricts to the seed host, ' +
+      '`same_domain` allows subdomains, `same_origin` also matches protocol, ' +
       '`all` follows any link.',
   })
   @IsOptional()

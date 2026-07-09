@@ -304,7 +304,7 @@ describe('MindfulAPI (e2e)', () => {
       expect(body.mode).toBe(ScanMode.CRAWL);
       expect(body.crawlOptions.maxPages).toBe(250);
       expect(body.crawlOptions.maxDepth).toBe(4);
-      expect(body.crawlOptions.strategy).toBe('same-hostname');
+      expect(body.crawlOptions.strategy).toBe('same_hostname');
     });
 
     it('queues a job after creating', async () => {

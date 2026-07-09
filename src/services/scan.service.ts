@@ -8,7 +8,10 @@ import { Repository } from 'typeorm';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 import {
-  CreateScanDto,
+  CreateScanRequest,
+  CreateSingleUrlScanDto,
+  CreateUrlListScanDto,
+  CreateCrawlScanDto,
   CrawlOptionsDto,
   ScanOptionsDto,
 } from '../dto/scan/request';
@@ -66,7 +69,7 @@ export class ScanService {
    * @param createScanDto Raw user request payload.
    * @returns Fully enriched scan response for the created run.
    */
-  async create(createScanDto: CreateScanDto): Promise<ScanResponseDto> {
+  async create(createScanDto: CreateScanRequest): Promise<ScanResponseDto> {
     const normalized = this.normalizeCreateInput(createScanDto);
     await this.urlPolicyService.assertAllowedTargets(normalized.targets);
     const encryptedBasicAuth = normalized.scanOptions.basicAuth
@@ -181,9 +184,11 @@ export class ScanService {
   /**
    * Normalizes and validates create input across all scan modes.
    */
-  private normalizeCreateInput(dto: CreateScanDto): NormalizedCreateInput {
+  private normalizeCreateInput(dto: CreateScanRequest): NormalizedCreateInput {
     const scanOptions = this.sanitizeScanOptions(dto.scanOptions);
 
+    // The request body is already validated (including cross-field rejection)
+    // by DiscriminatedBodyPipe, so each branch narrows to its variant type.
     switch (dto.mode) {
       case ScanMode.SINGLE_URL:
         return this.normalizeSingleUrlMode(dto, scanOptions);
@@ -228,21 +233,9 @@ export class ScanService {
    * Validates and normalizes `single_url` mode payload.
    */
   private normalizeSingleUrlMode(
-    dto: CreateScanDto,
+    dto: CreateSingleUrlScanDto,
     scanOptions: NormalizedCreateInput['scanOptions'],
   ): NormalizedCreateInput {
-    if (!dto.url) {
-      throw new BadRequestException(
-        '`url` is required when mode is single_url',
-      );
-    }
-
-    if (dto.urls || dto.startUrls || dto.crawlOptions) {
-      throw new BadRequestException(
-        'Only `url` and `scanOptions` are allowed when mode is single_url',
-      );
-    }
-
     return {
       mode: dto.mode,
       targets: [this.requireValidUrl(dto.url)],
@@ -255,21 +248,9 @@ export class ScanService {
    * Validates and normalizes `url_list` mode payload.
    */
   private normalizeUrlListMode(
-    dto: CreateScanDto,
+    dto: CreateUrlListScanDto,
     scanOptions: NormalizedCreateInput['scanOptions'],
   ): NormalizedCreateInput {
-    if (!dto.urls || dto.urls.length < 2) {
-      throw new BadRequestException(
-        '`urls` with at least 2 entries is required when mode is url_list',
-      );
-    }
-
-    if (dto.url || dto.startUrls || dto.crawlOptions) {
-      throw new BadRequestException(
-        'Only `urls` and `scanOptions` are allowed when mode is url_list',
-      );
-    }
-
     return {
       mode: dto.mode,
       targets: this.requireValidUrlList(dto.urls),
@@ -282,21 +263,9 @@ export class ScanService {
    * Validates and normalizes `crawl` mode payload.
    */
   private normalizeCrawlMode(
-    dto: CreateScanDto,
+    dto: CreateCrawlScanDto,
     scanOptions: NormalizedCreateInput['scanOptions'],
   ): NormalizedCreateInput {
-    if (!dto.startUrls || dto.startUrls.length === 0) {
-      throw new BadRequestException(
-        '`startUrls` is required when mode is crawl',
-      );
-    }
-
-    if (dto.url || dto.urls) {
-      throw new BadRequestException(
-        '`url` and `urls` are not allowed when mode is crawl',
-      );
-    }
-
     return {
       mode: dto.mode,
       targets: this.requireValidUrlList(dto.startUrls),

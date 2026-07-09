@@ -3,16 +3,36 @@ import {
   ApiPropertyOptional,
   getSchemaPath,
 } from '@nestjs/swagger';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  ArrayUnique,
+  Equals,
+  IsArray,
+  IsOptional,
+  IsUrl,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 import { ScanMode } from '../../../enums/scan-mode.enum';
+import { HTTP_URL_VALIDATION_OPTIONS } from '../../../constants/url-validation.constants';
 import { CrawlOptionsDto } from './crawl-options.dto';
 import { ScanOptionsDto } from './scan-options.dto';
 
+/** Upper bound on url_list targets per scan. */
+const MAX_URL_LIST_ITEMS = 500;
+/** Upper bound on crawl seed URLs per scan. */
+const MAX_CRAWL_SEED_ITEMS = 50;
+
 /**
- * OpenAPI schema variant for creating a single URL scan run.
+ * Request variant for creating a single URL scan run. This class is both the
+ * validated runtime type (via {@link DiscriminatedBodyPipe}) and the documented
+ * OpenAPI schema, so the two cannot drift.
  */
 export class CreateSingleUrlScanDto {
   /** Discriminator value identifying the single URL payload variant. */
   @ApiProperty({ enum: [ScanMode.SINGLE_URL], example: ScanMode.SINGLE_URL })
+  @Equals(ScanMode.SINGLE_URL)
   mode: ScanMode.SINGLE_URL;
 
   /** Absolute URL of the page that should be analyzed. */
@@ -21,19 +41,24 @@ export class CreateSingleUrlScanDto {
     format: 'uri',
     description: 'Single page URL to analyze.',
   })
+  @IsUrl(HTTP_URL_VALIDATION_OPTIONS)
   url: string;
 
   /** Optional scan behavior settings shared across all run modes. */
   @ApiPropertyOptional({ type: () => ScanOptionsDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ScanOptionsDto)
   scanOptions?: ScanOptionsDto;
 }
 
 /**
- * OpenAPI schema variant for creating an explicit URL list scan run.
+ * Request variant for creating an explicit URL list scan run.
  */
 export class CreateUrlListScanDto {
   /** Discriminator value identifying the URL list payload variant. */
   @ApiProperty({ enum: [ScanMode.URL_LIST], example: ScanMode.URL_LIST })
+  @Equals(ScanMode.URL_LIST)
   mode: ScanMode.URL_LIST;
 
   /** Fixed set of URLs that will be analyzed without link discovery. */
@@ -43,21 +68,31 @@ export class CreateUrlListScanDto {
     items: { type: 'string', format: 'uri' },
     uniqueItems: true,
     minItems: 2,
+    maxItems: MAX_URL_LIST_ITEMS,
     description: 'Explicit list of page URLs to analyze.',
   })
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(MAX_URL_LIST_ITEMS)
+  @ArrayUnique()
+  @IsUrl(HTTP_URL_VALIDATION_OPTIONS, { each: true })
   urls: string[];
 
   /** Optional scan behavior settings shared across all run modes. */
   @ApiPropertyOptional({ type: () => ScanOptionsDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ScanOptionsDto)
   scanOptions?: ScanOptionsDto;
 }
 
 /**
- * OpenAPI schema variant for creating a crawl-based scan run.
+ * Request variant for creating a crawl-based scan run.
  */
 export class CreateCrawlScanDto {
   /** Discriminator value identifying the crawl payload variant. */
   @ApiProperty({ enum: [ScanMode.CRAWL], example: ScanMode.CRAWL })
+  @Equals(ScanMode.CRAWL)
   mode: ScanMode.CRAWL;
 
   /** One or more crawl seed URLs used as discovery entry points. */
@@ -67,19 +102,48 @@ export class CreateCrawlScanDto {
     items: { type: 'string', format: 'uri' },
     uniqueItems: true,
     minItems: 1,
+    maxItems: MAX_CRAWL_SEED_ITEMS,
     description:
       'One or more seed URLs used as crawl entry points for page discovery.',
   })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_CRAWL_SEED_ITEMS)
+  @ArrayUnique()
+  @IsUrl(HTTP_URL_VALIDATION_OPTIONS, { each: true })
   startUrls: string[];
 
   /** Optional scan behavior settings shared across all run modes. */
   @ApiPropertyOptional({ type: () => ScanOptionsDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ScanOptionsDto)
   scanOptions?: ScanOptionsDto;
 
   /** Optional crawl behavior settings specific to crawl mode. */
   @ApiPropertyOptional({ type: () => CrawlOptionsDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CrawlOptionsDto)
   crawlOptions?: CrawlOptionsDto;
 }
+
+/**
+ * Discriminated union of the three create-scan request variants. This is the
+ * type accepted by the create-scan endpoint after {@link DiscriminatedBodyPipe}
+ * validation.
+ */
+export type CreateScanRequest =
+  | CreateSingleUrlScanDto
+  | CreateUrlListScanDto
+  | CreateCrawlScanDto;
+
+/** Maps each mode discriminator to its validated request class. */
+export const CREATE_SCAN_VARIANTS = {
+  [ScanMode.SINGLE_URL]: CreateSingleUrlScanDto,
+  [ScanMode.URL_LIST]: CreateUrlListScanDto,
+  [ScanMode.CRAWL]: CreateCrawlScanDto,
+} as const;
 
 /**
  * `oneOf` OpenAPI schema used for create-scan request bodies.
@@ -157,7 +221,7 @@ export const createScanRequestExamples: Record<string, OpenApiExampleObject> = {
       crawlOptions: {
         maxPages: 250,
         maxDepth: 4,
-        strategy: 'same-hostname',
+        strategy: 'same_hostname',
         globs: ['https://example.com/docs/**'],
         excludeGlobs: ['**/private/**'],
       },
