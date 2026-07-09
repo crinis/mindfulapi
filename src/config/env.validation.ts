@@ -2,6 +2,7 @@ import { plainToInstance } from 'class-transformer';
 import {
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   Max,
@@ -119,6 +120,82 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(1)
   THROTTLE_LIMIT?: number;
+
+  /** Master switch for the optional LLM-agent audit. */
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  AGENT_ENABLED?: string;
+
+  /** LLM provider adapter. */
+  @IsOptional()
+  @IsIn(['openai', 'anthropic', 'openai-compatible'])
+  AGENT_PROVIDER?: string;
+
+  @IsOptional()
+  @IsString()
+  AGENT_MODEL?: string;
+
+  /** Provider API key; length/validity checked lazily by the harness. */
+  @IsOptional()
+  @IsString()
+  AGENT_API_KEY?: string;
+
+  /** Base URL for the openai-compatible provider (OpenRouter/local). */
+  @IsOptional()
+  @IsString()
+  AGENT_BASE_URL?: string;
+
+  /** Comma-separated skills the server permits clients to request. */
+  @IsOptional()
+  @IsString()
+  AGENT_SKILLS?: string;
+
+  /** Concurrent per-unit requests during evaluation. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(16)
+  AGENT_CONCURRENCY?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  AGENT_MAX_UNITS_PER_PAGE?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(10000)
+  AGENT_MAX_UNITS_PER_SCAN?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  AGENT_MAX_TOKENS?: number;
+
+  /** Total token budget per scan; 0 disables the check. */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  AGENT_SCAN_TOKEN_BUDGET?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1000)
+  AGENT_REQUEST_TIMEOUT_MS?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1000)
+  AGENT_MAX_IMAGE_BYTES?: number;
+
+  /** Sampling temperature (0–2). */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(2)
+  AGENT_TEMPERATURE?: number;
 }
 
 /**

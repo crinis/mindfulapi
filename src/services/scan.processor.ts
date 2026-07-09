@@ -11,6 +11,7 @@ import {
   RequestQueue,
 } from 'crawlee';
 import { MemoryStorage } from '@crawlee/memory-storage';
+import type { Page } from 'playwright';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 import { ScanStatus } from '../enums/scan-status.enum';
@@ -33,6 +34,9 @@ import { DEFAULT_CRAWL_OPTIONS } from '../constants/crawl-options.constants';
 import { scanConfig } from '../config/configuration';
 import { CrawlStrategy } from '../enums/crawl-strategy.enum';
 import { truncate } from '../utils/truncate.util';
+import { AgentAuditService } from '../agent/agent-audit.service';
+import type { AuditSkill } from '../agent/skills/audit-skill.interface';
+import type { CollectedUnit } from '../agent/agent-audit.service';
 
 /** Maps the API's snake_case strategy values to Crawlee's kebab-case enum. */
 const CRAWL_STRATEGY_TO_ENQUEUE: Record<CrawlStrategy, EnqueueStrategy> = {
@@ -57,6 +61,15 @@ const PROGRESS_WRITE_PAGE_BATCH = 10;
 interface PageTask {
   /** URL that should be analyzed. */
   url: string;
+}
+
+/**
+ * Per-scan LLM-agent audit state threaded through the page loop: the active
+ * skills and an in-memory buffer of collected work units awaiting evaluation.
+ */
+interface AgentRun {
+  skills: AuditSkill[];
+  buffer: CollectedUnit[];
 }
 
 /**
@@ -118,6 +131,7 @@ export class ScanProcessor extends WorkerHost {
     @Inject(scanConfig.KEY)
     private readonly config: ConfigType<typeof scanConfig>,
     private readonly urlPolicyService: UrlPolicyService,
+    private readonly agentAudit: AgentAuditService,
   ) {
     super();
   }
@@ -153,21 +167,40 @@ export class ScanProcessor extends WorkerHost {
         basicAuth: this.resolveBasicAuth(scan),
       };
 
+      // Resolve the optional LLM-agent audit once per scan; empty unless the
+      // feature is enabled and the scan requested whitelisted skills.
+      const agentSkills = this.agentAudit.resolveSkills(scan);
+      const agent: AgentRun | undefined = agentSkills.length
+        ? { skills: agentSkills, buffer: [] }
+        : undefined;
+
       const progress =
         scan.mode === ScanMode.CRAWL
-          ? await this.performCrawl(scan, scanOptions)
-          : await this.performTargetListScan(scan, scanOptions);
+          ? await this.performCrawl(scan, scanOptions, agent)
+          : await this.performTargetListScan(scan, scanOptions, agent);
 
       // A cancellation observed mid-run wins over completion; persist the
       // partial counters but leave the CANCELED status in place.
       if (await this.isCanceled(scanId)) {
-        await this.scanRepository.update(scanId, {
-          pagesDiscovered: progress.pagesDiscovered,
-          pagesScanned: progress.pagesScanned,
-          pagesFailed: progress.pagesFailed,
-        });
+        await this.persistFinalCounters(scanId, progress);
         this.logger.log(`Scan ${scanId} was canceled`);
         return;
+      }
+
+      // Agentic phase: evidence was collected while pages were live; evaluate
+      // it now, off the browser, before marking the scan complete.
+      if (agent && agent.buffer.length > 0) {
+        await this.scanRepository.update(scanId, {
+          status: ScanStatus.ANALYZING,
+        });
+        await this.agentAudit.evaluate(scan, agent.buffer, () =>
+          this.isCanceled(scanId),
+        );
+        if (await this.isCanceled(scanId)) {
+          await this.persistFinalCounters(scanId, progress);
+          this.logger.log(`Scan ${scanId} was canceled during AI audit`);
+          return;
+        }
       }
 
       await this.scanRepository.update(scanId, {
@@ -206,6 +239,8 @@ export class ScanProcessor extends WorkerHost {
       .where('scanId = :scanId', { scanId })
       .execute();
 
+    await this.agentAudit.reset(scanId);
+
     await this.scanRepository.update(scanId, {
       status: ScanStatus.RUNNING,
       pagesDiscovered: 0,
@@ -214,12 +249,54 @@ export class ScanProcessor extends WorkerHost {
     });
   }
 
+  /** Persists page counters without changing the current status. */
+  private async persistFinalCounters(
+    scanId: number,
+    progress: ScanProgress,
+  ): Promise<void> {
+    await this.scanRepository.update(scanId, {
+      pagesDiscovered: progress.pagesDiscovered,
+      pagesScanned: progress.pagesScanned,
+      pagesFailed: progress.pagesFailed,
+    });
+  }
+
+  /**
+   * Collects trigger-filtered agent evidence from a live page into the run
+   * buffer. Never throws — agent collection must not fail a page scan.
+   */
+  private async collectAgentEvidence(
+    agent: AgentRun | undefined,
+    page: Page,
+    pageUrl: string,
+    issues: ScannedIssue[],
+  ): Promise<void> {
+    if (!agent || agent.skills.length === 0) {
+      return;
+    }
+    try {
+      const units = await this.agentAudit.collectForPage(
+        agent.skills,
+        page,
+        pageUrl,
+        issues,
+        agent.buffer.length,
+      );
+      agent.buffer.push(...units);
+    } catch (error) {
+      this.logger.warn(
+        `Agent evidence collection failed for ${pageUrl}: ${String(error)}`,
+      );
+    }
+  }
+
   /**
    * Executes single-url and url-list scans with controlled local concurrency.
    */
   private async performTargetListScan(
     scan: Scan,
     scanOptions: ScanOptions,
+    agent?: AgentRun,
   ): Promise<ScanProgress> {
     const tasks: PageTask[] = this.resolveScanTargets(scan).map((url) => ({
       url,
@@ -265,6 +342,7 @@ export class ScanProcessor extends WorkerHost {
             );
             await this.saveIssues(scan.id, issues);
             progress.pagesScanned += 1;
+            await this.collectAgentEvidence(agent, page, page.url(), issues);
           } catch (error) {
             progress.pagesFailed += 1;
             this.logger.warn(
@@ -294,6 +372,7 @@ export class ScanProcessor extends WorkerHost {
   private async performCrawl(
     scan: Scan,
     scanOptions: ScanOptions,
+    agent?: AgentRun,
   ): Promise<ScanProgress> {
     const seedUrls = this.resolveScanTargets(scan);
     const maxPages = scan.crawlMaxPages ?? DEFAULT_CRAWL_OPTIONS.maxPages;
@@ -367,6 +446,7 @@ export class ScanProcessor extends WorkerHost {
               );
               await this.saveIssues(scan.id, issues);
               progress.pagesScanned += 1;
+              await this.collectAgentEvidence(agent, page, page.url(), issues);
             } catch (error) {
               progress.pagesFailed += 1;
               this.logger.warn(

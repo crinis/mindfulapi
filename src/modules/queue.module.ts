@@ -15,6 +15,7 @@ import { BasicAuthCryptoService } from '../services/basic-auth-crypto.service';
 import { UrlPolicyService } from '../services/url-policy.service';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
+import { AgentModule } from './agent.module';
 
 /**
  * Infrastructure module configuring BullMQ workers and shared scan-processing services.
@@ -41,6 +42,7 @@ import { Issue } from '../entities/issue.entity';
       },
     }),
     TypeOrmModule.forFeature([Scan, Issue]),
+    AgentModule,
   ],
   providers: [
     ScanProcessor,

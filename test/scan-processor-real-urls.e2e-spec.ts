@@ -3,6 +3,7 @@ import { DataSource, Repository } from 'typeorm';
 import { Job } from 'bullmq';
 import { Scan } from '../src/entities/scan.entity';
 import { Issue } from '../src/entities/issue.entity';
+import { AgentFinding } from '../src/entities/agent-finding.entity';
 import { ScanMode } from '../src/enums/scan-mode.enum';
 import { ScanStatus } from '../src/enums/scan-status.enum';
 import { CrawlStrategy } from '../src/enums/crawl-strategy.enum';
@@ -12,6 +13,7 @@ import { ScanProcessor } from '../src/services/scan.processor';
 import { BasicAuthCryptoService } from '../src/services/basic-auth-crypto.service';
 import { scanConfig } from '../src/config/configuration';
 import { UrlPolicyService } from '../src/services/url-policy.service';
+import type { AgentAuditService } from '../src/agent/agent-audit.service';
 import {
   FixtureSiteServer,
   startFixtureSiteServer,
@@ -38,7 +40,7 @@ describe('ScanProcessor real URL integration', () => {
     dataSource = new DataSource({
       type: 'better-sqlite3',
       database: ':memory:',
-      entities: [Scan, Issue],
+      entities: [Scan, Issue, AgentFinding],
       synchronize: true,
     });
     await dataSource.initialize();
@@ -49,6 +51,14 @@ describe('ScanProcessor real URL integration', () => {
     browserService = new BrowserService(scanConfig());
     scanner = new AxeAccessibilityScanner(scanConfig());
 
+    // AI audit is disabled here; a no-op stub keeps the deterministic path.
+    const agentAudit = {
+      resolveSkills: () => [],
+      reset: () => Promise.resolve(undefined),
+      collectForPage: () => Promise.resolve([]),
+      evaluate: () => Promise.resolve(undefined),
+    };
+
     processor = new ScanProcessor(
       scanRepository,
       issueRepository,
@@ -58,6 +68,7 @@ describe('ScanProcessor real URL integration', () => {
       scanConfig(),
       // Fixture site runs on localhost, which the default policy blocks.
       new UrlPolicyService({ ...scanConfig(), allowPrivateTargets: true }),
+      agentAudit as unknown as AgentAuditService,
     );
   });
 

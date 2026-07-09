@@ -70,6 +70,11 @@ const makeScan = (overrides: Partial<Scan> = {}): Scan => ({
   pagesScanned: 0,
   pagesFailed: 0,
   issues: [],
+  aiAuditSkills: null,
+  aiTasksTotal: 0,
+  aiTasksCompleted: 0,
+  aiTasksFailed: 0,
+  agentFindings: [],
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   ...overrides,
@@ -93,6 +98,12 @@ describe('ScanProcessor', () => {
     Pick<BasicAuthCryptoService, 'decryptCredentials'>
   >;
   let mockUrlPolicy: { isAllowedTarget: jest.Mock };
+  let mockAgentAudit: {
+    resolveSkills: jest.Mock;
+    reset: jest.Mock;
+    collectForPage: jest.Mock;
+    evaluate: jest.Mock;
+  };
   let mockContext: { close: jest.Mock; newPage: jest.Mock };
 
   beforeEach(() => {
@@ -153,6 +164,12 @@ describe('ScanProcessor', () => {
     mockUrlPolicy = {
       isAllowedTarget: jest.fn().mockResolvedValue({ allowed: true }),
     };
+    mockAgentAudit = {
+      resolveSkills: jest.fn().mockReturnValue([]),
+      reset: jest.fn().mockResolvedValue(undefined),
+      collectForPage: jest.fn().mockResolvedValue([]),
+      evaluate: jest.fn().mockResolvedValue(undefined),
+    };
 
     processor = new ScanProcessor(
       mockScanRepo as any,
@@ -162,6 +179,7 @@ describe('ScanProcessor', () => {
       mockBasicAuthCrypto as any,
       scanConfig(),
       mockUrlPolicy as any,
+      mockAgentAudit as any,
     );
   });
 

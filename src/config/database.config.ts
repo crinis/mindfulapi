@@ -2,6 +2,7 @@ import { ConfigType } from '@nestjs/config';
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
+import { AgentFinding } from '../entities/agent-finding.entity';
 import { databaseConfig } from './configuration';
 
 /** Structural subset of the better-sqlite3 Database handle (no bundled types). */
@@ -21,7 +22,7 @@ export const createDatabaseConfig = (
 ): TypeOrmModuleOptions => ({
   type: 'better-sqlite3',
   database: database.path,
-  entities: [Scan, Issue],
+  entities: [Scan, Issue, AgentFinding],
   synchronize: true,
   logging: database.logging,
   prepareDatabase: (db: SqliteDatabase) => {

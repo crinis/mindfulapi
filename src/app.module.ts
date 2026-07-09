@@ -12,6 +12,7 @@ import { authProvider } from './guards/auth-provider';
 import { createDatabaseConfig } from './config/database.config';
 import { validate } from './config/env.validation';
 import {
+  agentConfig,
   appConfig,
   cleanupConfig,
   databaseConfig,
@@ -37,6 +38,7 @@ import {
         databaseConfig,
         scanConfig,
         cleanupConfig,
+        agentConfig,
       ],
     }),
     TypeOrmModule.forRootAsync({

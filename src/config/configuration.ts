@@ -21,6 +21,18 @@ function splitList(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
+/** Clamps a parsed float into [min, max], falling back when not a number. */
+function clampFloat(
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const parsed = parseFloat(raw ?? '');
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
+}
+
 /** HTTP server and general application settings. */
 export const appConfig = registerAs('app', () => ({
   port: clampInt(process.env.PORT, 3000, 1, 65535),
@@ -62,6 +74,71 @@ export const scanConfig = registerAs('scan', () => ({
   targetAllowHosts: splitList(process.env.SCAN_TARGET_ALLOW_HOSTS),
   playwrightWsUrl: process.env.PLAYWRIGHT_WS_URL || null,
   ignoreHttpsErrors: process.env.IGNORE_HTTPS_ERRORS === 'true',
+}));
+
+/**
+ * Optional LLM-agent audit settings.
+ *
+ * Powers the agentic accessibility skills that run in addition to axe-core.
+ * The API key is read here but only validated lazily by the model harness
+ * (mirrors the ENCRYPTION_KEY handling) so the app boots without a key when
+ * the feature is disabled.
+ */
+export const agentConfig = registerAs('agent', () => ({
+  /** Master switch for the AI audit capability. */
+  enabled: process.env.AGENT_ENABLED === 'true',
+  /** Provider adapter: openai | anthropic | openai-compatible. */
+  provider: process.env.AGENT_PROVIDER || null,
+  /** Model identifier passed to the provider (e.g. `gpt-4o-mini`). */
+  model: process.env.AGENT_MODEL || null,
+  /** Provider API key; validated lazily by the harness, never logged. */
+  apiKey: process.env.AGENT_API_KEY || null,
+  /**
+   * Base URL for the `openai-compatible` provider — point at OpenRouter or a
+   * local server (Ollama/vLLM/LM Studio) for broad model coverage.
+   */
+  baseUrl: process.env.AGENT_BASE_URL || null,
+  /** Skills the server permits clients to request; defaults to image alt text. */
+  allowedSkills: ((): string[] => {
+    const configured = splitList(process.env.AGENT_SKILLS);
+    return configured.length > 0 ? configured : ['image_alt_text'];
+  })(),
+  /** Concurrent per-unit requests (subagent fan-out) during evaluation. */
+  concurrency: clampInt(process.env.AGENT_CONCURRENCY, 4, 1, 16),
+  /** Max work units collected per page across all skills. */
+  maxUnitsPerPage: clampInt(process.env.AGENT_MAX_UNITS_PER_PAGE, 30, 1, 500),
+  /** Max work units evaluated per scan across all skills. */
+  maxUnitsPerScan: clampInt(
+    process.env.AGENT_MAX_UNITS_PER_SCAN,
+    200,
+    1,
+    10000,
+  ),
+  /** Output-token cap per individual request. */
+  perTaskMaxTokens: clampInt(process.env.AGENT_MAX_TOKENS, 1000, 1, 100000),
+  /** Total token budget per scan; 0 disables the budget check. */
+  perScanTokenBudget: clampInt(
+    process.env.AGENT_SCAN_TOKEN_BUDGET,
+    2_000_000,
+    0,
+    1_000_000_000,
+  ),
+  /** Per-request timeout in milliseconds. */
+  requestTimeoutMs: clampInt(
+    process.env.AGENT_REQUEST_TIMEOUT_MS,
+    60_000,
+    1000,
+    600_000,
+  ),
+  /** Skip element screenshots larger than this many bytes. */
+  maxImageBytes: clampInt(
+    process.env.AGENT_MAX_IMAGE_BYTES,
+    1_500_000,
+    1000,
+    20_000_000,
+  ),
+  /** Sampling temperature; 0 favours deterministic, low-hallucination output. */
+  temperature: clampFloat(process.env.AGENT_TEMPERATURE, 0, 0, 2),
 }));
 
 /** Scheduled data-retention cleanup settings. */

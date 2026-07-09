@@ -5,7 +5,9 @@
  * completion, enabling real-time status monitoring and result availability
  * indication for API consumers.
  *
- * The status progression follows a predictable flow: PENDING → RUNNING → (COMPLETED | FAILED)
+ * The status progression follows a predictable flow:
+ * PENDING → RUNNING → [ANALYZING] → (COMPLETED | FAILED). The ANALYZING phase
+ * occurs only when the optional LLM-agent audit is requested and enabled.
  */
 export enum ScanStatus {
   /**
@@ -17,12 +19,22 @@ export enum ScanStatus {
   PENDING = 'pending',
 
   /**
-   * Scan is currently being processed by a background worker.
+   * Scan is currently running deterministic (axe-core) analysis.
    *
-   * Browser automation is active, the page is being analyzed, and
-   * accessibility issues are being identified and documented.
+   * Browser automation is active, pages are being loaded, and accessibility
+   * issues are being identified and documented.
    */
   RUNNING = 'running',
+
+  /**
+   * Deterministic analysis is complete and the optional LLM-agent audit is
+   * running.
+   *
+   * Only reached when the scan requested AI audit skills and the feature is
+   * enabled server-side. Axe-core results are already persisted; agent
+   * findings are being produced.
+   */
+  ANALYZING = 'analyzing',
 
   /**
    * Scan has finished successfully with results available.

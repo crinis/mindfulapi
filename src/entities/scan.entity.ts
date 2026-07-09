@@ -10,7 +10,9 @@ import {
 import { ScanStatus } from '../enums/scan-status.enum';
 import { ScanMode } from '../enums/scan-mode.enum';
 import { CrawlStrategy } from '../enums/crawl-strategy.enum';
+import { AgentSkill } from '../enums/agent-skill.enum';
 import { Issue } from './issue.entity';
+import { AgentFinding } from './agent-finding.entity';
 
 /**
  * Database entity representing an accessibility scan and its metadata.
@@ -119,6 +121,28 @@ export class Scan {
   /** Related issue occurrences found during the scan run. */
   @OneToMany(() => Issue, (issue) => issue.scan, { cascade: true })
   issues: Issue[];
+
+  /**
+   * AI-audit skills requested for this run. Null/empty means no agent audit.
+   */
+  @Column({ type: 'simple-json', nullable: true })
+  aiAuditSkills?: AgentSkill[] | null;
+
+  /** Total agent work units queued for evaluation across all skills. */
+  @Column({ type: 'integer', default: 0 })
+  aiTasksTotal: number;
+
+  /** Agent work units that produced a finding (or a completed judgment). */
+  @Column({ type: 'integer', default: 0 })
+  aiTasksCompleted: number;
+
+  /** Agent work units that failed to evaluate. */
+  @Column({ type: 'integer', default: 0 })
+  aiTasksFailed: number;
+
+  /** Related LLM-agent findings produced during the AI-audit phase. */
+  @OneToMany(() => AgentFinding, (finding) => finding.scan, { cascade: true })
+  agentFindings: AgentFinding[];
 
   /** Timestamp when the scan run was created. */
   @Index()
