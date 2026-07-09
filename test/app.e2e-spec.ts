@@ -42,7 +42,17 @@ const mockPage = {
   providers: [
     {
       provide: ScanQueueService,
-      useValue: { addScanJob: mockAddScanJob },
+      useValue: {
+        addScanJob: mockAddScanJob,
+        cancelScanJob: jest.fn().mockResolvedValue(null),
+        getScanJobState: jest.fn().mockResolvedValue(null),
+        getQueueStatus: jest.fn().mockResolvedValue({
+          waiting: 0,
+          active: 0,
+          completed: 0,
+          failed: 0,
+        }),
+      },
     },
     {
       provide: BrowserService,
@@ -50,6 +60,7 @@ const mockPage = {
         getBrowser: jest.fn().mockResolvedValue({
           newPage: jest.fn().mockResolvedValue(mockPage),
         }),
+        isConnected: jest.fn().mockReturnValue(false),
       },
     },
     BasicAuthCryptoService,
@@ -216,6 +227,57 @@ describe('MindfulAPI (e2e)', () => {
 
     it('protects GET /cleanup/config when token is missing', () =>
       request(app.getHttpServer()).get('/v1/cleanup/policy').expect(401));
+  });
+
+  describe('GET /health', () => {
+    it('is reachable without authentication and reports checks', async () => {
+      const { body } = await request(app.getHttpServer())
+        .get('/health')
+        .expect(200);
+
+      expect(body.status).toBe('ok');
+      expect(body.checks.database).toBe('up');
+      expect(body.checks.redis).toBe('up');
+      expect(body.checks).toHaveProperty('browserConnected');
+      expect(body.checks.queue).toEqual({
+        waiting: 0,
+        active: 0,
+        completed: 0,
+        failed: 0,
+      });
+    });
+
+    it('is not versioned under /v1', () =>
+      request(app.getHttpServer()).get('/v1/health').expect(404));
+  });
+
+  describe('POST /scans/:id/cancel', () => {
+    it('cancels a pending scan', async () => {
+      const { body: created } = await request(app.getHttpServer())
+        .post('/v1/scans')
+        .set(authHeader())
+        .send({ mode: ScanMode.SINGLE_URL, url: 'https://example.com' })
+        .expect(201);
+
+      const { body } = await request(app.getHttpServer())
+        .post(`/v1/scans/${created.id}/cancel`)
+        .set(authHeader())
+        .expect(200);
+
+      expect(body.status).toBe(ScanStatus.CANCELED);
+    });
+
+    it('returns 409 when cancelling a completed scan', () =>
+      request(app.getHttpServer())
+        .post(`/v1/scans/${seededScan.id}/cancel`)
+        .set(authHeader())
+        .expect(409));
+
+    it('returns 404 for an unknown scan', () =>
+      request(app.getHttpServer())
+        .post('/v1/scans/999999/cancel')
+        .set(authHeader())
+        .expect(404));
   });
 
   describe('Error format (RFC 9457 problem+json)', () => {

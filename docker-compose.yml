@@ -61,6 +61,12 @@ services:
     restart: unless-stopped
     # Give in-flight scans time to finish before SIGKILL on shutdown.
     stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
 volumes:
   redis_data:

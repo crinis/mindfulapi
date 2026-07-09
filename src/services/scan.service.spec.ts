@@ -1,5 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ScanService } from './scan.service';
 import { ScanQueueService } from './scan-queue.service';
@@ -58,7 +63,9 @@ describe('ScanService', () => {
   let service: ScanService;
   let mockRepo: jest.Mocked<Record<string, jest.Mock>>;
   let mockIssueRepo: jest.Mocked<Record<string, jest.Mock>>;
-  let mockQueue: jest.Mocked<Pick<ScanQueueService, 'addScanJob'>>;
+  let mockQueue: jest.Mocked<
+    Pick<ScanQueueService, 'addScanJob' | 'cancelScanJob'>
+  >;
   let mockBasicAuthCrypto: jest.Mocked<
     Pick<BasicAuthCryptoService, 'encryptCredentials'>
   >;
@@ -110,7 +117,10 @@ describe('ScanService', () => {
       createQueryBuilder: jest.fn().mockReturnValue(issueCountQueryBuilder),
     };
 
-    mockQueue = { addScanJob: jest.fn().mockResolvedValue(undefined) };
+    mockQueue = {
+      addScanJob: jest.fn().mockResolvedValue(undefined),
+      cancelScanJob: jest.fn().mockResolvedValue(null),
+    };
     mockBasicAuthCrypto = {
       encryptCredentials: jest.fn(),
     };
@@ -427,12 +437,68 @@ describe('ScanService', () => {
     });
   });
 
+  describe('create() enqueue failure', () => {
+    it('marks the scan FAILED and throws 503 when the queue is unavailable', async () => {
+      const saved = makeScan();
+      mockRepo.create.mockReturnValue(saved);
+      mockRepo.save.mockResolvedValue(saved);
+      mockRepo.update = jest.fn().mockResolvedValue(undefined);
+      mockQueue.addScanJob.mockRejectedValue(new Error('redis down'));
+
+      await expect(
+        service.create({
+          mode: ScanMode.SINGLE_URL,
+          url: 'https://example.com',
+        }),
+      ).rejects.toThrow(ServiceUnavailableException);
+
+      expect(mockRepo.update).toHaveBeenCalledWith(saved.id, {
+        status: ScanStatus.FAILED,
+      });
+    });
+  });
+
+  describe('cancel()', () => {
+    it('cancels a pending scan and returns the updated scan', async () => {
+      mockRepo.findOne.mockResolvedValueOnce(
+        makeScan({ status: ScanStatus.PENDING }),
+      );
+      // Second findOne (inside findOne()) returns the canceled scan.
+      mockRepo.findOne.mockResolvedValueOnce(
+        makeScan({ status: ScanStatus.CANCELED }),
+      );
+      mockRepo.update = jest.fn().mockResolvedValue(undefined);
+
+      const result = await service.cancel(1);
+
+      expect(mockQueue.cancelScanJob).toHaveBeenCalledWith(1);
+      expect(mockRepo.update).toHaveBeenCalledWith(1, {
+        status: ScanStatus.CANCELED,
+      });
+      expect(result.status).toBe(ScanStatus.CANCELED);
+    });
+
+    it('throws NotFoundException for an unknown scan', async () => {
+      mockRepo.findOne.mockResolvedValue(null);
+      await expect(service.cancel(999)).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws ConflictException when the scan is already terminal', async () => {
+      mockRepo.findOne.mockResolvedValue(
+        makeScan({ status: ScanStatus.COMPLETED }),
+      );
+      await expect(service.cancel(1)).rejects.toThrow(ConflictException);
+      expect(mockQueue.cancelScanJob).not.toHaveBeenCalled();
+    });
+  });
+
   describe('remove()', () => {
     it('deletes scan by id relying on cascade for issues', async () => {
       mockRepo.delete = jest.fn().mockResolvedValue({ affected: 1 });
 
       await expect(service.remove(1)).resolves.not.toThrow();
       expect(mockRepo.delete).toHaveBeenCalledWith(1);
+      expect(mockQueue.cancelScanJob).toHaveBeenCalledWith(1);
     });
 
     it('throws NotFoundException when scan does not exist', async () => {

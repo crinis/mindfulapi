@@ -34,6 +34,14 @@ export class BrowserService implements OnApplicationShutdown {
   ) {}
 
   /**
+   * Reports whether a browser is currently initialized and connected, without
+   * triggering a launch. Used by the health endpoint.
+   */
+  isConnected(): boolean {
+    return this.browser?.isConnected() ?? false;
+  }
+
+  /**
    * Returns the shared browser instance, creating it on first access.
    * Concurrent callers await the same initialization promise.
    */

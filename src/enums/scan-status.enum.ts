@@ -40,4 +40,13 @@ export enum ScanStatus {
    * may be eligible for automatic retry depending on the error type.
    */
   FAILED = 'failed',
+
+  /**
+   * Scan was cancelled by an API client before it finished.
+   *
+   * A waiting job was removed from the queue, or a running scan observed the
+   * cancellation between pages and stopped early. Partial results (if any) are
+   * retained.
+   */
+  CANCELED = 'canceled',
 }

@@ -8,9 +8,11 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
+import { Reflector } from '@nestjs/core';
 import { createHash, timingSafeEqual } from 'crypto';
 import { Request } from 'express';
 import { securityConfig } from '../config/configuration';
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 /**
  * Global guard enforcing a static bearer token when `AUTH_TOKEN` is configured.
@@ -29,6 +31,7 @@ export class AuthTokenGuard implements CanActivate, OnApplicationBootstrap {
   constructor(
     @Inject(securityConfig.KEY)
     private readonly security: ConfigType<typeof securityConfig>,
+    private readonly reflector: Reflector,
   ) {}
 
   /**
@@ -60,6 +63,14 @@ export class AuthTokenGuard implements CanActivate, OnApplicationBootstrap {
    * @throws UnauthorizedException When the expected bearer token is missing or invalid.
    */
   canActivate(context: ExecutionContext): boolean {
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isPublic) {
+      return true;
+    }
+
     const token = this.security.authToken;
     if (!token) {
       // Validated at bootstrap: only reachable with AUTH_DISABLED=true.

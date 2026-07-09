@@ -465,6 +465,105 @@
         ]
       }
     },
+    "/v1/scans/{id}/cancel": {
+      "post": {
+        "description": "Cancels a pending or running scan. A queued job is removed; a running scan stops cooperatively between pages. Returns 409 if the scan is already in a terminal state.",
+        "operationId": "cancelScan",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Scan ID",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scan canceled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed or malformed request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request conflicts with the current resource state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cancel a scan run",
+        "tags": [
+          "Scans"
+        ]
+      }
+    },
     "/v1/rules": {
       "get": {
         "description": "Returns all available axe-core accessibility rules with metadata, sorted alphabetically by ID.",
@@ -818,6 +917,39 @@
         "summary": "Get cleanup retention policy",
         "tags": [
           "Cleanup"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Returns dependency health (database, Redis) plus browser connectivity and queue depth. Responds 200 when required dependencies are up, 503 otherwise. Unauthenticated.",
+        "operationId": "getHealth",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Service healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponseDto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A required dependency is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Liveness and readiness probe",
+        "tags": [
+          "Health"
         ]
       }
     }
@@ -1334,7 +1466,8 @@
               "pending",
               "running",
               "completed",
-              "failed"
+              "failed",
+              "canceled"
             ],
             "example": "completed"
           },
@@ -1554,7 +1687,8 @@
               "pending",
               "running",
               "completed",
-              "failed"
+              "failed",
+              "canceled"
             ],
             "example": "completed"
           },
@@ -1651,6 +1785,97 @@
           "enabled",
           "retentionDays",
           "interval"
+        ]
+      },
+      "QueueCountsDto": {
+        "type": "object",
+        "properties": {
+          "waiting": {
+            "type": "integer",
+            "example": 0,
+            "minimum": 0
+          },
+          "active": {
+            "type": "integer",
+            "example": 1,
+            "minimum": 0
+          },
+          "completed": {
+            "type": "integer",
+            "example": 42,
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "example": 0,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "waiting",
+          "active",
+          "completed",
+          "failed"
+        ]
+      },
+      "HealthChecksDto": {
+        "type": "object",
+        "properties": {
+          "database": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "example": "up"
+          },
+          "redis": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "example": "up"
+          },
+          "browserConnected": {
+            "type": "boolean",
+            "example": true
+          },
+          "queue": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QueueCountsDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "database",
+          "redis",
+          "browserConnected",
+          "queue"
+        ]
+      },
+      "HealthResponseDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "error"
+            ],
+            "example": "ok"
+          },
+          "checks": {
+            "$ref": "#/components/schemas/HealthChecksDto"
+          }
+        },
+        "required": [
+          "status",
+          "checks"
         ]
       }
     }

@@ -154,6 +154,35 @@ export class ScanController {
     return this.scanService.findOne(id, query.pageUrls);
   }
 
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    operationId: 'cancelScan',
+    summary: 'Cancel a scan run',
+    description:
+      'Cancels a pending or running scan. A queued job is removed; a running scan stops cooperatively between pages. Returns 409 if the scan is already in a terminal state.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Scan ID',
+    schema: { type: 'integer', minimum: 1 },
+    example: 1,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Scan canceled',
+    type: ScanResponseDto,
+  })
+  @ApiProblemResponses(400, 401, 404, 409, 429, 500)
+  /**
+   * Cancels a pending or running scan run.
+   */
+  async cancel(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<ScanResponseDto> {
+    return this.scanService.cancel(id);
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({

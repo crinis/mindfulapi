@@ -15,7 +15,7 @@ import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 import { ScanStatus } from '../enums/scan-status.enum';
 import { ScanMode } from '../enums/scan-mode.enum';
-import { ScanJobData } from './scan-queue.service';
+import { ScanJobData, SCAN_QUEUE_NAME } from './scan-queue.service';
 import { BrowserService } from './browser.service';
 import {
   AxeAccessibilityScanner,
@@ -84,8 +84,19 @@ interface ProgressWriter {
 /**
  * Background job processor for asynchronous accessibility scan execution.
  */
+/**
+ * Reads SCAN_CONCURRENCY (1-8, default 1) at import time. The @Processor
+ * decorator evaluates before ConfigModule loads, so this reads process.env
+ * directly; the value is still bounds-checked by the env validation schema.
+ */
+function resolveScanConcurrency(): number {
+  const raw = parseInt(process.env.SCAN_CONCURRENCY ?? '', 10);
+  if (!Number.isFinite(raw)) return 1;
+  return Math.min(Math.max(raw, 1), 8);
+}
+
 @Injectable()
-@Processor('scan-processing')
+@Processor(SCAN_QUEUE_NAME, { concurrency: resolveScanConcurrency() })
 export class ScanProcessor extends WorkerHost {
   /** Structured service logger for scan processing lifecycle events. */
   private readonly logger = new Logger(ScanProcessor.name);
@@ -146,6 +157,18 @@ export class ScanProcessor extends WorkerHost {
         scan.mode === ScanMode.CRAWL
           ? await this.performCrawl(scan, scanOptions)
           : await this.performTargetListScan(scan, scanOptions);
+
+      // A cancellation observed mid-run wins over completion; persist the
+      // partial counters but leave the CANCELED status in place.
+      if (await this.isCanceled(scanId)) {
+        await this.scanRepository.update(scanId, {
+          pagesDiscovered: progress.pagesDiscovered,
+          pagesScanned: progress.pagesScanned,
+          pagesFailed: progress.pagesFailed,
+        });
+        this.logger.log(`Scan ${scanId} was canceled`);
+        return;
+      }
 
       await this.scanRepository.update(scanId, {
         status: ScanStatus.COMPLETED,
@@ -209,6 +232,7 @@ export class ScanProcessor extends WorkerHost {
     };
     const progressWriter = this.createProgressWriter(scan.id);
     await progressWriter.flush(progress);
+    const isCanceled = this.createCancellationChecker(scan.id);
 
     const browser = await this.browserService.getBrowser();
     const context = await this.scanner.createContext(browser, scanOptions);
@@ -218,6 +242,10 @@ export class ScanProcessor extends WorkerHost {
         tasks,
         this.config.crawlConcurrency,
         async (task) => {
+          // Stop early if the scan was cancelled out of band.
+          if (await isCanceled()) {
+            return;
+          }
           // Re-checked at scan time: DNS may have changed since creation.
           const policy = await this.urlPolicyService.isAllowedTarget(task.url);
           if (!policy.allowed) {
@@ -294,6 +322,7 @@ export class ScanProcessor extends WorkerHost {
     };
     const progressWriter = this.createProgressWriter(scan.id);
     await progressWriter.flush(progress);
+    const isCanceled = this.createCancellationChecker(scan.id);
 
     await requestQueue.addRequests(
       seedUrls.map((url) => ({ url, uniqueKey: url, userData: { depth: 0 } })),
@@ -308,6 +337,10 @@ export class ScanProcessor extends WorkerHost {
         maxConcurrency: Math.max(1, concurrency),
         maxRequestsPerCrawl: maxPages,
         requestHandler: async ({ request, enqueueLinks }) => {
+          // Stop processing further pages once cancelled; drains quietly.
+          if (await isCanceled()) {
+            return;
+          }
           const depth = Number(request.userData.depth || 0);
           progress.pagesDiscovered += 1;
           // Discovered links are unvetted input — enforce the target policy
@@ -485,6 +518,36 @@ export class ScanProcessor extends WorkerHost {
     );
 
     await this.issueRepository.save(entities);
+  }
+
+  /**
+   * Reads the current persisted status to detect an out-of-band cancellation.
+   */
+  private async isCanceled(scanId: number): Promise<boolean> {
+    const row = await this.scanRepository.findOne({
+      where: { id: scanId },
+      select: { id: true, status: true },
+    });
+    return row?.status === ScanStatus.CANCELED;
+  }
+
+  /**
+   * Creates a per-scan cancellation checker that caches the result for a short
+   * window so page loops can poll it cheaply.
+   */
+  private createCancellationChecker(scanId: number): () => Promise<boolean> {
+    let canceled = false;
+    let lastCheckAt = 0;
+
+    return async () => {
+      if (canceled) return true;
+      if (Date.now() - lastCheckAt < PROGRESS_WRITE_INTERVAL_MS) {
+        return false;
+      }
+      lastCheckAt = Date.now();
+      canceled = await this.isCanceled(scanId);
+      return canceled;
+    };
   }
 
   /**

@@ -2,6 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 
+/** Queue name for scan processing jobs. */
+export const SCAN_QUEUE_NAME = 'scan-processing';
+
+/** Deterministic BullMQ job id for a scan, enabling idempotent enqueue/lookup. */
+export const scanJobId = (scanId: number): string => `scan-${scanId}`;
+
 /**
  * Data for a scan processing job in the BullMQ queue.
  */
@@ -39,10 +45,47 @@ export class ScanQueueService {
   /**
    * Enqueues a background job to process a scan run.
    *
+   * Uses a deterministic job id so re-enqueueing the same scan is idempotent
+   * and the job can be looked up or removed by scan id.
+   *
    * @param scanId Scan run ID to process.
    */
   async addScanJob(scanId: number): Promise<void> {
-    await this.scanQueue.add('process-scan', { scanId });
+    await this.scanQueue.add(
+      'process-scan',
+      { scanId },
+      { jobId: scanJobId(scanId) },
+    );
+  }
+
+  /**
+   * Attempts to remove a waiting scan job from the queue.
+   *
+   * @param scanId Scan run ID whose job should be removed.
+   * @returns The job's state before removal, or `null` when no job exists.
+   */
+  async cancelScanJob(scanId: number): Promise<string | null> {
+    const job = await this.scanQueue.getJob(scanJobId(scanId));
+    if (!job) {
+      return null;
+    }
+    const state = await job.getState();
+    // Only waiting/delayed jobs can be removed cleanly; an active job is
+    // cancelled cooperatively by the processor.
+    if (state !== 'active') {
+      await job.remove().catch(() => undefined);
+    }
+    return state;
+  }
+
+  /**
+   * Returns the BullMQ state of a scan's job, or `null` when none exists.
+   *
+   * @param scanId Scan run ID to look up.
+   */
+  async getScanJobState(scanId: number): Promise<string | null> {
+    const job = await this.scanQueue.getJob(scanJobId(scanId));
+    return job ? job.getState() : null;
   }
 
   /**

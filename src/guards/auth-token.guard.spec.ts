@@ -1,18 +1,24 @@
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { AuthTokenGuard } from './auth-token.guard';
 import { securityConfig } from '../config/configuration';
 
 function mockContext(authHeader?: string): ExecutionContext {
   return {
+    getHandler: () => undefined,
+    getClass: () => undefined,
     switchToHttp: () => ({
       getRequest: () => ({ headers: { authorization: authHeader } }),
     }),
-  } as ExecutionContext;
+  } as unknown as ExecutionContext;
 }
 
 /** Builds a guard capturing the current process.env security settings. */
 function makeGuard(): AuthTokenGuard {
-  return new AuthTokenGuard(securityConfig());
+  const reflector = {
+    getAllAndOverride: jest.fn().mockReturnValue(false),
+  } as unknown as Reflector;
+  return new AuthTokenGuard(securityConfig(), reflector);
 }
 
 describe('AuthTokenGuard', () => {

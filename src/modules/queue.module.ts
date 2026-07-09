@@ -4,7 +4,11 @@ import { ConfigType } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { redisConfig } from '../config/configuration';
 import { ScanProcessor } from '../services/scan.processor';
-import { ScanQueueService } from '../services/scan-queue.service';
+import {
+  ScanQueueService,
+  SCAN_QUEUE_NAME,
+} from '../services/scan-queue.service';
+import { ScanReconciliationService } from '../services/scan-reconciliation.service';
 import { BrowserService } from '../services/browser.service';
 import { AxeAccessibilityScanner } from '../services/axe-accessibility-scanner.service';
 import { BasicAuthCryptoService } from '../services/basic-auth-crypto.service';
@@ -28,7 +32,7 @@ import { Issue } from '../entities/issue.entity';
       }),
     }),
     BullModule.registerQueue({
-      name: 'scan-processing',
+      name: SCAN_QUEUE_NAME,
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 2000 },
@@ -41,6 +45,7 @@ import { Issue } from '../entities/issue.entity';
   providers: [
     ScanProcessor,
     ScanQueueService,
+    ScanReconciliationService,
     BrowserService,
     AxeAccessibilityScanner,
     BasicAuthCryptoService,

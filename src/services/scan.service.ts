@@ -1,7 +1,10 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
+  ConflictException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -57,6 +60,8 @@ interface NormalizedCreateInput {
  */
 @Injectable()
 export class ScanService {
+  private readonly logger = new Logger(ScanService.name);
+
   /**
    * @param scanRepository Scan aggregate repository.
    * @param scanQueueService Queue abstraction used to trigger async processing.
@@ -107,9 +112,57 @@ export class ScanService {
     });
 
     const savedScan = await this.scanRepository.save(scan);
-    await this.scanQueueService.addScanJob(savedScan.id);
+
+    try {
+      await this.scanQueueService.addScanJob(savedScan.id);
+    } catch (error) {
+      // The row exists but could not be queued (e.g. Redis down). Mark it
+      // FAILED so the reconciliation sweep can re-enqueue it, and surface a
+      // 503 rather than a misleading PENDING resource.
+      this.logger.error(
+        `Failed to enqueue scan ${savedScan.id}: ${String(error)}`,
+      );
+      await this.scanRepository.update(savedScan.id, {
+        status: ScanStatus.FAILED,
+      });
+      throw new ServiceUnavailableException(
+        'Scan was created but could not be queued for processing. Please retry.',
+      );
+    }
+
     savedScan.issues = [];
     return this.enrichScanData(savedScan);
+  }
+
+  /**
+   * Cancels a scan run. Removes a queued job and marks the scan CANCELED so a
+   * running worker stops cooperatively.
+   *
+   * @param id Scan run identifier.
+   * @throws NotFoundException When no run exists for the given ID.
+   * @throws ConflictException When the scan is already in a terminal state.
+   */
+  async cancel(id: number): Promise<ScanResponseDto> {
+    const scan = await this.scanRepository.findOne({ where: { id } });
+    if (!scan) {
+      throw new NotFoundException(`Scan with ID ${id} not found`);
+    }
+
+    const terminal = [
+      ScanStatus.COMPLETED,
+      ScanStatus.FAILED,
+      ScanStatus.CANCELED,
+    ];
+    if (terminal.includes(scan.status)) {
+      throw new ConflictException(
+        `Scan ${id} is already ${scan.status} and cannot be canceled.`,
+      );
+    }
+
+    await this.scanQueueService.cancelScanJob(id);
+    await this.scanRepository.update(id, { status: ScanStatus.CANCELED });
+
+    return this.findOne(id);
   }
 
   /**
@@ -296,6 +349,9 @@ export class ScanService {
    * @throws NotFoundException When no run exists for the given ID.
    */
   async remove(id: number): Promise<void> {
+    // Best-effort: drop any queued job so a deleted scan isn't processed.
+    await this.scanQueueService.cancelScanJob(id).catch(() => undefined);
+
     const result = await this.scanRepository.delete(id);
 
     if (!result.affected) {
