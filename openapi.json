@@ -966,7 +966,7 @@
   "info": {
     "title": "MindfulAPI",
     "description": "Automated web accessibility scanning API powered by axe-core and Playwright. Built for use with the [mindfula11y](https://github.com/crinis/mindfula11y) TYPO3 extension. Errors are returned as RFC 9457 `application/problem+json`.",
-    "version": "0.5.0",
+    "version": "0.6.0",
     "contact": {}
   },
   "tags": [
