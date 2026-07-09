@@ -33,7 +33,7 @@ import {
 import { ScanQueryDto } from '../dto/scan-query.dto';
 import { ScanByIdQueryDto } from '../dto/scan-by-id-query.dto';
 import { ScanResponseDto } from '../dto/scan/response';
-import { ErrorResponseDto } from '../dto/error-response.dto';
+import { ApiProblemResponses } from '../decorators/api-problem-responses.decorator';
 import { Response } from 'express';
 
 /**
@@ -77,21 +77,7 @@ export class ScanController {
     },
     type: ScanResponseDto,
   })
-  @ApiResponse({
-    status: 400,
-    description: 'Validation failed',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Missing or invalid Bearer token',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 500,
-    description: 'Unexpected server error',
-    type: ErrorResponseDto,
-  })
+  @ApiProblemResponses(400, 401, 429, 500)
   /**
    * Creates a new scan run and sets the resource `Location` header.
    */
@@ -100,7 +86,7 @@ export class ScanController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<ScanResponseDto> {
     const scan = await this.scanService.create(createScanDto);
-    response.location(`/scans/${scan.id}`);
+    response.location(`/v1/scans/${scan.id}`);
     return scan;
   }
 
@@ -117,21 +103,7 @@ export class ScanController {
     type: ScanResponseDto,
     isArray: true,
   })
-  @ApiResponse({
-    status: 400,
-    description: 'Invalid query parameters',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Missing or invalid Bearer token',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 500,
-    description: 'Unexpected server error',
-    type: ErrorResponseDto,
-  })
+  @ApiProblemResponses(400, 401, 429, 500)
   /**
    * Returns all scan runs, optionally filtered by a normalized target URL.
    */
@@ -167,26 +139,7 @@ export class ScanController {
     description: 'Scan found',
     type: ScanResponseDto,
   })
-  @ApiResponse({
-    status: 400,
-    description: 'ID must be a positive integer',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Missing or invalid Bearer token',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 404,
-    description: 'Scan not found',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 500,
-    description: 'Unexpected server error',
-    type: ErrorResponseDto,
-  })
+  @ApiProblemResponses(400, 401, 404, 429, 500)
   /**
    * Returns one scan run by numeric identifier.
    */
@@ -214,26 +167,7 @@ export class ScanController {
     status: 204,
     description: 'Scan deleted',
   })
-  @ApiResponse({
-    status: 400,
-    description: 'ID must be a positive integer',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Missing or invalid Bearer token',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 404,
-    description: 'Scan not found',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 500,
-    description: 'Unexpected server error',
-    type: ErrorResponseDto,
-  })
+  @ApiProblemResponses(400, 401, 404, 429, 500)
   /**
    * Deletes one scan run by numeric identifier.
    */

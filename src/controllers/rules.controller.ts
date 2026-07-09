@@ -7,7 +7,7 @@ import {
 } from '@nestjs/swagger';
 import { RulesService } from '../services/rules.service';
 import { RuleResponseDto } from '../dto/scan/response';
-import { ErrorResponseDto } from '../dto/error-response.dto';
+import { ApiProblemResponses } from '../decorators/api-problem-responses.decorator';
 
 /**
  * REST API controller for axe-core accessibility rules.
@@ -35,16 +35,7 @@ export class RulesController {
     type: RuleResponseDto,
     isArray: true,
   })
-  @ApiResponse({
-    status: 401,
-    description: 'Missing or invalid Bearer token',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 500,
-    description: 'Unexpected server error',
-    type: ErrorResponseDto,
-  })
+  @ApiProblemResponses(401, 429, 500)
   /**
    * Lists all available axe-core rules with response metadata.
    */

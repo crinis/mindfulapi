@@ -1,7 +1,18 @@
-import { INestApplication, ValidationPipe, Module } from '@nestjs/common';
+import {
+  INestApplication,
+  ValidationPipe,
+  Module,
+  VersioningType,
+} from '@nestjs/common';
+import { HttpAdapterHost } from '@nestjs/core';
 import { Test, TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { ProblemDetailsFilter } from '../src/filters/problem-details.filter';
+import {
+  flattenValidationErrors,
+  ValidationProblemException,
+} from '../src/exceptions/validation-problem.exception';
 import { DataSource } from 'typeorm';
 import * as request from 'supertest';
 import { App } from 'supertest/types';
@@ -137,13 +148,17 @@ describe('MindfulAPI (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
     app.useGlobalPipes(
       new ValidationPipe({
         transform: true,
         whitelist: true,
         forbidNonWhitelisted: true,
+        exceptionFactory: (errors) =>
+          new ValidationProblemException(flattenValidationErrors(errors)),
       }),
     );
+    app.useGlobalFilters(new ProblemDetailsFilter(app.get(HttpAdapterHost)));
 
     const swaggerConfig = new DocumentBuilder()
       .setTitle('MindfulAPI')
@@ -170,34 +185,79 @@ describe('MindfulAPI (e2e)', () => {
 
   describe('Authentication', () => {
     it('returns 401 when token is missing', () =>
-      request(app.getHttpServer()).get('/scans').expect(401));
+      request(app.getHttpServer()).get('/v1/scans').expect(401));
 
     it('returns 401 when token is invalid', () =>
       request(app.getHttpServer())
-        .get('/scans')
+        .get('/v1/scans')
         .set(authHeader('wrong-token'))
         .expect(401));
 
     it('returns 200 for correct Bearer token', () =>
-      request(app.getHttpServer()).get('/scans').set(authHeader()).expect(200));
+      request(app.getHttpServer())
+        .get('/v1/scans')
+        .set(authHeader())
+        .expect(200));
 
     it('protects GET /rules when token is missing', () =>
-      request(app.getHttpServer()).get('/rules').expect(401));
+      request(app.getHttpServer()).get('/v1/rules').expect(401));
 
     it('protects GET /scans/:id when token is missing', () =>
-      request(app.getHttpServer()).get(`/scans/${seededScan.id}`).expect(401));
+      request(app.getHttpServer())
+        .get(`/v1/scans/${seededScan.id}`)
+        .expect(401));
 
     it('protects POST /cleanup when token is missing', () =>
-      request(app.getHttpServer()).post('/cleanup').expect(401));
+      request(app.getHttpServer()).post('/v1/cleanup').expect(401));
 
     it('protects GET /cleanup/config when token is missing', () =>
-      request(app.getHttpServer()).get('/cleanup/config').expect(401));
+      request(app.getHttpServer()).get('/v1/cleanup/policy').expect(401));
+  });
+
+  describe('Error format (RFC 9457 problem+json)', () => {
+    it('returns problem+json for a 401', async () => {
+      const { body, headers } = await request(app.getHttpServer())
+        .get('/v1/scans')
+        .expect(401);
+
+      expect(headers['content-type']).toContain('application/problem+json');
+      expect(body.status).toBe(401);
+      expect(body.title).toBe('Unauthorized');
+      expect(body.instance).toBe('/v1/scans');
+    });
+
+    it('returns problem+json for a 404', async () => {
+      const { body } = await request(app.getHttpServer())
+        .get('/v1/scans/999999')
+        .set(authHeader())
+        .expect(404);
+
+      expect(body.status).toBe(404);
+      expect(body.title).toBe('Not Found');
+      expect(typeof body.detail).toBe('string');
+    });
+
+    it('returns a validation problem with field errors for a 400', async () => {
+      const { body, headers } = await request(app.getHttpServer())
+        .post('/v1/scans')
+        .set(authHeader())
+        .send({ mode: ScanMode.SINGLE_URL, url: 'not-a-url' })
+        .expect(400);
+
+      expect(headers['content-type']).toContain('application/problem+json');
+      expect(body.status).toBe(400);
+      expect(body.title).toBe('Validation Failed');
+      expect(Array.isArray(body.errors)).toBe(true);
+      expect(body.errors.length).toBeGreaterThan(0);
+      expect(body.errors[0]).toHaveProperty('pointer');
+      expect(body.errors[0]).toHaveProperty('message');
+    });
   });
 
   describe('POST /scans', () => {
     it('creates a single_url scan run', async () => {
       const { body, headers } = await request(app.getHttpServer())
-        .post('/scans')
+        .post('/v1/scans')
         .set(authHeader())
         .send({
           mode: ScanMode.SINGLE_URL,
@@ -214,12 +274,12 @@ describe('MindfulAPI (e2e)', () => {
       expect(body.violations).toEqual([]);
       expect(body.totalIssueCount).toBe(0);
       expect(body.progress.pagesDiscovered).toBe(0);
-      expect(headers.location).toBe(`/scans/${body.id}`);
+      expect(headers.location).toBe(`/v1/scans/${body.id}`);
     });
 
     it('creates a url_list scan run', async () => {
       const { body } = await request(app.getHttpServer())
-        .post('/scans')
+        .post('/v1/scans')
         .set(authHeader())
         .send({
           mode: ScanMode.URL_LIST,
@@ -233,7 +293,7 @@ describe('MindfulAPI (e2e)', () => {
 
     it('creates a crawl scan run with defaults', async () => {
       const { body } = await request(app.getHttpServer())
-        .post('/scans')
+        .post('/v1/scans')
         .set(authHeader())
         .send({
           mode: ScanMode.CRAWL,
@@ -249,7 +309,7 @@ describe('MindfulAPI (e2e)', () => {
 
     it('queues a job after creating', async () => {
       const { body } = await request(app.getHttpServer())
-        .post('/scans')
+        .post('/v1/scans')
         .set(authHeader())
         .send({
           mode: ScanMode.SINGLE_URL,
@@ -262,7 +322,7 @@ describe('MindfulAPI (e2e)', () => {
 
     it('returns 400 for invalid mode payload combinations', () =>
       request(app.getHttpServer())
-        .post('/scans')
+        .post('/v1/scans')
         .set(authHeader())
         .send({
           mode: ScanMode.SINGLE_URL,
@@ -273,7 +333,7 @@ describe('MindfulAPI (e2e)', () => {
 
     it('returns 400 when crawl globs contains duplicates', () =>
       request(app.getHttpServer())
-        .post('/scans')
+        .post('/v1/scans')
         .set(authHeader())
         .send({
           mode: ScanMode.CRAWL,
@@ -289,7 +349,7 @@ describe('MindfulAPI (e2e)', () => {
 
     it('returns 400 when url_list has fewer than 2 URLs', () =>
       request(app.getHttpServer())
-        .post('/scans')
+        .post('/v1/scans')
         .set(authHeader())
         .send({
           mode: ScanMode.URL_LIST,
@@ -299,7 +359,7 @@ describe('MindfulAPI (e2e)', () => {
 
     it('returns 400 when url_list contains duplicate URLs', () =>
       request(app.getHttpServer())
-        .post('/scans')
+        .post('/v1/scans')
         .set(authHeader())
         .send({
           mode: ScanMode.URL_LIST,
@@ -309,7 +369,7 @@ describe('MindfulAPI (e2e)', () => {
 
     it('returns 400 when crawl startUrls contains duplicates', () =>
       request(app.getHttpServer())
-        .post('/scans')
+        .post('/v1/scans')
         .set(authHeader())
         .send({
           mode: ScanMode.CRAWL,
@@ -319,7 +379,7 @@ describe('MindfulAPI (e2e)', () => {
 
     it('returns 400 when scanOptions.ruleIds contains duplicates', () =>
       request(app.getHttpServer())
-        .post('/scans')
+        .post('/v1/scans')
         .set(authHeader())
         .send({
           mode: ScanMode.SINGLE_URL,
@@ -330,7 +390,7 @@ describe('MindfulAPI (e2e)', () => {
 
     it('returns 401 without auth', () =>
       request(app.getHttpServer())
-        .post('/scans')
+        .post('/v1/scans')
         .send({
           mode: ScanMode.SINGLE_URL,
           url: 'https://example.com',
@@ -341,7 +401,7 @@ describe('MindfulAPI (e2e)', () => {
   describe('GET /scans', () => {
     it('returns runs with the unified response shape', async () => {
       const { body } = await request(app.getHttpServer())
-        .get('/scans')
+        .get('/v1/scans')
         .set(authHeader())
         .expect(200);
 
@@ -364,7 +424,7 @@ describe('MindfulAPI (e2e)', () => {
 
     it('filters by target URL', async () => {
       const { body } = await request(app.getHttpServer())
-        .get('/scans?target=https://seeded.example.com')
+        .get('/v1/scans?target=https://seeded.example.com')
         .set(authHeader())
         .expect(200);
 
@@ -376,7 +436,7 @@ describe('MindfulAPI (e2e)', () => {
 
     it('returns 400 for invalid target URL query', () =>
       request(app.getHttpServer())
-        .get('/scans?target=not-a-url')
+        .get('/v1/scans?target=not-a-url')
         .set(authHeader())
         .expect(400));
   });
@@ -384,7 +444,7 @@ describe('MindfulAPI (e2e)', () => {
   describe('GET /scans/:id', () => {
     it('returns grouped violations with pageUrl per issue', async () => {
       const { body } = await request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}`)
+        .get(`/v1/scans/${seededScan.id}`)
         .set(authHeader())
         .expect(200);
 
@@ -407,20 +467,20 @@ describe('MindfulAPI (e2e)', () => {
 
     it('returns 404 for unknown ID', () =>
       request(app.getHttpServer())
-        .get('/scans/999999')
+        .get('/v1/scans/999999')
         .set(authHeader())
         .expect(404));
 
     it('returns 400 for non-numeric ID', () =>
       request(app.getHttpServer())
-        .get('/scans/abc')
+        .get('/v1/scans/abc')
         .set(authHeader())
         .expect(400));
 
     it('filters violations to a single matching pageUrl', async () => {
       const url = 'https://seeded.example.com';
       const { body } = await request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}?pageUrls=${encodeURIComponent(url)}`)
+        .get(`/v1/scans/${seededScan.id}?pageUrls=${encodeURIComponent(url)}`)
         .set(authHeader())
         .expect(200);
 
@@ -436,7 +496,7 @@ describe('MindfulAPI (e2e)', () => {
       const url2 = 'https://seeded.example.com/about';
       const { body } = await request(app.getHttpServer())
         .get(
-          `/scans/${seededScan.id}?pageUrls=${encodeURIComponent(url1)}&pageUrls=${encodeURIComponent(url2)}`,
+          `/v1/scans/${seededScan.id}?pageUrls=${encodeURIComponent(url1)}&pageUrls=${encodeURIComponent(url2)}`,
         )
         .set(authHeader())
         .expect(200);
@@ -451,7 +511,9 @@ describe('MindfulAPI (e2e)', () => {
 
     it('returns empty violations when pageUrl matches no issues', async () => {
       const { body } = await request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}?pageUrls=https://no-match.example.com/`)
+        .get(
+          `/v1/scans/${seededScan.id}?pageUrls=https://no-match.example.com/`,
+        )
         .set(authHeader())
         .expect(200);
 
@@ -461,7 +523,7 @@ describe('MindfulAPI (e2e)', () => {
 
     it('returns 400 for invalid pageUrl query param', () =>
       request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}?pageUrls=not-a-url`)
+        .get(`/v1/scans/${seededScan.id}?pageUrls=not-a-url`)
         .set(authHeader())
         .expect(400));
   });
@@ -471,12 +533,12 @@ describe('MindfulAPI (e2e)', () => {
       const scan = await seedCompletedScan(dataSource);
 
       await request(app.getHttpServer())
-        .delete(`/scans/${scan.id}`)
+        .delete(`/v1/scans/${scan.id}`)
         .set(authHeader())
         .expect(204);
 
       await request(app.getHttpServer())
-        .get(`/scans/${scan.id}`)
+        .get(`/v1/scans/${scan.id}`)
         .set(authHeader())
         .expect(404);
 
@@ -488,18 +550,18 @@ describe('MindfulAPI (e2e)', () => {
 
     it('returns 404 for unknown ID', () =>
       request(app.getHttpServer())
-        .delete('/scans/999999')
+        .delete('/v1/scans/999999')
         .set(authHeader())
         .expect(404));
 
     it('returns 401 without token', () =>
-      request(app.getHttpServer()).delete('/scans/1').expect(401));
+      request(app.getHttpServer()).delete('/v1/scans/1').expect(401));
   });
 
   describe('GET /rules', () => {
     it('returns axe rules', async () => {
       const { body } = await request(app.getHttpServer())
-        .get('/rules')
+        .get('/v1/rules')
         .set(authHeader())
         .expect(200);
 
@@ -512,18 +574,19 @@ describe('MindfulAPI (e2e)', () => {
   });
 
   describe('Cleanup endpoints', () => {
-    it('POST /cleanup returns success', async () => {
+    it('POST /cleanup returns the deletion result', async () => {
       const { body } = await request(app.getHttpServer())
-        .post('/cleanup')
+        .post('/v1/cleanup')
         .set(authHeader())
         .expect(200);
 
-      expect(body.message).toBe('Cleanup completed successfully');
+      expect(typeof body.deletedScans).toBe('number');
+      expect(typeof body.cutoffDate).toBe('string');
     });
 
-    it('GET /cleanup/config returns config', async () => {
+    it('GET /cleanup/policy returns the retention policy', async () => {
       const { body } = await request(app.getHttpServer())
-        .get('/cleanup/config')
+        .get('/v1/cleanup/policy')
         .set(authHeader())
         .expect(200);
 
@@ -540,8 +603,8 @@ describe('MindfulAPI (e2e)', () => {
         .expect(200);
 
       expect(body.openapi).toMatch(/^3\./);
-      expect(body.paths['/scans']).toBeDefined();
-      expect(body.paths['/scans/{id}']).toBeDefined();
+      expect(body.paths['/v1/scans']).toBeDefined();
+      expect(body.paths['/v1/scans/{id}']).toBeDefined();
     });
 
     it('documents mode-based start payload with oneOf', async () => {
@@ -550,7 +613,7 @@ describe('MindfulAPI (e2e)', () => {
         .expect(200);
 
       const requestBodySchema =
-        body.paths['/scans'].post.requestBody.content['application/json']
+        body.paths['/v1/scans'].post.requestBody.content['application/json']
           .schema;
       expect(requestBodySchema.oneOf).toBeDefined();
       expect(requestBodySchema.discriminator.propertyName).toBe('mode');
@@ -561,16 +624,16 @@ describe('MindfulAPI (e2e)', () => {
         .get('/api-json')
         .expect(200);
 
-      const scanPost = body.paths['/scans'].post;
+      const scanPost = body.paths['/v1/scans'].post;
       const requestContent = scanPost.requestBody.content['application/json'];
 
       expect(scanPost.operationId).toBe('createScan');
-      expect(body.paths['/scans'].get.operationId).toBe('listScans');
-      expect(body.paths['/scans/{id}'].get.operationId).toBe('getScanById');
-      expect(body.paths['/rules'].get.operationId).toBe('listRules');
-      expect(body.paths['/cleanup'].post.operationId).toBe('triggerCleanup');
-      expect(body.paths['/cleanup/config'].get.operationId).toBe(
-        'getCleanupConfig',
+      expect(body.paths['/v1/scans'].get.operationId).toBe('listScans');
+      expect(body.paths['/v1/scans/{id}'].get.operationId).toBe('getScanById');
+      expect(body.paths['/v1/rules'].get.operationId).toBe('listRules');
+      expect(body.paths['/v1/cleanup'].post.operationId).toBe('triggerCleanup');
+      expect(body.paths['/v1/cleanup/policy'].get.operationId).toBe(
+        'getCleanupPolicy',
       );
 
       expect(requestContent.examples).toBeDefined();
@@ -584,8 +647,8 @@ describe('MindfulAPI (e2e)', () => {
         .get('/api-json')
         .expect(200);
 
-      const htmlPath = body.paths['/scans/{id}/reports/html'];
-      const pdfPath = body.paths['/scans/{id}/reports/pdf'];
+      const htmlPath = body.paths['/v1/scans/{id}/reports/html'];
+      const pdfPath = body.paths['/v1/scans/{id}/reports/pdf'];
       expect(htmlPath.get.responses['200'].content['text/html']).toBeDefined();
       expect(
         pdfPath.get.responses['200'].content['application/pdf'],
@@ -596,7 +659,7 @@ describe('MindfulAPI (e2e)', () => {
   describe('GET /scans/:id/reports/html', () => {
     it('returns 200 with text/html content type', async () => {
       const res = await request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}/reports/html`)
+        .get(`/v1/scans/${seededScan.id}/reports/html`)
         .set(authHeader())
         .expect(200);
 
@@ -607,7 +670,7 @@ describe('MindfulAPI (e2e)', () => {
 
     it('includes violation data in the report', async () => {
       const res = await request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}/reports/html`)
+        .get(`/v1/scans/${seededScan.id}/reports/html`)
         .set(authHeader())
         .expect(200);
 
@@ -617,14 +680,14 @@ describe('MindfulAPI (e2e)', () => {
 
     it('returns 404 for unknown scan', async () => {
       await request(app.getHttpServer())
-        .get('/scans/99999/reports/html')
+        .get('/v1/scans/99999/reports/html')
         .set(authHeader())
         .expect(404);
     });
 
     it('returns 401 when auth token is missing', async () => {
       await request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}/reports/html`)
+        .get(`/v1/scans/${seededScan.id}/reports/html`)
         .expect(401);
     });
   });
@@ -632,7 +695,7 @@ describe('MindfulAPI (e2e)', () => {
   describe('GET /scans/:id/reports/pdf', () => {
     it('returns 200 with application/pdf content type', async () => {
       const res = await request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}/reports/pdf`)
+        .get(`/v1/scans/${seededScan.id}/reports/pdf`)
         .set(authHeader())
         .expect(200);
 
@@ -644,14 +707,14 @@ describe('MindfulAPI (e2e)', () => {
 
     it('returns 404 for unknown scan', async () => {
       await request(app.getHttpServer())
-        .get('/scans/99999/reports/pdf')
+        .get('/v1/scans/99999/reports/pdf')
         .set(authHeader())
         .expect(404);
     });
 
     it('returns 401 when auth token is missing', async () => {
       await request(app.getHttpServer())
-        .get(`/scans/${seededScan.id}/reports/pdf`)
+        .get(`/v1/scans/${seededScan.id}/reports/pdf`)
         .expect(401);
     });
   });

@@ -15,7 +15,7 @@ import {
 } from '@nestjs/swagger';
 import { ScanService } from '../services/scan.service';
 import { ReportService } from '../services/report.service';
-import { ErrorResponseDto } from '../dto/error-response.dto';
+import { ApiProblemResponses } from '../decorators/api-problem-responses.decorator';
 
 /**
  * REST API controller for generating accessibility reports from scan data.
@@ -47,26 +47,7 @@ export class ReportController {
     description: 'HTML accessibility report',
     content: { 'text/html': { schema: { type: 'string' } } },
   })
-  @ApiResponse({
-    status: 400,
-    description: 'ID must be a positive integer',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Missing or invalid Bearer token',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 404,
-    description: 'Scan not found',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 500,
-    description: 'Unexpected server error',
-    type: ErrorResponseDto,
-  })
+  @ApiProblemResponses(400, 401, 404, 429, 500)
   @Header('Content-Type', 'text/html; charset=utf-8')
   /**
    * Returns a complete standalone HTML accessibility report for the given scan.
@@ -95,26 +76,7 @@ export class ReportController {
       'application/pdf': { schema: { type: 'string', format: 'binary' } },
     },
   })
-  @ApiResponse({
-    status: 400,
-    description: 'ID must be a positive integer',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Missing or invalid Bearer token',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 404,
-    description: 'Scan not found',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 500,
-    description: 'Unexpected server error',
-    type: ErrorResponseDto,
-  })
+  @ApiProblemResponses(400, 401, 404, 429, 500)
   /**
    * Returns a PDF accessibility report for the given scan as a downloadable file.
    */

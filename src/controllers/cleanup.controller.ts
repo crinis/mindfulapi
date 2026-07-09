@@ -6,8 +6,8 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { CleanupService } from '../services/cleanup.service';
-import { CleanupConfigDto, MessageDto } from '../dto/cleanup.dto';
-import { ErrorResponseDto } from '../dto/error-response.dto';
+import { CleanupConfigDto, CleanupResultDto } from '../dto/cleanup.dto';
+import { ApiProblemResponses } from '../decorators/api-problem-responses.decorator';
 
 /**
  * Controller for cleanup operations.
@@ -33,52 +33,35 @@ export class CleanupController {
   @ApiResponse({
     status: 200,
     description: 'Cleanup completed',
-    type: MessageDto,
+    type: CleanupResultDto,
   })
-  @ApiResponse({
-    status: 401,
-    description: 'Missing or invalid Bearer token',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 500,
-    description: 'Unexpected server error',
-    type: ErrorResponseDto,
-  })
+  @ApiProblemResponses(401, 429, 500)
   /**
-   * Triggers immediate cleanup and returns a success message payload.
+   * Triggers immediate cleanup and returns the number of scans deleted.
    */
-  async triggerCleanup(): Promise<MessageDto> {
-    await this.cleanupService.triggerManualCleanup();
-    return { message: 'Cleanup completed successfully' };
+  async triggerCleanup(): Promise<CleanupResultDto> {
+    const { deletedScans, cutoffDate } =
+      await this.cleanupService.triggerManualCleanup();
+    return { deletedScans, cutoffDate: cutoffDate.toISOString() };
   }
 
-  @Get('config')
+  @Get('policy')
   @ApiOperation({
-    operationId: 'getCleanupConfig',
-    summary: 'Get cleanup configuration',
+    operationId: 'getCleanupPolicy',
+    summary: 'Get cleanup retention policy',
     description:
-      'Returns the current cleanup configuration derived from environment variables.',
+      'Returns the current cleanup retention policy derived from environment variables.',
   })
   @ApiResponse({
     status: 200,
-    description: 'Cleanup configuration',
+    description: 'Cleanup retention policy',
     type: CleanupConfigDto,
   })
-  @ApiResponse({
-    status: 401,
-    description: 'Missing or invalid Bearer token',
-    type: ErrorResponseDto,
-  })
-  @ApiResponse({
-    status: 500,
-    description: 'Unexpected server error',
-    type: ErrorResponseDto,
-  })
+  @ApiProblemResponses(401, 429, 500)
   /**
-   * Returns active cleanup configuration values.
+   * Returns the active cleanup retention policy.
    */
-  getCleanupConfig(): CleanupConfigDto {
+  getCleanupPolicy(): CleanupConfigDto {
     return this.cleanupService.getCleanupConfig();
   }
 }

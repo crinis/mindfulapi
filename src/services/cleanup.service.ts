@@ -62,8 +62,10 @@ export class CleanupService {
 
   /**
    * Deletes scans older than the configured retention period.
+   *
+   * @returns The number of scans deleted and the cutoff date used.
    */
-  async performCleanup(): Promise<void> {
+  async performCleanup(): Promise<{ deletedScans: number; cutoffDate: Date }> {
     const cutoffDate = new Date();
 
     if (this.retentionDays === 0) {
@@ -81,20 +83,27 @@ export class CleanupService {
 
     if (scans.length === 0) {
       this.logger.log('No scans found for cleanup');
-      return;
+      return { deletedScans: 0, cutoffDate };
     }
 
     const scanIds = scans.map((s) => s.id);
     const result = await this.scanRepository.delete(scanIds);
-    this.logger.log(`Removed ${result.affected ?? scans.length} scans`);
+    const deletedScans = result.affected ?? scans.length;
+    this.logger.log(`Removed ${deletedScans} scans`);
+    return { deletedScans, cutoffDate };
   }
 
   /**
    * Manually triggers a cleanup run regardless of scheduler cadence.
+   *
+   * @returns The number of scans deleted and the cutoff date used.
    */
-  async triggerManualCleanup(): Promise<void> {
+  async triggerManualCleanup(): Promise<{
+    deletedScans: number;
+    cutoffDate: Date;
+  }> {
     this.logger.log('Manual cleanup triggered');
-    await this.performCleanup();
+    return this.performCleanup();
   }
 
   /**

@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.0",
   "paths": {
-    "/scans": {
+    "/v1/scans": {
       "post": {
         "description": "Queues a new axe-core scan run in one of three modes: single URL, URL list, or crawl. Processing runs asynchronously in the background. Poll GET /scans/:id for status and results.",
         "operationId": "createScan",
@@ -113,11 +113,11 @@
             }
           },
           "400": {
-            "description": "Validation failed",
+            "description": "Validation failed or malformed request",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -127,7 +127,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -137,7 +147,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -184,11 +194,11 @@
             }
           },
           "400": {
-            "description": "Invalid query parameters",
+            "description": "Validation failed or malformed request",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -198,7 +208,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -208,7 +228,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -225,7 +245,7 @@
         ]
       }
     },
-    "/scans/{id}": {
+    "/v1/scans/{id}": {
       "get": {
         "description": "Returns a specific scan with full violation details.",
         "operationId": "getScanById",
@@ -270,11 +290,11 @@
             }
           },
           "400": {
-            "description": "ID must be a positive integer",
+            "description": "Validation failed or malformed request",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -284,17 +304,27 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
           },
           "404": {
-            "description": "Scan not found",
+            "description": "Resource not found",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -304,7 +334,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -319,9 +349,89 @@
         "tags": [
           "Scans"
         ]
+      },
+      "delete": {
+        "description": "Permanently deletes a scan run and all of its stored issues.",
+        "operationId": "deleteScan",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Scan ID",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Scan deleted"
+          },
+          "400": {
+            "description": "Validation failed or malformed request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a scan run",
+        "tags": [
+          "Scans"
+        ]
       }
     },
-    "/rules": {
+    "/v1/rules": {
       "get": {
         "description": "Returns all available axe-core accessibility rules with metadata, sorted alphabetically by ID.",
         "operationId": "listRules",
@@ -345,7 +455,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -355,7 +475,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -372,7 +492,7 @@
         ]
       }
     },
-    "/scans/{id}/reports/html": {
+    "/v1/scans/{id}/reports/html": {
       "get": {
         "description": "Returns a full standalone HTML accessibility report.",
         "operationId": "getHtmlReport",
@@ -400,11 +520,11 @@
             }
           },
           "400": {
-            "description": "ID must be a positive integer",
+            "description": "Validation failed or malformed request",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -414,17 +534,27 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
           },
           "404": {
-            "description": "Scan not found",
+            "description": "Resource not found",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -434,7 +564,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -451,7 +581,7 @@
         ]
       }
     },
-    "/scans/{id}/reports/pdf": {
+    "/v1/scans/{id}/reports/pdf": {
       "get": {
         "description": "Returns a generated PDF accessibility report.",
         "operationId": "getPdfReport",
@@ -480,11 +610,11 @@
             }
           },
           "400": {
-            "description": "ID must be a positive integer",
+            "description": "Validation failed or malformed request",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -494,17 +624,27 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
           },
           "404": {
-            "description": "Scan not found",
+            "description": "Resource not found",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -514,7 +654,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -531,7 +671,7 @@
         ]
       }
     },
-    "/cleanup": {
+    "/v1/cleanup": {
       "post": {
         "description": "Immediately runs the cleanup process to delete scans older than the configured retention period, bypassing the enabled flag.",
         "operationId": "triggerCleanup",
@@ -542,7 +682,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MessageDto"
+                  "$ref": "#/components/schemas/CleanupResultDto"
                 }
               }
             }
@@ -552,7 +692,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -562,7 +712,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -579,14 +729,14 @@
         ]
       }
     },
-    "/cleanup/config": {
+    "/v1/cleanup/policy": {
       "get": {
-        "description": "Returns the current cleanup configuration derived from environment variables.",
-        "operationId": "getCleanupConfig",
+        "description": "Returns the current cleanup retention policy derived from environment variables.",
+        "operationId": "getCleanupPolicy",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Cleanup configuration",
+            "description": "Cleanup retention policy",
             "content": {
               "application/json": {
                 "schema": {
@@ -600,7 +750,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -610,7 +770,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponseDto"
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
                 }
               }
             }
@@ -621,7 +781,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get cleanup configuration",
+        "summary": "Get cleanup retention policy",
         "tags": [
           "Cleanup"
         ]
@@ -630,8 +790,8 @@
   },
   "info": {
     "title": "MindfulAPI",
-    "description": "Automated web accessibility scanning API powered by axe-core and Playwright. Built for use with the [mindfula11y](https://github.com/crinis/mindfula11y) TYPO3 extension.",
-    "version": "1.0",
+    "description": "Automated web accessibility scanning API powered by axe-core and Playwright. Built for use with the [mindfula11y](https://github.com/crinis/mindfula11y) TYPO3 extension. Errors are returned as RFC 9457 `application/problem+json`.",
+    "version": "0.5.0",
     "contact": {}
   },
   "tags": [
@@ -640,12 +800,20 @@
       "description": "Create and inspect accessibility scan runs"
     },
     {
+      "name": "Reports",
+      "description": "Generate HTML and PDF accessibility reports"
+    },
+    {
       "name": "Rules",
       "description": "List available axe-core rules and metadata"
     },
     {
       "name": "Cleanup",
       "description": "Manage retention cleanup lifecycle"
+    },
+    {
+      "name": "Health",
+      "description": "Liveness and readiness probes"
     }
   ],
   "servers": [
@@ -659,7 +827,7 @@
       "bearer": {
         "scheme": "bearer",
         "bearerFormat": "JWT",
-        "description": "Set the AUTH_TOKEN environment variable to enable authentication. Leave unset for open access.",
+        "description": "Set the AUTH_TOKEN environment variable to enable authentication. When authentication is disabled (AUTH_DISABLED=true), the token is ignored.",
         "type": "http"
       }
     },
@@ -1140,6 +1308,7 @@
           "crawlOptions": {
             "nullable": true,
             "description": "Present only for crawl runs.",
+            "type": "object",
             "allOf": [
               {
                 "$ref": "#/components/schemas/CrawlOptionsResponseDto"
@@ -1194,56 +1363,88 @@
           "updatedAt"
         ]
       },
-      "ErrorResponseDto": {
+      "ValidationErrorDetail": {
         "type": "object",
         "properties": {
-          "statusCode": {
-            "type": "integer",
-            "example": 400,
-            "description": "HTTP status code.",
-            "minimum": 400,
-            "maximum": 599
+          "pointer": {
+            "type": "string",
+            "example": "/urls",
+            "description": "JSON Pointer to the field that failed validation."
           },
           "message": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            ],
-            "example": [
-              "url must be a URL address"
-            ],
-            "description": "Human-readable error message or array of validation messages."
-          },
-          "error": {
             "type": "string",
-            "example": "Bad Request",
-            "description": "Short error classification"
+            "example": "urls must contain at least 2 elements",
+            "description": "Human-readable validation message."
           }
         },
         "required": [
-          "statusCode",
-          "message",
-          "error"
+          "pointer",
+          "message"
         ]
       },
-      "MessageDto": {
+      "ProblemDetailsDto": {
         "type": "object",
         "properties": {
-          "message": {
+          "type": {
             "type": "string",
-            "example": "Cleanup completed successfully",
-            "description": "Human-readable operation result message."
+            "example": "about:blank",
+            "description": "A URI reference identifying the problem type. `about:blank` is used for problems with no dedicated documentation."
+          },
+          "title": {
+            "type": "string",
+            "example": "Bad Request",
+            "description": "Short, human-readable summary of the problem type."
+          },
+          "status": {
+            "type": "integer",
+            "example": 400,
+            "minimum": 400,
+            "maximum": 599,
+            "description": "HTTP status code for this occurrence."
+          },
+          "detail": {
+            "type": "string",
+            "example": "Scan with ID 42 not found",
+            "description": "Human-readable explanation specific to this occurrence."
+          },
+          "instance": {
+            "type": "string",
+            "example": "/v1/scans/42",
+            "description": "URI reference identifying this specific occurrence."
+          },
+          "errors": {
+            "description": "Field-level validation errors (validation problems only).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ValidationErrorDetail"
+            }
           }
         },
         "required": [
-          "message"
+          "type",
+          "title",
+          "status"
+        ]
+      },
+      "CleanupResultDto": {
+        "type": "object",
+        "properties": {
+          "deletedScans": {
+            "type": "integer",
+            "example": 12,
+            "description": "Number of scan runs deleted.",
+            "minimum": 0
+          },
+          "cutoffDate": {
+            "type": "string",
+            "example": "2026-06-09T00:00:00.000Z",
+            "description": "Scans created before this timestamp were deleted.",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "deletedScans",
+          "cutoffDate"
         ]
       },
       "CleanupConfigDto": {
@@ -1273,5 +1474,11 @@
         ]
       }
     }
-  }
+  },
+  "security": [
+    {
+      "bearer": []
+    },
+    {}
+  ]
 }

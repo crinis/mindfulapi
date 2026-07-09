@@ -104,7 +104,7 @@ describe('CleanupService', () => {
     it('delegates to performCleanup', async () => {
       const spy = jest
         .spyOn(service, 'performCleanup')
-        .mockResolvedValue(undefined);
+        .mockResolvedValue({ deletedScans: 0, cutoffDate: new Date() });
 
       await service.triggerManualCleanup();
 
@@ -116,7 +116,7 @@ describe('CleanupService', () => {
     it('runs cleanup when enabled', async () => {
       const spy = jest
         .spyOn(service, 'performCleanup')
-        .mockResolvedValue(undefined);
+        .mockResolvedValue({ deletedScans: 0, cutoffDate: new Date() });
 
       await service.performScheduledCleanup();
 
@@ -132,7 +132,7 @@ describe('CleanupService', () => {
       );
       const spy = jest
         .spyOn(disabledService, 'performCleanup')
-        .mockResolvedValue(undefined);
+        .mockResolvedValue({ deletedScans: 0, cutoffDate: new Date() });
 
       await disabledService.performScheduledCleanup();
 

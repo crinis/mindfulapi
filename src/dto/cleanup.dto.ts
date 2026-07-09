@@ -1,19 +1,29 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 /**
- * Generic message response returned from action endpoints (e.g. trigger cleanup).
+ * Result of a manual cleanup run.
  */
-export class MessageDto {
-  /** Human-readable result message for the invoked operation. */
+export class CleanupResultDto {
+  /** Number of scan runs deleted by this cleanup. */
   @ApiProperty({
-    example: 'Cleanup completed successfully',
-    description: 'Human-readable operation result message.',
+    type: 'integer',
+    example: 12,
+    description: 'Number of scan runs deleted.',
+    minimum: 0,
   })
-  message: string;
+  deletedScans: number;
+
+  /** ISO 8601 cutoff — scans created before this were deleted. */
+  @ApiProperty({
+    example: '2026-06-09T00:00:00.000Z',
+    description: 'Scans created before this timestamp were deleted.',
+    format: 'date-time',
+  })
+  cutoffDate: string;
 }
 
 /**
- * Cleanup service configuration as derived from environment variables.
+ * Cleanup retention policy as derived from environment variables.
  */
 export class CleanupConfigDto {
   /** Indicates whether scheduled cleanup executions are active. */

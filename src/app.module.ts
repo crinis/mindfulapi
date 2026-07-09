@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigType } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScanModule } from './modules/scan.module';
 import { QueueModule } from './modules/queue.module';
@@ -40,10 +42,21 @@ import {
       useFactory: (database: ConfigType<typeof databaseConfig>) =>
         createDatabaseConfig(database),
     }),
+    ThrottlerModule.forRootAsync({
+      inject: [securityConfig.KEY],
+      useFactory: (security: ConfigType<typeof securityConfig>) => ({
+        throttlers: [
+          {
+            ttl: security.throttleTtlSeconds * 1000,
+            limit: security.throttleLimit,
+          },
+        ],
+      }),
+    }),
     QueueModule, // Background job processing for accessibility scans
     ScanModule, // Core scan management functionality
     CleanupModule, // Automated cleanup of old scan data
   ],
-  providers: [authProvider],
+  providers: [authProvider, { provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}
