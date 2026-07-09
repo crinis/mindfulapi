@@ -205,7 +205,7 @@ All configuration is done via environment variables. Copy `.env.example` for a f
 | `THROTTLE_LIMIT` | `100` | Allowed requests per window per client |
 | `AGENT_ENABLED` | `false` | Enable the optional [AI accessibility audit](#ai-accessibility-audit-optional) |
 | `AGENT_PROVIDER` | _(unset)_ | LLM provider: `openai`, `anthropic`, or `openai-compatible` (OpenRouter / local models) |
-| `AGENT_MODEL` | _(unset)_ | Model identifier passed to the provider (e.g. `gpt-4o-mini`) |
+| `AGENT_MODEL` | _(unset)_ | Model identifier passed to the provider (e.g. `gpt-4.1-mini`) |
 | `AGENT_API_KEY` | _(unset)_ | Provider API key; validated lazily, never logged |
 | `AGENT_BASE_URL` | _(unset)_ | Base URL for the `openai-compatible` provider (OpenRouter or a local server) |
 | `AGENT_SKILLS` | `image_alt_text` | Comma-separated skills clients may request |
@@ -268,7 +268,7 @@ Configuration is entirely environment-variable driven (the same convention as th
 
 | Goal | `AGENT_PROVIDER` | `AGENT_BASE_URL` | `AGENT_MODEL` (example) |
 |------|------------------|------------------|-------------------------|
-| OpenAI directly | `openai` | _(unset)_ | `gpt-4o-mini` |
+| OpenAI directly | `openai` | _(unset)_ | `gpt-4.1-mini` |
 | Anthropic directly | `anthropic` | _(unset)_ | `claude-3-5-haiku-latest` |
 | **OpenRouter** (one key → hundreds of models) | `openai-compatible` | `https://openrouter.ai/api/v1` | `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`, `meta-llama/llama-3.2-90b-vision-instruct` |
 | DeepSeek | `openai-compatible` | `https://api.deepseek.com` | `deepseek-chat` |
@@ -284,7 +284,7 @@ AGENT_API_KEY=sk-or-...
 AGENT_SKILLS=image_alt_text        # skills clients may request
 ```
 
-**Picking a model.** The `image_alt_text` skill needs a **vision-capable** model (it sends screenshots) that is reasonably good at structured JSON output. Small multimodal models (e.g. `gpt-4o-mini`, `claude-3.5-haiku`, or a hosted Llama Vision) are usually the sweet spot for cost. Larger models improve judgment accuracy on ambiguous images at higher cost. Because the harness validates every response and falls back to `insufficient_evidence` on failure, a weaker model degrades gracefully (more "needs review", fewer confident verdicts) rather than breaking scans — start cheap and scale up only if you see too many `insufficient_evidence` findings. Using OpenRouter as the gateway lets you switch models by changing one string, which makes this tuning easy.
+**Picking a model.** The `image_alt_text` skill needs a **vision-capable** model (it sends screenshots) that is good at structured JSON output. A useful reference point: `gpt-4.1-mini` reliably distinguishes accurate, inaccurate, and redundant alt text and suggests fixes, at low cost. Beware going *too* small — the very cheapest tier (e.g. `gpt-4.1-nano`) tends to **rubber-stamp** images as "appropriate" and silently miss real problems rather than admit uncertainty, so validate any downgrade against known-bad examples before trusting it. Note that reasoning models (OpenAI's GPT-5 / o-series) currently reject the harness's `AGENT_TEMPERATURE=0` and will fall back to `insufficient_evidence` unless you set `AGENT_TEMPERATURE=1`. The harness validates every response and falls back to `insufficient_evidence` on hard failures, so a scan never breaks — but a weak model fails by *under-reporting* (false "appropriate"), which is easy to miss. Using OpenRouter as the gateway lets you switch models by changing one string, which makes this tuning easy.
 
 ### Per-skill model selection
 
@@ -293,7 +293,7 @@ The `AGENT_*` values above are the **defaults for every skill**. Any skill can p
 ```bash
 # Global default (used by any skill without an override):
 AGENT_PROVIDER=openai
-AGENT_MODEL=gpt-4o-mini
+AGENT_MODEL=gpt-4.1-mini
 AGENT_API_KEY=sk-...
 
 # Override just the image skill to run on OpenRouter with a vision model:
