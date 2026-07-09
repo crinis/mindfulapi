@@ -12,6 +12,8 @@ import { BasicAuthCryptoService } from './basic-auth-crypto.service';
 import { UrlPolicyService } from './url-policy.service';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
+import { AgentFinding } from '../entities/agent-finding.entity';
+import { agentConfig } from '../config/configuration';
 import { ScanStatus } from '../enums/scan-status.enum';
 import { IssueImpact } from '../enums/issue-impact.enum';
 import {
@@ -92,6 +94,14 @@ describe('ScanService', () => {
     addGroupBy: jest.Mock;
     getRawMany: jest.Mock;
   };
+  let mockAgentFindingRepo: jest.Mocked<Record<string, jest.Mock>>;
+  let agentFindingQueryBuilder: {
+    select: jest.Mock;
+    addSelect: jest.Mock;
+    where: jest.Mock;
+    groupBy: jest.Mock;
+    getRawMany: jest.Mock;
+  };
 
   beforeEach(async () => {
     scanQueryBuilder = {
@@ -121,6 +131,17 @@ describe('ScanService', () => {
       find: jest.fn().mockResolvedValue([]),
       createQueryBuilder: jest.fn().mockReturnValue(issueCountQueryBuilder),
     };
+    agentFindingQueryBuilder = {
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      groupBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([]),
+    };
+    mockAgentFindingRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      createQueryBuilder: jest.fn().mockReturnValue(agentFindingQueryBuilder),
+    };
 
     mockQueue = {
       addScanJob: jest.fn().mockResolvedValue(undefined),
@@ -138,9 +159,14 @@ describe('ScanService', () => {
         ScanService,
         { provide: getRepositoryToken(Scan), useValue: mockRepo },
         { provide: getRepositoryToken(Issue), useValue: mockIssueRepo },
+        {
+          provide: getRepositoryToken(AgentFinding),
+          useValue: mockAgentFindingRepo,
+        },
         { provide: ScanQueueService, useValue: mockQueue },
         { provide: BasicAuthCryptoService, useValue: mockBasicAuthCrypto },
         { provide: UrlPolicyService, useValue: mockUrlPolicy },
+        { provide: agentConfig.KEY, useValue: agentConfig() },
       ],
     }).compile();
 
@@ -188,6 +214,7 @@ describe('ScanService', () => {
         crawlStrategy: null,
         crawlGlobs: null,
         crawlExcludeGlobs: null,
+        aiAuditSkills: null,
         status: ScanStatus.PENDING,
       });
       expect(mockRepo.save).toHaveBeenCalledWith(saved);

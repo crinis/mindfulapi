@@ -18,6 +18,10 @@ import { ScanMode } from '../../../enums/scan-mode.enum';
 import { HTTP_URL_VALIDATION_OPTIONS } from '../../../constants/url-validation.constants';
 import { CrawlOptionsDto } from './crawl-options.dto';
 import { ScanOptionsDto } from './scan-options.dto';
+import { AiAuditRequestDto } from './ai-audit.dto';
+
+/** Optional AI-audit opt-in field shared by every create-scan variant. */
+const aiAuditApiProperty = { type: () => AiAuditRequestDto } as const;
 
 /** Upper bound on url_list targets per scan. */
 const MAX_URL_LIST_ITEMS = 500;
@@ -50,6 +54,13 @@ export class CreateSingleUrlScanDto {
   @ValidateNested()
   @Type(() => ScanOptionsDto)
   scanOptions?: ScanOptionsDto;
+
+  /** Optional opt-in to the LLM-agent audit for this run. */
+  @ApiPropertyOptional(aiAuditApiProperty)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AiAuditRequestDto)
+  aiAudit?: AiAuditRequestDto;
 }
 
 /**
@@ -84,6 +95,13 @@ export class CreateUrlListScanDto {
   @ValidateNested()
   @Type(() => ScanOptionsDto)
   scanOptions?: ScanOptionsDto;
+
+  /** Optional opt-in to the LLM-agent audit for this run. */
+  @ApiPropertyOptional(aiAuditApiProperty)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AiAuditRequestDto)
+  aiAudit?: AiAuditRequestDto;
 }
 
 /**
@@ -119,6 +137,13 @@ export class CreateCrawlScanDto {
   @ValidateNested()
   @Type(() => ScanOptionsDto)
   scanOptions?: ScanOptionsDto;
+
+  /** Optional opt-in to the LLM-agent audit for this run. */
+  @ApiPropertyOptional(aiAuditApiProperty)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AiAuditRequestDto)
+  aiAudit?: AiAuditRequestDto;
 
   /** Optional crawl behavior settings specific to crawl mode. */
   @ApiPropertyOptional({ type: () => CrawlOptionsDto })

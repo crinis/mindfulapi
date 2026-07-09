@@ -4,6 +4,7 @@ import { ScanMode } from '../../../enums/scan-mode.enum';
 import { CrawlOptionsResponseDto } from './crawl-options-response.dto';
 import { ScanProgressResponseDto } from './scan-progress-response.dto';
 import { ScanOptionsResponseDto } from './scan-options-response.dto';
+import { AiAuditResponseDto } from './ai-audit-response.dto';
 
 /**
  * Issue occurrence counts grouped by severity.
@@ -71,6 +72,14 @@ export class ScanSummaryResponseDto {
   /** Total number of issue occurrences across all severities. */
   @ApiProperty({ type: 'integer', example: 3, minimum: 0 })
   totalIssueCount: number;
+
+  /** Optional AI-audit phase summary; `null` when not requested/enabled. */
+  @ApiProperty({ type: () => AiAuditResponseDto, nullable: true })
+  aiAudit: AiAuditResponseDto | null;
+
+  /** Number of agent findings produced by the AI-audit phase. */
+  @ApiProperty({ type: 'integer', example: 2, minimum: 0 })
+  agentFindingCount: number;
 
   /** Timestamp indicating when this scan run record was created. */
   @ApiProperty({

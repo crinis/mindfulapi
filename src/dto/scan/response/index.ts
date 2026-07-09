@@ -4,5 +4,7 @@ export * from './violation-response.dto';
 export * from './scan-options-response.dto';
 export * from './crawl-options-response.dto';
 export * from './scan-progress-response.dto';
+export * from './agent-finding-response.dto';
+export * from './ai-audit-response.dto';
 export * from './scan-response.dto';
 export * from './scan-summary-response.dto';

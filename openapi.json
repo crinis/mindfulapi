@@ -1063,6 +1063,29 @@
           }
         }
       },
+      "AiAuditRequestDto": {
+        "type": "object",
+        "properties": {
+          "skills": {
+            "type": "array",
+            "example": [
+              "image_alt_text"
+            ],
+            "uniqueItems": true,
+            "minItems": 1,
+            "description": "Agent audit skills to run in addition to axe-core. Each must be enabled server-side.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "image_alt_text"
+              ]
+            }
+          }
+        },
+        "required": [
+          "skills"
+        ]
+      },
       "CreateSingleUrlScanDto": {
         "type": "object",
         "properties": {
@@ -1081,6 +1104,9 @@
           },
           "scanOptions": {
             "$ref": "#/components/schemas/ScanOptionsDto"
+          },
+          "aiAudit": {
+            "$ref": "#/components/schemas/AiAuditRequestDto"
           }
         },
         "required": [
@@ -1115,6 +1141,9 @@
           },
           "scanOptions": {
             "$ref": "#/components/schemas/ScanOptionsDto"
+          },
+          "aiAudit": {
+            "$ref": "#/components/schemas/AiAuditRequestDto"
           }
         },
         "required": [
@@ -1207,6 +1236,9 @@
           },
           "scanOptions": {
             "$ref": "#/components/schemas/ScanOptionsDto"
+          },
+          "aiAudit": {
+            "$ref": "#/components/schemas/AiAuditRequestDto"
           },
           "crawlOptions": {
             "$ref": "#/components/schemas/CrawlOptionsDto"
@@ -1438,6 +1470,131 @@
           "issues"
         ]
       },
+      "AiAuditResponseDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "skipped",
+              "pending",
+              "running",
+              "completed"
+            ],
+            "example": "completed"
+          },
+          "requestedSkills": {
+            "type": "array",
+            "example": [
+              "image_alt_text"
+            ],
+            "items": {
+              "type": "string",
+              "enum": [
+                "image_alt_text"
+              ]
+            }
+          },
+          "tasksTotal": {
+            "type": "integer",
+            "example": 12,
+            "minimum": 0
+          },
+          "tasksCompleted": {
+            "type": "integer",
+            "example": 12,
+            "minimum": 0
+          },
+          "tasksFailed": {
+            "type": "integer",
+            "example": 0,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "status",
+          "requestedSkills",
+          "tasksTotal",
+          "tasksCompleted",
+          "tasksFailed"
+        ]
+      },
+      "AgentFindingResponseDto": {
+        "type": "object",
+        "properties": {
+          "skill": {
+            "type": "string",
+            "enum": [
+              "image_alt_text"
+            ],
+            "example": "image_alt_text"
+          },
+          "category": {
+            "type": "string",
+            "example": "redundant",
+            "description": "Per-skill verdict."
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "serious",
+              "moderate",
+              "minor"
+            ],
+            "example": "moderate"
+          },
+          "confidence": {
+            "type": "number",
+            "example": 0.82,
+            "minimum": 0,
+            "maximum": 1
+          },
+          "pageUrl": {
+            "type": "object",
+            "nullable": true,
+            "example": "https://example.com",
+            "description": "Page the finding was found on."
+          },
+          "selector": {
+            "type": "object",
+            "nullable": true,
+            "example": "img.hero"
+          },
+          "message": {
+            "type": "string",
+            "example": "The alt text repeats the adjacent caption verbatim."
+          },
+          "suggestion": {
+            "type": "object",
+            "nullable": true,
+            "example": "Team celebrating a product launch"
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": true,
+            "nullable": true,
+            "description": "Skill-specific details (e.g. needsHumanReview flag)."
+          },
+          "model": {
+            "type": "object",
+            "nullable": true,
+            "example": "gpt-4o-mini"
+          }
+        },
+        "required": [
+          "skill",
+          "category",
+          "severity",
+          "confidence",
+          "pageUrl",
+          "selector",
+          "message",
+          "suggestion",
+          "details",
+          "model"
+        ]
+      },
       "ScanResponseDto": {
         "type": "object",
         "properties": {
@@ -1474,6 +1631,7 @@
             "enum": [
               "pending",
               "running",
+              "analyzing",
               "completed",
               "failed",
               "canceled"
@@ -1514,6 +1672,23 @@
             "minimum": 0,
             "description": "Sum of issue occurrences across all violations."
           },
+          "aiAudit": {
+            "nullable": true,
+            "description": "AI-audit phase summary; null when the audit did not run.",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AiAuditResponseDto"
+              }
+            ]
+          },
+          "agentFindings": {
+            "description": "Agent findings produced by the AI-audit phase.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentFindingResponseDto"
+            }
+          },
           "createdAt": {
             "type": "string",
             "example": "2025-06-14T10:30:00.000Z",
@@ -1537,6 +1712,8 @@
           "progress",
           "violations",
           "totalIssueCount",
+          "aiAudit",
+          "agentFindings",
           "createdAt",
           "updatedAt"
         ]
@@ -1695,6 +1872,7 @@
             "enum": [
               "pending",
               "running",
+              "analyzing",
               "completed",
               "failed",
               "canceled"
@@ -1724,6 +1902,20 @@
             "example": 3,
             "minimum": 0
           },
+          "aiAudit": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AiAuditResponseDto"
+              }
+            ]
+          },
+          "agentFindingCount": {
+            "type": "integer",
+            "example": 2,
+            "minimum": 0
+          },
           "createdAt": {
             "type": "string",
             "example": "2025-06-14T10:30:00.000Z",
@@ -1745,6 +1937,8 @@
           "progress",
           "issueCounts",
           "totalIssueCount",
+          "aiAudit",
+          "agentFindingCount",
           "createdAt",
           "updatedAt"
         ]

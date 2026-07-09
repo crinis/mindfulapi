@@ -18,6 +18,8 @@ function makeScan(overrides: Partial<ScanResponseDto> = {}): ScanResponseDto {
     progress: { pagesDiscovered: 1, pagesScanned: 1, pagesFailed: 0 },
     violations: [],
     totalIssueCount: 0,
+    aiAudit: null,
+    agentFindings: [],
     createdAt: new Date('2025-06-14T10:30:00.000Z'),
     updatedAt: new Date('2025-06-14T10:31:00.000Z'),
     ...overrides,

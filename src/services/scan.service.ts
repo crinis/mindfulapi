@@ -1,4 +1,5 @@
 import {
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -6,11 +7,14 @@ import {
   ConflictException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { ConfigType } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
+import { AgentFinding } from '../entities/agent-finding.entity';
 import { IssueImpact } from '../enums/issue-impact.enum';
+import { AgentSkill } from '../enums/agent-skill.enum';
 import {
   CreateScanRequest,
   CreateSingleUrlScanDto,
@@ -18,6 +22,7 @@ import {
   CreateCrawlScanDto,
   CrawlOptionsDto,
   ScanOptionsDto,
+  AiAuditRequestDto,
 } from '../dto/scan/request';
 import { ScanStatus } from '../enums/scan-status.enum';
 import { ScanMode } from '../enums/scan-mode.enum';
@@ -25,10 +30,14 @@ import { ScanQueueService } from './scan-queue.service';
 import { BasicAuth } from './axe-accessibility-scanner.service';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
 import { UrlPolicyService } from './url-policy.service';
+import { agentConfig } from '../config/configuration';
 import {
   ScanResponseDto,
   ScanSummaryResponseDto,
   IssueCountsDto,
+  AgentFindingResponseDto,
+  AiAuditResponseDto,
+  AiAuditStatus,
 } from '../dto/scan/response';
 import { PaginatedResponseDto } from '../dto/pagination/paginated-response.dto';
 import { DEFAULT_CRAWL_OPTIONS } from '../constants/crawl-options.constants';
@@ -71,9 +80,13 @@ export class ScanService {
     private readonly scanRepository: Repository<Scan>,
     @InjectRepository(Issue)
     private readonly issueRepository: Repository<Issue>,
+    @InjectRepository(AgentFinding)
+    private readonly agentFindingRepository: Repository<AgentFinding>,
     private readonly scanQueueService: ScanQueueService,
     private readonly basicAuthCryptoService: BasicAuthCryptoService,
     private readonly urlPolicyService: UrlPolicyService,
+    @Inject(agentConfig.KEY)
+    private readonly agentSettings: ConfigType<typeof agentConfig>,
   ) {}
 
   /**
@@ -84,6 +97,7 @@ export class ScanService {
    */
   async create(createScanDto: CreateScanRequest): Promise<ScanResponseDto> {
     const normalized = this.normalizeCreateInput(createScanDto);
+    const aiAuditSkills = this.resolveRequestedSkills(createScanDto.aiAudit);
     await this.urlPolicyService.assertAllowedTargets(normalized.targets);
     const encryptedBasicAuth = normalized.scanOptions.basicAuth
       ? this.basicAuthCryptoService.encryptCredentials(
@@ -108,6 +122,7 @@ export class ScanService {
       crawlExcludeGlobs: normalized.crawlOptions?.excludeGlobs.length
         ? normalized.crawlOptions.excludeGlobs
         : null,
+      aiAuditSkills,
       status: ScanStatus.PENDING,
     });
 
@@ -131,7 +146,34 @@ export class ScanService {
     }
 
     savedScan.issues = [];
+    savedScan.agentFindings = [];
     return this.enrichScanData(savedScan);
+  }
+
+  /**
+   * Validates a requested AI audit against the server configuration, returning
+   * the deduped skill list to persist (or `null` when not requested).
+   *
+   * @throws BadRequestException When AI audit is disabled server-side or a
+   * requested skill is not on the server whitelist.
+   */
+  private resolveRequestedSkills(
+    aiAudit?: AiAuditRequestDto,
+  ): AgentSkill[] | null {
+    if (!aiAudit?.skills?.length) {
+      return null;
+    }
+    if (!this.agentSettings.enabled) {
+      throw new BadRequestException('AI audit is not enabled on this server.');
+    }
+    const allowed = new Set(this.agentSettings.allowedSkills);
+    const rejected = aiAudit.skills.filter((skill) => !allowed.has(skill));
+    if (rejected.length > 0) {
+      throw new BadRequestException(
+        `Requested AI audit skills are not enabled on this server: ${rejected.join(', ')}`,
+      );
+    }
+    return Array.from(new Set(aiAudit.skills));
   }
 
   /**
@@ -205,18 +247,48 @@ export class ScanService {
         )
       : scans;
 
-    const countsByScan = await this.issueCountsForScans(
-      confirmed.map((scan) => scan.id),
-    );
+    const scanIds = confirmed.map((scan) => scan.id);
+    const countsByScan = await this.issueCountsForScans(scanIds);
+    const agentCountsByScan = await this.agentFindingCountsForScans(scanIds);
 
     return {
       items: confirmed.map((scan) =>
-        this.toSummary(scan, countsByScan.get(scan.id)),
+        this.toSummary(
+          scan,
+          countsByScan.get(scan.id),
+          agentCountsByScan.get(scan.id) ?? 0,
+        ),
       ),
       total,
       limit: options.limit,
       offset: options.offset,
     };
+  }
+
+  /**
+   * Counts agent findings per scan in a single grouped query.
+   *
+   * @param scanIds Scans to count findings for.
+   * @returns Map of scanId → agent finding count.
+   */
+  private async agentFindingCountsForScans(
+    scanIds: number[],
+  ): Promise<Map<number, number>> {
+    const result = new Map<number, number>();
+    if (scanIds.length === 0) {
+      return result;
+    }
+    const rows = await this.agentFindingRepository
+      .createQueryBuilder('finding')
+      .select('finding.scanId', 'scanId')
+      .addSelect('COUNT(*)', 'count')
+      .where('finding.scanId IN (:...scanIds)', { scanIds })
+      .groupBy('finding.scanId')
+      .getRawMany<{ scanId: number; count: string }>();
+    for (const row of rows) {
+      result.set(Number(row.scanId), Number(row.count));
+    }
+    return result;
   }
 
   /**
@@ -245,6 +317,16 @@ export class ScanService {
           ? { pageUrl: In(normalizedPageUrls) }
           : {}),
       },
+    });
+
+    scan.agentFindings = await this.agentFindingRepository.find({
+      where: {
+        scan: { id },
+        ...(normalizedPageUrls?.length
+          ? { pageUrl: In(normalizedPageUrls) }
+          : {}),
+      },
+      order: { id: 'ASC' },
     });
 
     return this.enrichScanData(scan);
@@ -299,6 +381,7 @@ export class ScanService {
   private toSummary(
     scan: Scan,
     counts: IssueCountsDto | undefined,
+    agentFindingCount: number,
   ): ScanSummaryResponseDto {
     const issueCounts = counts ?? {
       critical: 0,
@@ -337,6 +420,8 @@ export class ScanService {
         issueCounts.serious +
         issueCounts.moderate +
         issueCounts.minor,
+      aiAudit: this.buildAiAudit(scan),
+      agentFindingCount,
       createdAt: scan.createdAt,
       updatedAt: scan.updatedAt,
     };
@@ -560,8 +645,57 @@ export class ScanService {
       },
       violations,
       totalIssueCount: violations.reduce((sum, v) => sum + v.issues.length, 0),
+      aiAudit: this.buildAiAudit(scan),
+      agentFindings: (scan.agentFindings ?? []).map((finding) =>
+        this.toAgentFinding(finding),
+      ),
       createdAt: scan.createdAt,
       updatedAt: scan.updatedAt,
+    };
+  }
+
+  /** Maps a persisted agent finding to its response shape. */
+  private toAgentFinding(finding: AgentFinding): AgentFindingResponseDto {
+    return {
+      skill: finding.skill,
+      category: finding.category,
+      severity: finding.severity,
+      confidence: finding.confidence,
+      pageUrl: finding.pageUrl ?? null,
+      selector: finding.selector ?? null,
+      message: finding.message,
+      suggestion: finding.suggestion ?? null,
+      details: finding.details ?? null,
+      model: finding.model ?? null,
+    };
+  }
+
+  /**
+   * Builds the AI-audit summary for a scan, or `null` when the audit was not
+   * requested. The status is derived from the scan lifecycle status.
+   */
+  private buildAiAudit(scan: Scan): AiAuditResponseDto | null {
+    const skills = scan.aiAuditSkills;
+    if (!skills?.length) {
+      return null;
+    }
+    let status: AiAuditStatus;
+    switch (scan.status) {
+      case ScanStatus.COMPLETED:
+        status = AiAuditStatus.COMPLETED;
+        break;
+      case ScanStatus.ANALYZING:
+        status = AiAuditStatus.RUNNING;
+        break;
+      default:
+        status = AiAuditStatus.PENDING;
+    }
+    return {
+      status,
+      requestedSkills: skills,
+      tasksTotal: scan.aiTasksTotal ?? 0,
+      tasksCompleted: scan.aiTasksCompleted ?? 0,
+      tasksFailed: scan.aiTasksFailed ?? 0,
     };
   }
 }

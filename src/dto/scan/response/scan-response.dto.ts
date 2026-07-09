@@ -5,6 +5,8 @@ import { CrawlOptionsResponseDto } from './crawl-options-response.dto';
 import { ScanProgressResponseDto } from './scan-progress-response.dto';
 import { ScanOptionsResponseDto } from './scan-options-response.dto';
 import { ViolationResponseDto } from './violation-response.dto';
+import { AgentFindingResponseDto } from './agent-finding-response.dto';
+import { AiAuditResponseDto } from './ai-audit-response.dto';
 
 /**
  * Unified API response representing a scan run and its results/progress.
@@ -74,6 +76,22 @@ export class ScanResponseDto {
     description: 'Sum of issue occurrences across all violations.',
   })
   totalIssueCount: number;
+
+  /** Optional AI-audit phase summary; `null` when not requested/enabled. */
+  @ApiProperty({
+    type: () => AiAuditResponseDto,
+    nullable: true,
+    description: 'AI-audit phase summary; null when the audit did not run.',
+  })
+  aiAudit: AiAuditResponseDto | null;
+
+  /** LLM-agent findings complementing the deterministic violations. */
+  @ApiProperty({
+    type: () => AgentFindingResponseDto,
+    isArray: true,
+    description: 'Agent findings produced by the AI-audit phase.',
+  })
+  agentFindings: AgentFindingResponseDto[];
 
   /** Timestamp indicating when this scan run record was created. */
   @ApiProperty({
