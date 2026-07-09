@@ -196,6 +196,10 @@ export class EnvironmentVariables {
   @Min(0)
   @Max(2)
   AGENT_TEMPERATURE?: number;
+
+  // Per-skill model overrides (AGENT_SKILL_<ID>_{PROVIDER,MODEL,API_KEY,
+  // BASE_URL}) are read dynamically per registered skill in configuration.ts
+  // and validated lazily by the model harness, so they are not declared here.
 }
 
 /**

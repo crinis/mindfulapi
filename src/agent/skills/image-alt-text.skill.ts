@@ -177,7 +177,11 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
     evidence: ImageEvidence,
     harness: AgentHarnessService,
   ): Promise<AgentFindingDraft | null> {
-    const { data: verdict, usage } = await harness.evaluateStructured({
+    const {
+      data: verdict,
+      usage,
+      model,
+    } = await harness.evaluateStructured({
       system: IMAGE_ALT_SYSTEM_PROMPT,
       prompt: buildImagePrompt(evidence),
       images: evidence.screenshot
@@ -190,11 +194,12 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
         : [],
       schema: imageAltVerdictSchema,
       fallback: INSUFFICIENT_EVIDENCE,
+      skill: this.id,
     });
 
     // An accurate accessible name is not a finding — surface only problems.
     if (verdict.verdict === 'appropriate') {
-      return { ...emptyDraft(evidence, usage), category: 'appropriate' };
+      return { ...emptyDraft(evidence, usage), model, category: 'appropriate' };
     }
 
     const lowConfidence = verdict.confidence < MIN_CONFIDENCE;
@@ -218,6 +223,7 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
         needsHumanReview: category === 'insufficient_evidence' || lowConfidence,
       },
       usage,
+      model,
     };
   }
 

@@ -1,5 +1,32 @@
 import { registerAs } from '@nestjs/config';
 import { CronExpression } from '@nestjs/schedule';
+import { AgentSkill } from '../enums/agent-skill.enum';
+
+/** Provider/model/credentials for a single agent skill (or the global default). */
+export interface AgentModelConfig {
+  provider: string | null;
+  model: string | null;
+  apiKey: string | null;
+  baseUrl: string | null;
+}
+
+/**
+ * Reads an optional per-skill model override from
+ * `AGENT_SKILL_<ID>_{PROVIDER,MODEL,API_KEY,BASE_URL}` (e.g.
+ * `AGENT_SKILL_IMAGE_ALT_TEXT_MODEL`). Any unset field falls back to the global
+ * `AGENT_*` default at resolution time.
+ */
+function readSkillModelOverride(skill: string): AgentModelConfig | null {
+  const prefix = `AGENT_SKILL_${skill.toUpperCase()}`;
+  const override: AgentModelConfig = {
+    provider: process.env[`${prefix}_PROVIDER`] || null,
+    model: process.env[`${prefix}_MODEL`] || null,
+    apiKey: process.env[`${prefix}_API_KEY`] || null,
+    baseUrl: process.env[`${prefix}_BASE_URL`] || null,
+  };
+  const hasAny = Object.values(override).some((value) => value !== null);
+  return hasAny ? override : null;
+}
 
 /** Clamps a parsed integer into [min, max], falling back when not a number. */
 function clampInt(
@@ -87,17 +114,27 @@ export const scanConfig = registerAs('scan', () => ({
 export const agentConfig = registerAs('agent', () => ({
   /** Master switch for the AI audit capability. */
   enabled: process.env.AGENT_ENABLED === 'true',
-  /** Provider adapter: openai | anthropic | openai-compatible. */
+  /** Default provider adapter: openai | anthropic | openai-compatible. */
   provider: process.env.AGENT_PROVIDER || null,
-  /** Model identifier passed to the provider (e.g. `gpt-4o-mini`). */
+  /** Default model identifier passed to the provider (e.g. `gpt-4o-mini`). */
   model: process.env.AGENT_MODEL || null,
-  /** Provider API key; validated lazily by the harness, never logged. */
+  /** Default provider API key; validated lazily by the harness, never logged. */
   apiKey: process.env.AGENT_API_KEY || null,
   /**
-   * Base URL for the `openai-compatible` provider — point at OpenRouter or a
-   * local server (Ollama/vLLM/LM Studio) for broad model coverage.
+   * Default base URL for the `openai-compatible` provider — point at OpenRouter
+   * or a local server (Ollama/vLLM/LM Studio) for broad model coverage.
    */
   baseUrl: process.env.AGENT_BASE_URL || null,
+  /**
+   * Per-skill model overrides, keyed by skill id. Each field falls back to the
+   * global `AGENT_*` default when unset, so a skill can point at a different
+   * provider/model/gateway without duplicating shared settings.
+   */
+  skillModels: Object.fromEntries(
+    Object.values(AgentSkill)
+      .map((skill) => [skill, readSkillModelOverride(skill)] as const)
+      .filter(([, override]) => override !== null),
+  ) as Record<string, AgentModelConfig>,
   /** Skills the server permits clients to request; defaults to image alt text. */
   allowedSkills: ((): string[] => {
     const configured = splitList(process.env.AGENT_SKILLS);

@@ -15,12 +15,18 @@ const fallback = { verdict: 'insufficient_evidence' };
 
 describe('AgentHarnessService.evaluateStructured', () => {
   let service: AgentHarnessService;
-  let providerFactory: { getModel: jest.Mock };
+  let providerFactory: { getModel: jest.Mock; resolveModelConfig: jest.Mock };
 
   beforeEach(() => {
     generateObjectMock.mockReset();
     providerFactory = {
       getModel: jest.fn().mockResolvedValue({ id: 'model' }),
+      resolveModelConfig: jest.fn().mockReturnValue({
+        provider: 'openai',
+        model: 'gpt-test',
+        apiKey: 'sk',
+        baseUrl: null,
+      }),
     };
     service = new AgentHarnessService(
       providerFactory as unknown as ModelProviderFactory,

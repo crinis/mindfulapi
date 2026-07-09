@@ -209,6 +209,7 @@ All configuration is done via environment variables. Copy `.env.example` for a f
 | `AGENT_API_KEY` | _(unset)_ | Provider API key; validated lazily, never logged |
 | `AGENT_BASE_URL` | _(unset)_ | Base URL for the `openai-compatible` provider (OpenRouter or a local server) |
 | `AGENT_SKILLS` | `image_alt_text` | Comma-separated skills clients may request |
+| `AGENT_SKILL_<ID>_{PROVIDER,MODEL,API_KEY,BASE_URL}` | _(inherits `AGENT_*`)_ | Optional per-skill model override (e.g. `AGENT_SKILL_IMAGE_ALT_TEXT_MODEL`). See [Per-skill model selection](#per-skill-model-selection) |
 | `AGENT_CONCURRENCY` | `4` | Concurrent per-image requests during evaluation (1–16) |
 | `AGENT_MAX_UNITS_PER_PAGE` | `30` | Cap on collected work units per page |
 | `AGENT_MAX_UNITS_PER_SCAN` | `200` | Cap on evaluated work units per scan |
@@ -261,22 +262,50 @@ POST /v1/scans
 
 Scan responses gain an `aiAudit` summary (`status`, `requestedSkills`, task counters) and an `agentFindings` array; list summaries gain `agentFindingCount`. Requesting the audit when it is disabled server-side, or requesting a non-whitelisted skill, returns a `400` problem.
 
-### Enabling and choosing a model
+### Choosing an API/gateway and model
 
-The harness is built on the Vercel AI SDK, so it speaks to many providers through one configuration. Point it at a native provider, at **OpenRouter** (hundreds of hosted models through one endpoint), or at a **local** open-weight server (Ollama/vLLM/LM Studio) via the `openai-compatible` provider and a `baseUrl`:
+Configuration is entirely environment-variable driven (the same convention as the rest of MindfulAPI — there is no separate config file). The harness is built on the Vercel AI SDK, so one set of variables reaches many providers. You pick **where** requests go with `AGENT_PROVIDER` (+ `AGENT_BASE_URL`), and **which model** with `AGENT_MODEL`:
+
+| Goal | `AGENT_PROVIDER` | `AGENT_BASE_URL` | `AGENT_MODEL` (example) |
+|------|------------------|------------------|-------------------------|
+| OpenAI directly | `openai` | _(unset)_ | `gpt-4o-mini` |
+| Anthropic directly | `anthropic` | _(unset)_ | `claude-3-5-haiku-latest` |
+| **OpenRouter** (one key → hundreds of models) | `openai-compatible` | `https://openrouter.ai/api/v1` | `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`, `meta-llama/llama-3.2-90b-vision-instruct` |
+| DeepSeek | `openai-compatible` | `https://api.deepseek.com` | `deepseek-chat` |
+| **Local** (Ollama) | `openai-compatible` | `http://localhost:11434/v1` | `llama3.2-vision` |
+| **Local** (vLLM / LM Studio) | `openai-compatible` | `http://localhost:8000/v1` | _(the served model id)_ |
 
 ```bash
 AGENT_ENABLED=true
-AGENT_PROVIDER=openai            # openai | anthropic | openai-compatible
-AGENT_MODEL=gpt-4o-mini
-AGENT_API_KEY=sk-...
-# For OpenRouter or a local model, use:
-# AGENT_PROVIDER=openai-compatible
-# AGENT_BASE_URL=https://openrouter.ai/api/v1   (or http://localhost:11434/v1)
-AGENT_SKILLS=image_alt_text       # skills clients may request
+AGENT_PROVIDER=openai-compatible
+AGENT_BASE_URL=https://openrouter.ai/api/v1
+AGENT_MODEL=openai/gpt-4o-mini
+AGENT_API_KEY=sk-or-...
+AGENT_SKILLS=image_alt_text        # skills clients may request
 ```
 
-Cost/behaviour controls (all optional): `AGENT_CONCURRENCY`, `AGENT_MAX_UNITS_PER_PAGE`, `AGENT_MAX_UNITS_PER_SCAN`, `AGENT_MAX_TOKENS`, `AGENT_SCAN_TOKEN_BUDGET`, `AGENT_REQUEST_TIMEOUT_MS`, `AGENT_MAX_IMAGE_BYTES`, `AGENT_TEMPERATURE`. See [`.env.example`](.env.example) for defaults.
+**Picking a model.** The `image_alt_text` skill needs a **vision-capable** model (it sends screenshots) that is reasonably good at structured JSON output. Small multimodal models (e.g. `gpt-4o-mini`, `claude-3.5-haiku`, or a hosted Llama Vision) are usually the sweet spot for cost. Larger models improve judgment accuracy on ambiguous images at higher cost. Because the harness validates every response and falls back to `insufficient_evidence` on failure, a weaker model degrades gracefully (more "needs review", fewer confident verdicts) rather than breaking scans — start cheap and scale up only if you see too many `insufficient_evidence` findings. Using OpenRouter as the gateway lets you switch models by changing one string, which makes this tuning easy.
+
+### Per-skill model selection
+
+The `AGENT_*` values above are the **defaults for every skill**. Any skill can point at a different API/model with `AGENT_SKILL_<SKILL_ID>_{PROVIDER,MODEL,API_KEY,BASE_URL}` — each field independently falls back to the corresponding `AGENT_*` default, so you only set what differs. This lets you route each audit task to the model that is cheapest/most accurate for it.
+
+```bash
+# Global default (used by any skill without an override):
+AGENT_PROVIDER=openai
+AGENT_MODEL=gpt-4o-mini
+AGENT_API_KEY=sk-...
+
+# Override just the image skill to run on OpenRouter with a vision model:
+AGENT_SKILL_IMAGE_ALT_TEXT_PROVIDER=openai-compatible
+AGENT_SKILL_IMAGE_ALT_TEXT_BASE_URL=https://openrouter.ai/api/v1
+AGENT_SKILL_IMAGE_ALT_TEXT_MODEL=meta-llama/llama-3.2-90b-vision-instruct
+AGENT_SKILL_IMAGE_ALT_TEXT_API_KEY=sk-or-...
+```
+
+The `<SKILL_ID>` is the upper-cased skill value (e.g. `image_alt_text` → `IMAGE_ALT_TEXT`). Each finding records the model that actually produced it, so you can audit which model judged what. (Tuning knobs like token/temperature limits below remain global.)
+
+Cost/behaviour controls (all optional, global): `AGENT_CONCURRENCY`, `AGENT_MAX_UNITS_PER_PAGE`, `AGENT_MAX_UNITS_PER_SCAN`, `AGENT_MAX_TOKENS`, `AGENT_SCAN_TOKEN_BUDGET`, `AGENT_REQUEST_TIMEOUT_MS`, `AGENT_MAX_IMAGE_BYTES`, `AGENT_TEMPERATURE`. See [`.env.example`](.env.example) for defaults.
 
 > **Privacy.** When the AI audit runs, cropped element screenshots and the associated attributes are sent to the configured LLM provider. Only enable it with a provider you trust, and consider a self-hosted/local model for sensitive sites.
 

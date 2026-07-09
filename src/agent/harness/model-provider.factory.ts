@@ -5,7 +5,15 @@ import {
 } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import type { LanguageModel } from 'ai';
-import { agentConfig } from '../../config/configuration';
+import { agentConfig, AgentModelConfig } from '../../config/configuration';
+
+/** A fully-resolved model configuration (skill override merged over defaults). */
+export interface ResolvedModelConfig {
+  provider: string;
+  model: string;
+  apiKey: string | null;
+  baseUrl: string | null;
+}
 
 // The AI SDK packages are ESM-only, so they are imported lazily inside
 // getModel(). This keeps them out of the module-load graph (Jest/CommonJS)
@@ -26,7 +34,8 @@ import { agentConfig } from '../../config/configuration';
  */
 @Injectable()
 export class ModelProviderFactory {
-  private cached?: LanguageModel;
+  /** Built models cached per resolved config (provider|model|baseUrl). */
+  private readonly cache = new Map<string, LanguageModel>();
 
   constructor(
     @Inject(agentConfig.KEY)
@@ -34,24 +43,48 @@ export class ModelProviderFactory {
   ) {}
 
   /**
-   * Builds (and caches) the configured language model, throwing a readable
-   * error when required settings are missing.
+   * Resolves the effective model config for a skill: its per-skill override
+   * (`AGENT_SKILL_<ID>_*`) merged over the global `AGENT_*` defaults. Passing no
+   * skill returns the global default. Throws when provider/model are unset.
    */
-  async getModel(): Promise<LanguageModel> {
-    if (this.cached) {
-      return this.cached;
-    }
+  resolveModelConfig(skill?: string): ResolvedModelConfig {
+    const override: AgentModelConfig | undefined = skill
+      ? this.config.skillModels[skill]
+      : undefined;
 
-    const { provider, model, apiKey, baseUrl } = this.config;
+    const provider = override?.provider ?? this.config.provider;
+    const model = override?.model ?? this.config.model;
     if (!provider) {
       throw new InternalServerErrorException(
-        'AGENT_PROVIDER is not configured.',
+        `AGENT_PROVIDER is not configured${skill ? ` for skill ${skill}` : ''}.`,
       );
     }
     if (!model) {
-      throw new InternalServerErrorException('AGENT_MODEL is not configured.');
+      throw new InternalServerErrorException(
+        `AGENT_MODEL is not configured${skill ? ` for skill ${skill}` : ''}.`,
+      );
+    }
+    return {
+      provider,
+      model,
+      apiKey: override?.apiKey ?? this.config.apiKey,
+      baseUrl: override?.baseUrl ?? this.config.baseUrl,
+    };
+  }
+
+  /**
+   * Builds (and caches) the language model for a skill (or the global default),
+   * throwing a readable error when required settings are missing.
+   */
+  async getModel(skill?: string): Promise<LanguageModel> {
+    const { provider, model, apiKey, baseUrl } = this.resolveModelConfig(skill);
+    const cacheKey = `${provider}|${model}|${baseUrl ?? ''}`;
+    const existing = this.cache.get(cacheKey);
+    if (existing) {
+      return existing;
     }
 
+    let built: LanguageModel;
     switch (provider) {
       case 'openai': {
         const { createOpenAI } = await import('@ai-sdk/openai');
@@ -59,7 +92,7 @@ export class ModelProviderFactory {
           apiKey: this.requireApiKey(apiKey, provider),
           ...(baseUrl ? { baseURL: baseUrl } : {}),
         });
-        this.cached = openai(model);
+        built = openai(model);
         break;
       }
       case 'anthropic': {
@@ -68,7 +101,7 @@ export class ModelProviderFactory {
           apiKey: this.requireApiKey(apiKey, provider),
           ...(baseUrl ? { baseURL: baseUrl } : {}),
         });
-        this.cached = anthropic(model);
+        built = anthropic(model);
         break;
       }
       case 'openai-compatible': {
@@ -84,7 +117,7 @@ export class ModelProviderFactory {
           baseURL: baseUrl,
           ...(apiKey ? { apiKey } : {}),
         });
-        this.cached = compatible(model);
+        built = compatible(model);
         break;
       }
       default:
@@ -93,7 +126,8 @@ export class ModelProviderFactory {
         );
     }
 
-    return this.cached;
+    this.cache.set(cacheKey, built);
+    return built;
   }
 
   /** Returns the API key or throws when a provider requires one. */

@@ -68,4 +68,32 @@ describe('ModelProviderFactory.getModel', () => {
     expect(second).toBe(model);
     expect(createOpenAIMock).toHaveBeenCalledTimes(1); // cached
   });
+
+  it('applies a per-skill model override merged over the defaults', () => {
+    const factory = makeFactory({
+      provider: 'openai',
+      model: 'default-model',
+      apiKey: 'sk-default',
+      skillModels: {
+        image_alt_text: {
+          provider: null, // inherit openai
+          model: 'skill-model',
+          apiKey: 'sk-skill',
+          baseUrl: null,
+        },
+      },
+    });
+
+    expect(factory.resolveModelConfig('image_alt_text')).toEqual({
+      provider: 'openai',
+      model: 'skill-model',
+      apiKey: 'sk-skill',
+      baseUrl: null,
+    });
+    // No override falls back entirely to the defaults.
+    expect(factory.resolveModelConfig().model).toBe('default-model');
+    expect(factory.resolveModelConfig('unknown_skill').model).toBe(
+      'default-model',
+    );
+  });
 });

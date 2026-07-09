@@ -215,7 +215,7 @@ export class AgentAuditService {
       message: truncate(draft.message, MAX_MESSAGE_LENGTH) ?? '',
       suggestion: truncate(draft.suggestion, MAX_SUGGESTION_LENGTH),
       details: draft.details ?? null,
-      model: this.config.model ?? undefined,
+      model: draft.model ?? this.config.model ?? undefined,
       inputTokens: draft.usage.inputTokens,
       outputTokens: draft.usage.outputTokens,
     });

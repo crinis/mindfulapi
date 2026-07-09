@@ -52,6 +52,8 @@ export interface AgentFindingDraft {
   details?: Record<string, unknown> | null;
   /** Token usage for budget accounting. */
   usage: TokenUsage;
+  /** Resolved model that produced the finding (provenance). */
+  model?: string;
 }
 
 /**

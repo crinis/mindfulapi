@@ -38,12 +38,19 @@ export interface StructuredRequest<T> {
    * their `insufficient_evidence` verdict here.
    */
   fallback: T;
+  /**
+   * Skill id, used to select a per-skill model override
+   * (`AGENT_SKILL_<ID>_*`); omit to use the global default model.
+   */
+  skill?: string;
 }
 
 /** Result of a harness call, including usage and a degraded-output flag. */
 export interface HarnessResult<T> {
   data: T;
   usage: TokenUsage;
+  /** Resolved model identifier that produced (or would produce) the output. */
+  model: string;
   /** True when {@link StructuredRequest.fallback} was returned. */
   degraded: boolean;
 }
@@ -88,10 +95,14 @@ export class AgentHarnessService {
       });
     }
 
+    const modelId = this.providerFactory.resolveModelConfig(
+      request.skill,
+    ).model;
+
     try {
       const { generateObject } = await import('ai');
       const result = await generateObject({
-        model: await this.providerFactory.getModel(),
+        model: await this.providerFactory.getModel(request.skill),
         schema: request.schema,
         system: request.system,
         messages: [{ role: 'user', content }],
@@ -103,6 +114,7 @@ export class AgentHarnessService {
       return {
         data: result.object,
         usage: this.normalizeUsage(result.usage),
+        model: modelId,
         degraded: false,
       };
     } catch (error) {
@@ -112,6 +124,7 @@ export class AgentHarnessService {
       return {
         data: request.fallback,
         usage: { inputTokens: 0, outputTokens: 0 },
+        model: modelId,
         degraded: true,
       };
     }
@@ -127,10 +140,11 @@ export class AgentHarnessService {
     prompt: string;
     tools: ToolSet;
     maxSteps?: number;
+    skill?: string;
   }): Promise<{ text: string; usage: TokenUsage }> {
     const { generateText, stepCountIs } = await import('ai');
     const result = await generateText({
-      model: await this.providerFactory.getModel(),
+      model: await this.providerFactory.getModel(request.skill),
       system: request.system,
       prompt: request.prompt,
       tools: request.tools,
