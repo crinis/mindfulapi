@@ -27,4 +27,14 @@ export enum AgentSkill {
    * different destinations are left to axe-core.
    */
   LINK_PURPOSE = 'link_purpose',
+  /**
+   * Judges the clarity of a form control's label and instructions that axe
+   * cannot: uninformative or ambiguous labels (WCAG 2.4.6) and fields that need
+   * format/constraint guidance the user is never given (3.3.2). Missing / empty
+   * / title-only / multiple labels and missing button/select names are left to
+   * axe-core; deterministic attribute/structure facts (required state,
+   * placeholder-as-label, control grouping, autocomplete tokens) are out of
+   * scope by design.
+   */
+  FORM_LABELS = 'form_labels',
 }

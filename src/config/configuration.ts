@@ -140,7 +140,7 @@ export const agentConfig = registerAs('agent', () => ({
     const configured = splitList(process.env.AGENT_SKILLS);
     return configured.length > 0
       ? configured
-      : ['image_alt_text', 'heading_structure', 'link_purpose'];
+      : ['image_alt_text', 'heading_structure', 'link_purpose', 'form_labels'];
   })(),
   /** Concurrent per-unit requests (subagent fan-out) during evaluation. */
   concurrency: clampInt(process.env.AGENT_CONCURRENCY, 4, 1, 16),

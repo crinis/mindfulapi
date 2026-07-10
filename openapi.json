@@ -1079,7 +1079,8 @@
               "enum": [
                 "image_alt_text",
                 "heading_structure",
-                "link_purpose"
+                "link_purpose",
+                "form_labels"
               ]
             }
           }
@@ -1495,7 +1496,8 @@
               "enum": [
                 "image_alt_text",
                 "heading_structure",
-                "link_purpose"
+                "link_purpose",
+                "form_labels"
               ]
             }
           },
@@ -1531,7 +1533,8 @@
             "enum": [
               "image_alt_text",
               "heading_structure",
-              "link_purpose"
+              "link_purpose",
+              "form_labels"
             ],
             "example": "image_alt_text"
           },
