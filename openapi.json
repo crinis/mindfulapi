@@ -1080,7 +1080,8 @@
                 "image_alt_text",
                 "heading_structure",
                 "link_purpose",
-                "form_labels"
+                "form_labels",
+                "page_title"
               ]
             }
           }
@@ -1497,7 +1498,8 @@
                 "image_alt_text",
                 "heading_structure",
                 "link_purpose",
-                "form_labels"
+                "form_labels",
+                "page_title"
               ]
             }
           },
@@ -1534,7 +1536,8 @@
               "image_alt_text",
               "heading_structure",
               "link_purpose",
-              "form_labels"
+              "form_labels",
+              "page_title"
             ],
             "example": "image_alt_text"
           },
@@ -1600,7 +1603,7 @@
           "model": {
             "type": "object",
             "nullable": true,
-            "example": "gpt-4o-mini"
+            "example": "gpt-5.4-mini"
           }
         },
         "required": [

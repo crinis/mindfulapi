@@ -37,4 +37,12 @@ export enum AgentSkill {
    * scope by design.
    */
   FORM_LABELS = 'form_labels',
+  /**
+   * Judges whether the page `<title>` describes its topic or purpose (WCAG
+   * 2.4.2, Level A): placeholder/boilerplate titles ("Untitled Document",
+   * "Home") or titles that do not convey what the page is about. A missing or
+   * empty `<title>` is left to axe-core (`document-title`), and cross-page title
+   * uniqueness is out of scope for a page-scoped skill.
+   */
+  PAGE_TITLE = 'page_title',
 }

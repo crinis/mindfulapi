@@ -9,6 +9,7 @@ import { ImageAltTextSkill } from '../agent/skills/image-alt-text.skill';
 import { HeadingStructureSkill } from '../agent/skills/heading-structure.skill';
 import { LinkPurposeSkill } from '../agent/skills/link-purpose.skill';
 import { FormLabelsSkill } from '../agent/skills/form-labels.skill';
+import { PageTitleSkill } from '../agent/skills/page-title.skill';
 import { AgentAuditService } from '../agent/agent-audit.service';
 
 /**
@@ -27,6 +28,7 @@ import { AgentAuditService } from '../agent/agent-audit.service';
     HeadingStructureSkill,
     LinkPurposeSkill,
     FormLabelsSkill,
+    PageTitleSkill,
     AgentAuditService,
   ],
   exports: [AgentAuditService, TypeOrmModule],

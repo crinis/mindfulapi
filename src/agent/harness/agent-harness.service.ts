@@ -95,9 +95,8 @@ export class AgentHarnessService {
       });
     }
 
-    const modelId = this.providerFactory.resolveModelConfig(
-      request.skill,
-    ).model;
+    const resolved = this.providerFactory.resolveModelConfig(request.skill);
+    const modelId = resolved.model;
 
     try {
       const { generateObject } = await import('ai');
@@ -107,7 +106,15 @@ export class AgentHarnessService {
         system: request.system,
         messages: [{ role: 'user', content }],
         maxOutputTokens: this.config.maxTokensPerRequest,
-        temperature: this.config.temperature,
+        // Reasoning models (GPT-5 family) take a reasoning effort and reject a
+        // non-default temperature; sampling models take the configured one.
+        ...(resolved.reasoningEffort
+          ? {
+              providerOptions: {
+                openai: { reasoningEffort: resolved.reasoningEffort },
+              },
+            }
+          : { temperature: this.config.temperature }),
         maxRetries: 1,
         abortSignal: AbortSignal.timeout(this.config.requestTimeoutMs),
       });

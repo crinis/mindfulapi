@@ -26,9 +26,9 @@ describe('ModelProviderFactory.getModel', () => {
     );
   });
 
-  it('throws when the model is not configured', async () => {
+  it('throws when the model is not configured and the provider has no profile', async () => {
     await expect(
-      makeFactory({ provider: 'openai', model: null }).getModel(),
+      makeFactory({ provider: 'anthropic', model: null }).getModel(),
     ).rejects.toThrow(/AGENT_MODEL/);
   });
 
@@ -80,6 +80,7 @@ describe('ModelProviderFactory.getModel', () => {
           model: 'skill-model',
           apiKey: 'sk-skill',
           baseUrl: null,
+          reasoningEffort: null,
         },
       },
     });
@@ -89,12 +90,93 @@ describe('ModelProviderFactory.getModel', () => {
       model: 'skill-model',
       apiKey: 'sk-skill',
       baseUrl: null,
+      reasoningEffort: null,
     });
     // No override falls back entirely to the defaults.
     expect(factory.resolveModelConfig().model).toBe('default-model');
     expect(factory.resolveModelConfig('unknown_skill').model).toBe(
       'default-model',
     );
+  });
+
+  describe('provider model profiles', () => {
+    it('uses the OpenAI profile per-skill models when no model is configured', () => {
+      // Provider selected, but AGENT_MODEL unset and no per-skill env override:
+      // each skill falls back to its tuned profile model.
+      const factory = makeFactory({
+        provider: 'openai',
+        model: null,
+        apiKey: 'sk-default',
+        skillModels: {},
+      });
+
+      // Text-only semantic skills run on the cheapest tier at `none` effort…
+      expect(factory.resolveModelConfig('page_title')).toMatchObject({
+        model: 'gpt-5.4-nano',
+        reasoningEffort: 'none',
+      });
+      expect(factory.resolveModelConfig('link_purpose').model).toBe(
+        'gpt-5.4-nano',
+      );
+      // …the structural-reasoning skill takes a reasoning effort…
+      expect(factory.resolveModelConfig('heading_structure')).toMatchObject({
+        model: 'gpt-5.4-mini',
+        reasoningEffort: 'low',
+      });
+      expect(factory.resolveModelConfig('form_labels').model).toBe(
+        'gpt-5.4-nano',
+      );
+      // …the vision skill takes the mini tier…
+      expect(factory.resolveModelConfig('image_alt_text').model).toBe(
+        'gpt-5.4-mini',
+      );
+      // …and an unlisted/default lookup uses the profile default.
+      expect(factory.resolveModelConfig().model).toBe('gpt-5.4-mini');
+    });
+
+    it('lets an explicit AGENT_MODEL override the profile for every skill', () => {
+      const factory = makeFactory({
+        provider: 'openai',
+        model: 'forced-model',
+        apiKey: 'sk-default',
+        skillModels: {},
+      });
+      expect(factory.resolveModelConfig('page_title').model).toBe(
+        'forced-model',
+      );
+      expect(factory.resolveModelConfig('image_alt_text').model).toBe(
+        'forced-model',
+      );
+      // A forced model is not a profile reasoning model, so no effort leaks in.
+      expect(factory.resolveModelConfig('heading_structure')).toMatchObject({
+        model: 'forced-model',
+        reasoningEffort: null,
+      });
+    });
+
+    it('lets a per-skill env override beat both the profile and AGENT_MODEL', () => {
+      const factory = makeFactory({
+        provider: 'openai',
+        model: 'forced-model',
+        apiKey: 'sk-default',
+        skillModels: {
+          page_title: {
+            provider: null,
+            model: 'per-skill-model',
+            apiKey: null,
+            baseUrl: null,
+            reasoningEffort: null,
+          },
+        },
+      });
+      expect(factory.resolveModelConfig('page_title').model).toBe(
+        'per-skill-model',
+      );
+      // Other skills still follow AGENT_MODEL.
+      expect(factory.resolveModelConfig('heading_structure').model).toBe(
+        'forced-model',
+      );
+    });
   });
 
   it('resolves a distinct model per skill in one configuration', () => {
@@ -108,12 +190,14 @@ describe('ModelProviderFactory.getModel', () => {
           model: 'vision-model',
           apiKey: null,
           baseUrl: null,
+          reasoningEffort: null,
         },
         heading_structure: {
           provider: null,
           model: 'cheap-text-model',
           apiKey: null,
           baseUrl: null,
+          reasoningEffort: null,
         },
       },
     });

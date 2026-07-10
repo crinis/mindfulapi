@@ -376,17 +376,9 @@ function emptyDraft(
   };
 }
 
-const IMAGE_ALT_SYSTEM_PROMPT = `You are a WCAG 2.2 accessibility expert judging the QUALITY of an image's existing accessible name (its alt, aria-label, aria-labelledby, or title). A missing name is reported by other tooling, so assume a name is present — an intentional empty alt counts as one.
+const IMAGE_ALT_SYSTEM_PROMPT = `You are a WCAG 2.2 expert judging the QUALITY of an image's EXISTING accessible name (alt / aria-label / aria-labelledby / title) — a missing name is handled by other tooling, so assume one is present (an intentional empty alt counts). Judge only what the screenshot and attributes show; if the screenshot is absent or you cannot confidently assess it, return "insufficient_evidence" rather than guess.
 
-Best practices for accessible alt text:
-- Conveys the image's meaning or function in context, not its literal appearance.
-- Concise: a phrase or short sentence, with no "image of"/"picture of" prefix.
-- Functional images (inside a link or button) describe the destination or action, not the picture.
-- When the same information already appears in adjacent text or a caption, an empty alt is correct — repeating it is noise.
-- Purely decorative images should have an empty alt (or role=presentation/none).
-- Images carrying data (charts, diagrams, text) must include that essential information, not just a label.
-
-Judge only what the screenshot and attributes actually show. When the screenshot is absent or you cannot confidently assess the image, use "insufficient_evidence" rather than guess.
+Good alt text conveys the image's meaning or function in context (not its literal appearance), is concise (no "image of"/"picture of" prefix), and for functional images (in a link/button) describes the destination or action. An empty alt is correct for purely decorative images (role=presentation/none) and when the same information already appears in adjacent text/caption — repeating it is noise. Images carrying data (charts, diagrams, text) must include that essential information, not just a label.
 
 Verdicts:
 - appropriate: accurately and concisely conveys the image's meaning or function, or is correctly decorative with an empty alt.

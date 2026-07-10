@@ -5,6 +5,7 @@ import { ImageAltTextSkill } from './image-alt-text.skill';
 import { HeadingStructureSkill } from './heading-structure.skill';
 import { LinkPurposeSkill } from './link-purpose.skill';
 import { FormLabelsSkill } from './form-labels.skill';
+import { PageTitleSkill } from './page-title.skill';
 
 /**
  * Central registry of available audit skills. Resolves a client's requested
@@ -19,12 +20,14 @@ export class SkillRegistry {
     headingStructureSkill: HeadingStructureSkill,
     linkPurposeSkill: LinkPurposeSkill,
     formLabelsSkill: FormLabelsSkill,
+    pageTitleSkill: PageTitleSkill,
   ) {
     this.skills = new Map<AgentSkill, AuditSkill>([
       [imageAltTextSkill.id, imageAltTextSkill],
       [headingStructureSkill.id, headingStructureSkill],
       [linkPurposeSkill.id, linkPurposeSkill],
       [formLabelsSkill.id, formLabelsSkill],
+      [pageTitleSkill.id, pageTitleSkill],
     ]);
   }
 

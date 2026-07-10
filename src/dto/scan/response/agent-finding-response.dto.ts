@@ -73,6 +73,6 @@ export class AgentFindingResponseDto {
   details: Record<string, unknown> | null;
 
   /** Model identifier that produced this finding (provenance). */
-  @ApiProperty({ nullable: true, example: 'gpt-4o-mini' })
+  @ApiProperty({ nullable: true, example: 'gpt-5.4-mini' })
   model: string | null;
 }

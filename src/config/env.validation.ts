@@ -198,9 +198,15 @@ export class EnvironmentVariables {
   @Max(2)
   AGENT_TEMPERATURE?: number;
 
-  // Per-skill model overrides (AGENT_SKILL_<ID>_{PROVIDER,MODEL,API_KEY,
-  // BASE_URL}) are read dynamically per registered skill in configuration.ts
-  // and validated lazily by the model harness, so they are not declared here.
+  /** Reasoning effort for a reasoning `AGENT_MODEL`. */
+  @IsOptional()
+  @IsIn(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'])
+  AGENT_REASONING_EFFORT?: string;
+
+  // Per-skill overrides (AGENT_SKILL_<ID>_{PROVIDER,MODEL,API_KEY,BASE_URL,
+  // REASONING_EFFORT}) are read dynamically per registered skill in
+  // configuration.ts and validated lazily by the model harness, so they are not
+  // declared here.
 }
 
 /**

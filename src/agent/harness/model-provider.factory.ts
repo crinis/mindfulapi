@@ -5,7 +5,11 @@ import {
 } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import type { LanguageModel } from 'ai';
-import { agentConfig, AgentModelConfig } from '../../config/configuration';
+import {
+  agentConfig,
+  AgentModelConfig,
+  resolveProfileEntry,
+} from '../../config/configuration';
 
 /** A fully-resolved model configuration (skill override merged over defaults). */
 export interface ResolvedModelConfig {
@@ -13,6 +17,8 @@ export interface ResolvedModelConfig {
   model: string;
   apiKey: string | null;
   baseUrl: string | null;
+  /** Reasoning effort for reasoning models; null selects the sampling path. */
+  reasoningEffort: string | null;
 }
 
 // The AI SDK packages are ESM-only, so they are imported lazily inside
@@ -43,9 +49,11 @@ export class ModelProviderFactory {
   ) {}
 
   /**
-   * Resolves the effective model config for a skill: its per-skill override
-   * (`AGENT_SKILL_<ID>_*`) merged over the global `AGENT_*` defaults. Passing no
-   * skill returns the global default. Throws when provider/model are unset.
+   * Resolves the effective model config for a skill. Model precedence, highest
+   * first: the per-skill env override (`AGENT_SKILL_<ID>_MODEL`), the explicit
+   * global `AGENT_MODEL`, then the provider's built-in tuned profile (the
+   * optimized default set — e.g. OpenAI runs the text skills on nano). Passing
+   * no skill returns the provider default. Throws when provider/model are unset.
    */
   resolveModelConfig(skill?: string): ResolvedModelConfig {
     const override: AgentModelConfig | undefined = skill
@@ -53,22 +61,34 @@ export class ModelProviderFactory {
       : undefined;
 
     const provider = override?.provider ?? this.config.provider;
-    const model = override?.model ?? this.config.model;
     if (!provider) {
       throw new InternalServerErrorException(
         `AGENT_PROVIDER is not configured${skill ? ` for skill ${skill}` : ''}.`,
       );
     }
+    // The profile only supplies the model when neither the per-skill env nor the
+    // global AGENT_MODEL does; its reasoning effort is used only in that case.
+    const usesProfileModel = !override?.model && !this.config.model;
+    const profile = resolveProfileEntry(provider, skill);
+    const model =
+      override?.model ?? this.config.model ?? profile?.model ?? null;
     if (!model) {
       throw new InternalServerErrorException(
-        `AGENT_MODEL is not configured${skill ? ` for skill ${skill}` : ''}.`,
+        `No model configured for skill ${skill ?? '(default)'}: set AGENT_MODEL, ` +
+          `AGENT_SKILL_${(skill ?? '').toUpperCase()}_MODEL, or use a provider with a built-in profile.`,
       );
     }
+    const reasoningEffort =
+      override?.reasoningEffort ??
+      (usesProfileModel ? profile?.reasoningEffort : undefined) ??
+      this.config.reasoningEffort ??
+      null;
     return {
       provider,
       model,
       apiKey: override?.apiKey ?? this.config.apiKey,
       baseUrl: override?.baseUrl ?? this.config.baseUrl,
+      reasoningEffort,
     };
   }
 

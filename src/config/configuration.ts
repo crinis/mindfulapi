@@ -8,6 +8,102 @@ export interface AgentModelConfig {
   model: string | null;
   apiKey: string | null;
   baseUrl: string | null;
+  /**
+   * OpenAI reasoning effort (`none` | `low` | `medium` | `high`; the original
+   * `gpt-5-nano`/`gpt-5-mini` also accept `minimal`, but `gpt-5.4+` reject it).
+   * Set for reasoning models (GPT-5 family); when set, the harness passes it and
+   * omits `temperature` (reasoning models reject a non-default temperature).
+   */
+  reasoningEffort: string | null;
+}
+
+/** A model choice in a provider profile: the id plus optional reasoning effort. */
+export interface ProfileModel {
+  model: string;
+  /** OpenAI reasoning effort for this model; omit for sampling (non-reasoning) models. */
+  reasoningEffort?: string;
+}
+
+/** A gateway/provider's tuned default model set for the agent skills. */
+export interface ProviderModelProfile {
+  /** Model used for any skill without a `perSkill` entry. */
+  default: ProfileModel;
+  /** Per-skill tuned models (minimal sufficient model, from live A/B testing). */
+  perSkill: Partial<Record<AgentSkill, ProfileModel>>;
+}
+
+/**
+ * Built-in, tuned default model sets keyed by provider. When a provider is
+ * selected but no explicit model is configured (`AGENT_MODEL` unset and no
+ * `AGENT_SKILL_<ID>_MODEL` override), each skill uses the model tuned for it
+ * here — the "optimized default set" for that gateway. Explicit env always
+ * wins over a profile (precedence lives in the factory's `resolveModelConfig`).
+ *
+ * The gpt-4.x family is legacy (de-featured on OpenAI's pricing page), so the
+ * profile targets the current GPT-5 line. These are reasoning models: they run
+ * with an explicit reasoning effort and the harness omits `temperature` for
+ * them. Values are the minimal model + effort that held up in per-skill A/B
+ * testing (accuracy versus token cost, chosen for accuracy WITHOUT
+ * over-flagging — a false "issue" on a clean page is as harmful as a miss):
+ * - `link_purpose`, `page_title` — simple text classification; the cheapest
+ *   `gpt-5.4-nano` at `none` effort matched the larger models (8/8).
+ * - `form_labels` — GPT-5's reasoning-native `gpt-5.4-nano` at `none` now
+ *   catches the descriptiveness / instruction gaps the legacy nano missed
+ *   entirely, with no false positive on placeholder-labelled fields. (Premium
+ *   option for zero-defect: `gpt-5.4-mini` at `low`.)
+ * - `image_alt_text` — needs a vision-capable model, so `gpt-5.4-mini`; at
+ *   `none` effort it reads the screenshot and judges accurately.
+ * - `heading_structure` — multi-verdict structural reasoning; `gpt-5.4-mini`
+ *   at `low` effort was the only combo with zero false positives AND full
+ *   recall (9/9). Lower tiers/effort over-flag clean pages.
+ *
+ * Only OpenAI is provided for now. Providers without a profile (anthropic,
+ * openai-compatible) fall back to the global `AGENT_MODEL` until one is added.
+ */
+export const PROVIDER_MODEL_PROFILES: Record<string, ProviderModelProfile> = {
+  openai: {
+    default: { model: 'gpt-5.4-mini', reasoningEffort: 'none' },
+    perSkill: {
+      [AgentSkill.IMAGE_ALT_TEXT]: {
+        model: 'gpt-5.4-mini',
+        reasoningEffort: 'none',
+      },
+      [AgentSkill.HEADING_STRUCTURE]: {
+        model: 'gpt-5.4-mini',
+        reasoningEffort: 'low',
+      },
+      [AgentSkill.LINK_PURPOSE]: {
+        model: 'gpt-5.4-nano',
+        reasoningEffort: 'none',
+      },
+      [AgentSkill.FORM_LABELS]: {
+        model: 'gpt-5.4-nano',
+        reasoningEffort: 'none',
+      },
+      [AgentSkill.PAGE_TITLE]: {
+        model: 'gpt-5.4-nano',
+        reasoningEffort: 'none',
+      },
+    },
+  },
+};
+
+/**
+ * Resolves the tuned profile entry (model + reasoning effort) for a provider +
+ * skill, or the provider's profile default, or `null` when the provider has no
+ * profile. Kept here (next to the profile table) so the resolution order lives
+ * in one place.
+ */
+export function resolveProfileEntry(
+  provider: string,
+  skill?: string,
+): ProfileModel | null {
+  const profile = PROVIDER_MODEL_PROFILES[provider];
+  if (!profile) return null;
+  if (skill && skill in profile.perSkill) {
+    return profile.perSkill[skill as AgentSkill] ?? profile.default;
+  }
+  return profile.default;
 }
 
 /**
@@ -23,6 +119,7 @@ function readSkillModelOverride(skill: string): AgentModelConfig | null {
     model: process.env[`${prefix}_MODEL`] || null,
     apiKey: process.env[`${prefix}_API_KEY`] || null,
     baseUrl: process.env[`${prefix}_BASE_URL`] || null,
+    reasoningEffort: process.env[`${prefix}_REASONING_EFFORT`] || null,
   };
   const hasAny = Object.values(override).some((value) => value !== null);
   return hasAny ? override : null;
@@ -116,7 +213,7 @@ export const agentConfig = registerAs('agent', () => ({
   enabled: process.env.AGENT_ENABLED === 'true',
   /** Default provider adapter: openai | anthropic | openai-compatible. */
   provider: process.env.AGENT_PROVIDER || null,
-  /** Default model identifier passed to the provider (e.g. `gpt-4o-mini`). */
+  /** Default model identifier passed to the provider (e.g. `gpt-5.4-mini`). */
   model: process.env.AGENT_MODEL || null,
   /** Default provider API key; validated lazily by the harness, never logged. */
   apiKey: process.env.AGENT_API_KEY || null,
@@ -140,7 +237,13 @@ export const agentConfig = registerAs('agent', () => ({
     const configured = splitList(process.env.AGENT_SKILLS);
     return configured.length > 0
       ? configured
-      : ['image_alt_text', 'heading_structure', 'link_purpose', 'form_labels'];
+      : [
+          'image_alt_text',
+          'heading_structure',
+          'link_purpose',
+          'form_labels',
+          'page_title',
+        ];
   })(),
   /** Concurrent per-unit requests (subagent fan-out) during evaluation. */
   concurrency: clampInt(process.env.AGENT_CONCURRENCY, 4, 1, 16),
@@ -153,10 +256,14 @@ export const agentConfig = registerAs('agent', () => ({
     1,
     10000,
   ),
-  /** Output-token cap per individual request. */
+  /**
+   * Output-token cap per individual request. Covers reasoning tokens too, so it
+   * is set with headroom for reasoning models (the heaviest skill,
+   * `heading_structure` at `low` effort, peaked ~470 but reasoning counts vary).
+   */
   maxTokensPerRequest: clampInt(
     process.env.AGENT_MAX_TOKENS_PER_REQUEST,
-    1000,
+    2000,
     1,
     100000,
   ),
@@ -183,6 +290,12 @@ export const agentConfig = registerAs('agent', () => ({
   ),
   /** Sampling temperature; 0 favours deterministic, low-hallucination output. */
   temperature: clampFloat(process.env.AGENT_TEMPERATURE, 0, 0, 2),
+  /**
+   * Global reasoning effort applied to reasoning models when no profile/per-skill
+   * value is set. Unset for the default (sampling) path; provide it only when
+   * pointing `AGENT_MODEL` at a reasoning model.
+   */
+  reasoningEffort: process.env.AGENT_REASONING_EFFORT || null,
 }));
 
 /** Scheduled data-retention cleanup settings. */

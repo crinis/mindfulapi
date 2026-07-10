@@ -205,19 +205,20 @@ All configuration is done via environment variables. Copy `.env.example` for a f
 | `THROTTLE_LIMIT` | `100` | Allowed requests per window per client |
 | `AGENT_ENABLED` | `false` | Enable the optional [AI accessibility audit](#ai-accessibility-audit-optional) |
 | `AGENT_PROVIDER` | _(unset)_ | LLM provider: `openai`, `anthropic`, or `openai-compatible` (OpenRouter / local models) |
-| `AGENT_MODEL` | _(unset)_ | Model identifier passed to the provider (e.g. `gpt-4.1-mini`) |
+| `AGENT_MODEL` | _(unset)_ | Model for every skill. Optional for OpenAI (unset → tuned [per-skill profile](#picking-a-model)); required for other providers |
 | `AGENT_API_KEY` | _(unset)_ | Provider API key; validated lazily, never logged |
 | `AGENT_BASE_URL` | _(unset)_ | Base URL for the `openai-compatible` provider (OpenRouter or a local server) |
-| `AGENT_SKILLS` | `image_alt_text,heading_structure,link_purpose,form_labels` | Comma-separated skills clients may request |
-| `AGENT_SKILL_<ID>_{PROVIDER,MODEL,API_KEY,BASE_URL}` | _(inherits `AGENT_*`)_ | Optional per-skill model override (e.g. `AGENT_SKILL_IMAGE_ALT_TEXT_MODEL`). See [Per-skill model selection](#per-skill-model-selection) |
-| `AGENT_CONCURRENCY` | `4` | Concurrent per-image requests during evaluation (1–16) |
+| `AGENT_SKILLS` | `image_alt_text,heading_structure,link_purpose,form_labels,page_title` | Comma-separated skills clients may request |
+| `AGENT_REASONING_EFFORT` | _(unset)_ | Reasoning effort (`none`…`high`) when `AGENT_MODEL` is a reasoning model; the profile sets this per skill otherwise. Note: `gpt-5.4+` reject `minimal` — use `none`; only the original `gpt-5-nano`/`gpt-5-mini` accept `minimal` |
+| `AGENT_SKILL_<ID>_{PROVIDER,MODEL,API_KEY,BASE_URL,REASONING_EFFORT}` | _(inherits `AGENT_*` / profile)_ | Optional per-skill override (e.g. `AGENT_SKILL_HEADING_STRUCTURE_REASONING_EFFORT`). See [Per-skill model selection](#per-skill-model-selection) |
+| `AGENT_CONCURRENCY` | `4` | Concurrent per-unit requests during evaluation — one unit is an image (`image_alt_text`) or a page (the text-only skills) (1–16) |
 | `AGENT_MAX_UNITS_PER_PAGE` | `30` | Cap on collected work units per page |
 | `AGENT_MAX_UNITS_PER_SCAN` | `200` | Cap on evaluated work units per scan |
-| `AGENT_MAX_TOKENS_PER_REQUEST` | `1000` | Output-token cap per request |
+| `AGENT_MAX_TOKENS_PER_REQUEST` | `2000` | Output-token cap per request (covers reasoning tokens) |
 | `AGENT_TOKEN_BUDGET_PER_SCAN` | `2000000` | Total token budget per scan (`0` disables the check) |
 | `AGENT_REQUEST_TIMEOUT_MS` | `60000` | Per-request timeout |
 | `AGENT_MAX_IMAGE_BYTES` | `1500000` | Skip element screenshots larger than this |
-| `AGENT_TEMPERATURE` | `0` | Sampling temperature (0–2) |
+| `AGENT_TEMPERATURE` | `0` | Sampling temperature (0–2); omitted for reasoning models |
 
 Generate a secure encryption key (required when using encrypted fields such as `scanOptions.basicAuth`):
 
@@ -244,8 +245,8 @@ The feature is **disabled by default**. When enabled server-side, each scan stil
 
 ### How it works
 
-- **Deterministic-first triggering.** A skill only evaluates what axe cannot, so there is no duplicate reporting and no wasted tokens. `image_alt_text` ignores any image axe already flags for a missing name; `heading_structure` never reports skipped levels, empty headings, or a missing `<h1>` (all covered by axe); `link_purpose` only judges links that already have a name and skips identical-name/different-target links (axe's `identical-links-same-purpose`); `form_labels` only judges the clarity of a control's label and instructions (2.4.6 / 3.3.2), never re-reporting missing/title-only/multiple labels (axe's) or anything an attribute/structure check settles deterministically (required state, placeholder-as-label, grouping, autocomplete) — each judges only _semantics_.
-- **Minimal, structured evidence.** Evidence is gathered while the page is live and kept as small as possible. `image_alt_text` sends a cropped element screenshot plus accessible-name attributes, one request per image. `heading_structure` sends the page's heading outline (levels, text, a short content snippet each) plus styled-block and unheaded-section candidates as text — one request per page, no screenshot. `link_purpose` sends a deduplicated inventory of named links (accessible name, compact destination, surrounding context) — repeated nav/footer links collapse to a single line — again one text-only request per page. `form_labels` sends the page's form controls (accessible name + its source, control type, placeholder, existing described-by instructions, constraint hints) — one text-only request per page.
+- **Deterministic-first triggering.** A skill only evaluates what axe cannot, so there is no duplicate reporting and no wasted tokens. `image_alt_text` ignores any image axe already flags for a missing name; `heading_structure` never reports skipped levels, empty headings, or a missing `<h1>` (all covered by axe); `link_purpose` only judges links that already have a name and skips identical-name/different-target links (axe's `identical-links-same-purpose`); `form_labels` only judges the clarity of a control's label and instructions (2.4.6 / 3.3.2), never re-reporting missing/title-only/multiple labels (axe's) or anything an attribute/structure check settles deterministically (required state, placeholder-as-label, grouping, autocomplete); `page_title` only judges whether a *present* `<title>` describes the page (2.4.2) and never reports a missing/empty title (axe's `document-title`) — each judges only _semantics_.
+- **Minimal, structured evidence.** Evidence is gathered while the page is live and kept as small as possible. `image_alt_text` sends a cropped element screenshot plus accessible-name attributes, one request per image. `heading_structure` sends the page's heading outline (levels, text, a short content snippet each) plus styled-block and unheaded-section candidates as text — one request per page, no screenshot. `link_purpose` sends a deduplicated inventory of named links (accessible name, compact destination, surrounding context) — repeated nav/footer links collapse to a single line — again one text-only request per page. `form_labels` sends the page's form controls (accessible name + its source, control type, placeholder, existing described-by instructions, constraint hints) — one text-only request per page. `page_title` sends the page's `<title>` plus its top headings and meta description as topic context — one text-only request per page.
 - **Forced structured output.** Every request returns a fixed verdict with a confidence score, and each finding records the WCAG success criterion it maps to. Low-confidence or unjudgeable cases become `insufficient_evidence` findings flagged for human review — the model never fabricates a verdict.
 - **New lifecycle status.** With AI audit requested, a scan progresses `pending → running` (axe) `→ analyzing` (agents) `→ completed`. Clients must tolerate the new `analyzing` status.
 
@@ -257,8 +258,9 @@ The feature is **disabled by default**. When enabled server-side, each scan stil
 | `heading_structure` | per page (text-only) | Non-descriptive & vague/generic headings, confusing duplicates, `h1`↔topic mismatch (2.4.6); content sections with no heading (**2.4.10, AAA**); headings faked with styled `<p>`/`<div>` (1.3.1) | Skipped/out-of-order levels, empty headings, missing `<h1>` |
 | `link_purpose` | per page (text-only) | Generic filler / non-descriptive / raw-URL link text (2.4.4, A); link names that only make sense with surrounding context (**2.4.9, AAA**) | Missing link name, identical names pointing to different destinations |
 | `form_labels` | per page (text-only) | Uninformative or ambiguous field labels (2.4.6); fields needing format/constraint instructions the user is never given (3.3.2) | Missing / title-only / multiple labels, missing button & select names (plus deterministic facts left to future checks: required state, placeholder-as-label, control grouping, autocomplete tokens) |
+| `page_title` | per page (text-only) | Placeholder/boilerplate page titles ("Untitled Document", "Home") or titles that don't describe the page (2.4.2, A) | Missing / empty `<title>` (axe's `document-title`); cross-page title uniqueness left to a future deterministic check |
 
-`heading_structure`, `link_purpose`, and `form_labels` cover the judgment-based criteria (2.4.6 / 2.4.10 / 1.3.1 for headings; 2.4.4 / 2.4.9 for links; 2.4.6 / 3.3.2 for form labels) that deterministic tooling structurally cannot evaluate — including the Level **AAA** heading and link criteria (2.4.10 / 2.4.9). Each skill owns a single semantic task and never judges anything an attribute or structure check could settle deterministically.
+`heading_structure`, `link_purpose`, `form_labels`, and `page_title` cover the judgment-based criteria (2.4.6 / 2.4.10 / 1.3.1 for headings; 2.4.4 / 2.4.9 for links; 2.4.6 / 3.3.2 for form labels; 2.4.2 for the page title) that deterministic tooling structurally cannot evaluate — including the Level **AAA** heading and link criteria (2.4.10 / 2.4.9). Each skill owns a single semantic task and never judges anything an attribute or structure check could settle deterministically. `page_title` is deliberately **SEO-safe**: it never flags a title for containing the site/brand name, its length, or its keywords, and any suggested fix keeps the brand and adds the missing page topic.
 
 ### Requesting an audit
 
@@ -291,11 +293,11 @@ Every `agentFindings` entry has the **same shape regardless of skill**, so clien
 
 ### Choosing an API/gateway and model
 
-Configuration is entirely environment-variable driven (the same convention as the rest of MindfulAPI — there is no separate config file). The harness is built on the Vercel AI SDK, so one set of variables reaches many providers. You pick **where** requests go with `AGENT_PROVIDER` (+ `AGENT_BASE_URL`), and **which model** with `AGENT_MODEL`:
+Configuration is entirely environment-variable driven (the same convention as the rest of MindfulAPI — there is no separate config file). The harness is built on the Vercel AI SDK, so one set of variables reaches many providers. You pick **where** requests go with `AGENT_PROVIDER` (+ `AGENT_BASE_URL`), and **which model** with `AGENT_MODEL` — though for OpenAI you can leave `AGENT_MODEL` unset and get the tuned [per-skill profile](#picking-a-model) instead:
 
 | Goal | `AGENT_PROVIDER` | `AGENT_BASE_URL` | `AGENT_MODEL` (example) |
 |------|------------------|------------------|-------------------------|
-| OpenAI directly | `openai` | _(unset)_ | `gpt-4.1-mini` |
+| OpenAI directly | `openai` | _(unset)_ | _(unset → tuned GPT-5 per-skill profile)_ or e.g. `gpt-5.4-mini` |
 | Anthropic directly | `anthropic` | _(unset)_ | `claude-3-5-haiku-latest` |
 | **OpenRouter** (one key → hundreds of models) | `openai-compatible` | `https://openrouter.ai/api/v1` | `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`, `meta-llama/llama-3.2-90b-vision-instruct` |
 | DeepSeek | `openai-compatible` | `https://api.deepseek.com` | `deepseek-chat` |
@@ -308,36 +310,48 @@ AGENT_PROVIDER=openai-compatible
 AGENT_BASE_URL=https://openrouter.ai/api/v1
 AGENT_MODEL=openai/gpt-4o-mini
 AGENT_API_KEY=sk-or-...
-AGENT_SKILLS=image_alt_text,heading_structure,link_purpose,form_labels   # skills clients may request
+AGENT_SKILLS=image_alt_text,heading_structure,link_purpose,form_labels,page_title   # skills clients may request
 ```
 
-**Picking a model.** The `image_alt_text` skill needs a **vision-capable** model (it sends screenshots) that is good at structured JSON output; `heading_structure`, `link_purpose`, and `form_labels` are text-only, so any capable structured-output model works for them (route them separately with per-skill overrides if you like — see below). `form_labels` weighs whether a field genuinely needs instructions, so it benefits from a slightly more capable model than the pure text-matching skills. A useful reference point: `gpt-4.1-mini` reliably distinguishes accurate, inaccurate, and redundant alt text and suggests fixes, at low cost. Beware going *too* small — the very cheapest tier (e.g. `gpt-4.1-nano`) tends to **rubber-stamp** content as "appropriate" and silently miss real problems rather than admit uncertainty, so validate any downgrade against known-bad examples before trusting it. Note that reasoning models (OpenAI's GPT-5 / o-series) currently reject the harness's `AGENT_TEMPERATURE=0` and will fall back to `insufficient_evidence` unless you set `AGENT_TEMPERATURE=1`. The harness validates every response and falls back to `insufficient_evidence` on hard failures, so a scan never breaks — but a weak model fails by *under-reporting* (false "appropriate"), which is easy to miss. Using OpenRouter as the gateway lets you switch models by changing one string, which makes this tuning easy.
+**Picking a model.** Each skill has different needs, so rather than forcing one model everywhere the server ships a **tuned per-provider profile**: select a provider, leave `AGENT_MODEL` unset, and every skill automatically runs on the model — and reasoning effort — that tested best for it, no per-skill config required. The profile targets OpenAI's current **GPT-5 line** (the gpt-4.x family is now legacy). These are reasoning models, so each entry pairs a model with a **reasoning effort**; the profile comes from per-skill A/B testing, chosen for accuracy **without over-flagging** (a false "issue" on a clean page erodes trust as much as a miss):
+
+| Skill | OpenAI profile | Effort | Why |
+| --- | --- | --- | --- |
+| `image_alt_text` | `gpt-5.4-mini` | `none` | Needs a **vision** model; reads the screenshot and judges accurately |
+| `heading_structure` | `gpt-5.4-mini` | `low` | Multi-verdict structural reasoning; the reasoning pass is the only config with full recall **and** zero false positives (9/9). `none`-effort tiers over-flag clean pages |
+| `form_labels` | `gpt-5.4-nano` | `none` | GPT-5's reasoning-native nano now catches the descriptiveness/instruction gaps the legacy nano missed entirely — no need for `mini` |
+| `link_purpose` | `gpt-5.4-nano` | `none` | Simple text classification; nano matched the larger models |
+| `page_title` | `gpt-5.4-nano` | `none` | Simple title-vs-content check; nano matched the larger models |
+
+The rule the testing confirmed: a weak model/effort fails by *under-reporting* (false "appropriate") or *over-reporting* on clean pages — both easy to miss — so the profile spends the extra reasoning only where the cheap setting measurably failed (`heading_structure`). Reasoning models reject a non-default temperature, so the harness **omits `temperature`** and passes the reasoning effort for any profiled/reasoning model automatically. The harness validates every response and falls back to `insufficient_evidence` on hard failures, so a scan never breaks.
+
+Only OpenAI ships a profile today. Providers without one (Anthropic, `openai-compatible` gateways like OpenRouter/DeepSeek/local) require an explicit `AGENT_MODEL`; adding a profile for them is a one-object change in `src/config/configuration.ts`.
 
 ### Per-skill model selection
 
-The `AGENT_*` values above are the **defaults for every skill**. Any skill can point at a different API/model with `AGENT_SKILL_<SKILL_ID>_{PROVIDER,MODEL,API_KEY,BASE_URL}` — each field independently falls back to the corresponding `AGENT_*` default, so you only set what differs. This matters because skills have **widely different requirements**: `image_alt_text` needs a vision model, while `heading_structure`, `link_purpose`, and `form_labels` are text-only and can run on a cheaper, faster model.
+**Model precedence, highest first:** `AGENT_SKILL_<ID>_MODEL` (explicit per-skill) → `AGENT_MODEL` (explicit global — forces one model for every skill) → the provider profile above. The reasoning effort follows the same source: `AGENT_SKILL_<ID>_REASONING_EFFORT` → `AGENT_REASONING_EFFORT` (global) → the profile's effort (only when the profile also supplied the model). So you only set env for what you want to change; the profile fills in the rest. The other per-skill fields — `AGENT_SKILL_<ID>_{PROVIDER,API_KEY,BASE_URL}` — let a single skill run on an entirely different gateway (each independently falls back to the corresponding `AGENT_*` default).
 
 ```bash
-# Global default (used by any skill without an override):
+# Zero-config optimized set: pick the provider, leave AGENT_MODEL unset →
+# every skill uses its tuned GPT-5 profile model + reasoning effort (as above).
 AGENT_PROVIDER=openai
-AGENT_MODEL=gpt-4.1-mini
 AGENT_API_KEY=sk-...
 
-# image_alt_text → a strong vision model on OpenRouter:
-AGENT_SKILL_IMAGE_ALT_TEXT_PROVIDER=openai-compatible
-AGENT_SKILL_IMAGE_ALT_TEXT_BASE_URL=https://openrouter.ai/api/v1
-AGENT_SKILL_IMAGE_ALT_TEXT_MODEL=meta-llama/llama-3.2-90b-vision-instruct
-AGENT_SKILL_IMAGE_ALT_TEXT_API_KEY=sk-or-...
+# Force ONE model for every skill (overrides the whole profile). If it is a
+# reasoning model, also give it an effort so temperature is omitted:
+# AGENT_MODEL=gpt-5.4-mini
+# AGENT_REASONING_EFFORT=none
 
-# heading_structure & link_purpose → a cheap text-only model (no vision needed):
-AGENT_SKILL_HEADING_STRUCTURE_MODEL=gpt-4.1-nano
-AGENT_SKILL_LINK_PURPOSE_MODEL=gpt-4.1-nano
-
-# form_labels → text-only but weighs instruction needs; a mid-tier model fits:
-AGENT_SKILL_FORM_LABELS_MODEL=gpt-4.1-mini
+# Override a SINGLE skill — e.g. spend more reasoning on heading_structure, or
+# route image_alt_text to a vision model on another gateway:
+# AGENT_SKILL_HEADING_STRUCTURE_REASONING_EFFORT=medium
+# AGENT_SKILL_IMAGE_ALT_TEXT_PROVIDER=openai-compatible
+# AGENT_SKILL_IMAGE_ALT_TEXT_BASE_URL=https://openrouter.ai/api/v1
+# AGENT_SKILL_IMAGE_ALT_TEXT_MODEL=meta-llama/llama-3.2-90b-vision-instruct
+# AGENT_SKILL_IMAGE_ALT_TEXT_API_KEY=sk-or-...
 ```
 
-The `<SKILL_ID>` is the upper-cased skill value (e.g. `image_alt_text` → `IMAGE_ALT_TEXT`, `heading_structure` → `HEADING_STRUCTURE`, `link_purpose` → `LINK_PURPOSE`, `form_labels` → `FORM_LABELS`). Each finding records the model that actually produced it, so you can audit which model judged what. (Tuning knobs like token/temperature limits below remain global.)
+The `<SKILL_ID>` is the upper-cased skill value (e.g. `image_alt_text` → `IMAGE_ALT_TEXT`, `page_title` → `PAGE_TITLE`). Each finding records the model that actually produced it, so you can audit which model judged what. (Non-model tuning knobs like token/budget limits below remain global.)
 
 Cost/behaviour controls (all optional, global): `AGENT_CONCURRENCY`, `AGENT_MAX_UNITS_PER_PAGE`, `AGENT_MAX_UNITS_PER_SCAN`, `AGENT_MAX_TOKENS_PER_REQUEST`, `AGENT_TOKEN_BUDGET_PER_SCAN`, `AGENT_REQUEST_TIMEOUT_MS`, `AGENT_MAX_IMAGE_BYTES`, `AGENT_TEMPERATURE`. See [`.env.example`](.env.example) for defaults.
 

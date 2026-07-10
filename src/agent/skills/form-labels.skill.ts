@@ -15,11 +15,11 @@ import type {
 const MIN_CONFIDENCE = 0.5;
 
 /** Max individual fields included in one page request (token bound). */
-const MAX_FIELDS = 40;
+const MAX_FIELDS = 25;
 /** Longest accessible name / label kept per control. */
-const NAME_MAX = 160;
+const NAME_MAX = 120;
 /** Longest describedby (existing instructions) text kept per field. */
-const DESC_MAX = 200;
+const DESC_MAX = 180;
 /** Max findings the model may return in one page request. */
 const MAX_FINDINGS = 40;
 
@@ -420,16 +420,16 @@ function appropriateDraft(
   };
 }
 
-const FORM_LABELS_SYSTEM_PROMPT = `You are a WCAG 2.2 accessibility expert judging one thing: the CLARITY of each form control's visible label and instructions.
+const FORM_LABELS_SYSTEM_PROMPT = `You audit WCAG 2.2 for one thing: the CLARITY of each form control's visible label and instructions. Every control already has an accessible name.
 
-Deterministic tooling already reports controls with NO accessible name, title-only labels, multiple conflicting labels, and missing button/select names. NEVER report those — they are out of scope. Attribute and structure facts (required state, placeholder used as the only label, radio/checkbox grouping, missing autocomplete tokens) are handled deterministically elsewhere — do NOT judge them either. Judge ONLY these two quality gaps on controls that already have a name:
+Out of scope — NEVER report: missing/empty names, title-only labels, multiple labels, missing button/select names, required state, placeholder-as-sole-label, radio/checkbox grouping, autocomplete tokens. Deterministic tooling owns all of these. Judge ONLY these two quality gaps:
 
-- label_not_descriptive (WCAG 2.4.6, AA): the label is present but uninformative or ambiguous given the field's purpose or its sibling fields (e.g. "Name" among three name fields, "Value", "Field 1"). Judge only the WORDS: a name shown as "[via placeholder]" is NOT a defect on that basis — placeholder-as-label is handled deterministically elsewhere, so treat those words exactly as you would any label.
-- missing_instructions (3.3.2, A): a field that clearly needs a format or constraint hint (a date, a password with rules, a specific pattern, a code) has none — not in its label, its placeholder, or its described-by text. Do NOT demand instructions for self-explanatory fields (e.g. a plain "Email" or "Full name"). A "constraints" hint in the evidence signals a machine rule exists; if the user is never told about it in text, that is missing_instructions.
-- appropriate: the label is clear and any needed instructions are present.
-- insufficient_evidence: the evidence does not allow a reliable judgment.
+- label_not_descriptive (2.4.6, AA): a present label that is uninformative or ambiguous for the field's purpose or among its sibling fields (e.g. "Name" among three name fields, "Value", "Field 1"). Judge only the WORDS — a name marked "[via placeholder]" is NOT a defect for that reason; weigh those words like any other label.
+- missing_instructions (3.3.2, A): a field that plainly needs a format/constraint hint (a date, a password with rules, a pattern, a code) gives none — not in its label, placeholder, or described-by text. Do NOT demand instructions for self-explanatory fields (a plain "Email" or "Full name"). A "constraints" hint means a machine rule exists; if the user is never told it in text, that is missing_instructions.
+- appropriate: label clear and any needed instructions present.
+- insufficient_evidence: too little to judge reliably; prefer this over guessing.
 
-Report only real problems; return an empty findings array when every control is clear. Reference each finding by the exact bracketed id (e.g. I1) shown in the evidence. Prefer "insufficient_evidence" over guessing. Set "suggestedText" to a better label or the instruction to add, only when proposing one, otherwise null. Keep each "rationale" under 50 words.`;
+Report only real problems; return an empty findings array when every control is clear. Reference each finding by its exact bracketed id (e.g. I1). Set "suggestedText" to a better label or the instruction to add, else null. Keep each "rationale" under 50 words.`;
 
 /** Renders the form inventory into a compact, one-line-per-field prompt. */
 export function buildFormPrompt(evidence: FormEvidence): string {

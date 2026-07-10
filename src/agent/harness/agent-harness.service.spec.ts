@@ -26,6 +26,7 @@ describe('AgentHarnessService.evaluateStructured', () => {
         model: 'gpt-test',
         apiKey: 'sk',
         baseUrl: null,
+        reasoningEffort: null,
       }),
     };
     service = new AgentHarnessService(
@@ -81,6 +82,55 @@ describe('AgentHarnessService.evaluateStructured', () => {
     });
 
     expect(result.usage).toEqual({ inputTokens: 0, outputTokens: 0 });
+  });
+
+  it('sends temperature (and no reasoning effort) for a sampling model', async () => {
+    generateObjectMock.mockResolvedValue({
+      object: { verdict: 'appropriate' },
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+
+    await service.evaluateStructured({
+      system: 'sys',
+      prompt: 'p',
+      schema,
+      fallback,
+    });
+
+    const call = generateObjectMock.mock.calls[0][0] as {
+      temperature?: number;
+      providerOptions?: unknown;
+    };
+    expect(call.temperature).toBe(agentConfig().temperature);
+    expect(call.providerOptions).toBeUndefined();
+  });
+
+  it('sends reasoning effort and omits temperature for a reasoning model', async () => {
+    providerFactory.resolveModelConfig.mockReturnValue({
+      provider: 'openai',
+      model: 'gpt-5.4-mini',
+      apiKey: 'sk',
+      baseUrl: null,
+      reasoningEffort: 'low',
+    });
+    generateObjectMock.mockResolvedValue({
+      object: { verdict: 'appropriate' },
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+
+    await service.evaluateStructured({
+      system: 'sys',
+      prompt: 'p',
+      schema,
+      fallback,
+    });
+
+    const call = generateObjectMock.mock.calls[0][0] as {
+      temperature?: number;
+      providerOptions?: { openai?: { reasoningEffort?: string } };
+    };
+    expect(call.temperature).toBeUndefined();
+    expect(call.providerOptions?.openai?.reasoningEffort).toBe('low');
   });
 
   it('drops oversized images before sending them to the model', async () => {

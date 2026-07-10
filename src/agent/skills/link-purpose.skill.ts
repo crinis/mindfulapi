@@ -15,11 +15,11 @@ import type {
 const MIN_CONFIDENCE = 0.5;
 
 /** Max unique links included in one page request (token bound). */
-const MAX_LINKS = 50;
+const MAX_LINKS = 40;
 /** Longest accessible name kept (link names are short; guards runaway text). */
-const LINK_TEXT_MAX = 200;
+const LINK_TEXT_MAX = 160;
 /** Chars of surrounding context captured per link (the 2.4.4 signal). */
-const CONTEXT_SNIPPET = 140;
+const CONTEXT_SNIPPET = 110;
 /** Longest destination string kept per link. */
 const DEST_MAX = 80;
 /** Max findings the model may return in one page request. */
@@ -421,18 +421,18 @@ function appropriateDraft(
   };
 }
 
-const LINK_PURPOSE_SYSTEM_PROMPT = `You are a WCAG 2.2 accessibility expert judging whether each link's ACCESSIBLE NAME conveys its purpose — the goal is Level AAA conformance (2.4.9 Link Purpose, Link Only) on top of Level A (2.4.4 Link Purpose, In Context).
+const LINK_PURPOSE_SYSTEM_PROMPT = `You are a WCAG 2.2 expert judging whether each link's ACCESSIBLE NAME conveys its purpose, targeting Level AAA (2.4.9 Link Purpose, Link Only) on top of Level A (2.4.4 Link Purpose, In Context).
 
-Deterministic tooling already reports links with NO accessible name and identical names that point to DIFFERENT destinations. NEVER report those — they are out of scope. Judge only the quality of a name that is present:
+Deterministic tooling already reports links with NO accessible name and identical names pointing to DIFFERENT destinations. NEVER report those — out of scope. Judge only the quality of a name that is present:
 
-- vague_or_generic (WCAG 2.4.4, A): the name is uninformative filler that gives no clue to the destination — "click here", "read more", "more", "here", "learn more", "details", "link", "this", "download". These fail even with surrounding context.
+- vague_or_generic (2.4.4, A): uninformative filler giving no clue to the destination — "click here", "read more", "more", "here", "learn more", "details", "link", "this", "download". These fail even with surrounding context.
 - not_descriptive (2.4.4, A): a non-generic name that still does not describe where the link goes or what it does (e.g. mismatched with its destination).
-- url_as_text (2.4.4, A): the visible name is a raw URL or path rather than human-readable text, which screen readers announce character by character.
-- unclear_without_context (2.4.9, AAA): the name is understandable ONLY together with its surrounding sentence, list item, or heading — it passes 2.4.4 (In Context) but fails 2.4.9 (Link Only). Use this when nearby context resolves the meaning but the link text alone does not.
+- url_as_text (2.4.4, A): the name is a raw URL or path rather than human-readable text, which screen readers announce character by character.
+- unclear_without_context (2.4.9, AAA): the name resolves ONLY with its surrounding sentence, list item, or heading — passes 2.4.4 (In Context) but fails 2.4.9 (Link Only). Use when nearby context makes an otherwise-thin name clear; prefer this over vague_or_generic in that case.
 - appropriate: the name conveys the link's purpose on its own.
-- insufficient_evidence: the evidence does not allow a reliable judgment.
+- insufficient_evidence: too little evidence to judge reliably; prefer this over guessing.
 
-Use the "destination" and "context" fields to decide: if the context is what makes an otherwise-thin name clear, prefer unclear_without_context over vague_or_generic. Report only real problems; return an empty findings array when every link is clear. Reference each finding by the exact bracketed id (e.g. L1) shown before each link. Prefer "insufficient_evidence" over guessing. Set "suggestedText" to a better, self-describing link name only when proposing one, otherwise null. Keep each "rationale" under 50 words.`;
+Use the "destination" and "context" fields to decide. Report only real problems; return an empty findings array when every link is clear. Reference each finding by the exact bracketed id (e.g. L1) shown before each link. Set "suggestedText" to a better, self-describing link name only when proposing one, otherwise null. Keep each rationale under 50 words.`;
 
 /** Renders the link inventory into a compact, one-line-per-link prompt. */
 export function buildLinkPrompt(evidence: LinkEvidence): string {

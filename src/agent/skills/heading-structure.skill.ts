@@ -15,13 +15,13 @@ import type {
 const MIN_CONFIDENCE = 0.5;
 
 /** Max headings included in the outline (token bound). */
-const MAX_HEADINGS = 60;
+const MAX_HEADINGS = 40;
 /** Chars of following content captured per heading (descriptiveness signal). */
-const HEADING_SNIPPET = 160;
+const HEADING_SNIPPET = 120;
 /** A sectioning element needs at least this much text to warrant a heading. */
 const SECTION_MIN_TEXT = 600;
 /** Chars of an unheaded section's content included as context. */
-const SECTION_SNIPPET = 200;
+const SECTION_SNIPPET = 150;
 /** Max unheaded-section candidates surfaced. */
 const MAX_SECTIONS = 8;
 /** Longest text a "fake heading" candidate may contain (headings are short). */
@@ -502,19 +502,19 @@ function appropriateDraft(
   };
 }
 
-const HEADING_SYSTEM_PROMPT = `You are a WCAG 2.2 accessibility expert judging the SEMANTIC QUALITY of a page's heading structure — the goal is Level AAA conformance for headings. You receive the page's heading outline (already validated for structural correctness), styled blocks that might be unmarked headings, and semantic sections that lack a heading.
+const HEADING_SYSTEM_PROMPT = `You judge the semantic quality of a page's heading structure (WCAG AAA). You get the heading outline (structure already validated), styled blocks that may be unmarked headings, and semantic sections lacking a heading.
 
-Deterministic tooling already reports skipped/out-of-order levels, empty headings, and a missing <h1>. NEVER report those — they are out of scope. Judge only what requires understanding the content:
+Deterministic tooling already reports skipped/out-of-order levels, empty headings, and missing <h1> — NEVER report those. Judge only what needs reading the content:
 
-- not_descriptive (WCAG 2.4.6): the heading text does not describe the content of the section that follows it.
+- not_descriptive (2.4.6): heading does not describe the section that follows.
 - vague_or_generic (2.4.6): non-empty but uninformative for navigation ("More", "Info", "Section 1", "Read more").
-- duplicate (2.4.6): repeated identical/near-identical headings that make heading navigation ambiguous.
-- h1_topic_mismatch (2.4.6): the top-level heading does not reflect the page's main topic (compare against the page title).
-- missing_section_heading (2.4.10, AAA): a listed section contains substantial, self-contained content but has no heading and clearly warrants one. 2.4.10 applies only where sectional organization already exists — do NOT invent headings for trivial or non-sectional content.
-- mis_nested (1.3.1): the heading's level is sequential (not skipped) but misrepresents the parent/child relationship — e.g. a sub-topic marked as a sibling. Only flag when clearly wrong.
-- fake_heading (1.3.1): a styled paragraph/div that visually reads as a section title but is not a heading element. Prune false positives (bold lead sentences, emphasis) — only flag text that genuinely heads a section.
+- duplicate (2.4.6): repeated identical/near-identical headings that make navigation ambiguous.
+- h1_topic_mismatch (2.4.6): top-level heading does not reflect the page's main topic (vs. the page title).
+- missing_section_heading (2.4.10): a listed section has substantial, self-contained content but no heading and clearly needs one — only where sectioning already exists; never invent headings for trivial or non-sectional content.
+- mis_nested (1.3.1): level is sequential (not skipped) but misrepresents the parent/child relationship, e.g. a sub-topic marked as a sibling. Flag only when clearly wrong.
+- fake_heading (1.3.1): a styled paragraph/div that reads as a section title but is not a heading element. Ignore false positives (bold lead sentences, emphasis); flag only text that genuinely heads a section.
 
-Report only real problems; return an empty findings array when the outline is sound. Reference each finding by the exact bracketed id (e.g. H1, F1, S1) given in the evidence. Prefer "insufficient_evidence" over guessing. Set "suggestedText"/"suggestedLevel" only when proposing a concrete fix, otherwise null. Keep each "rationale" under 50 words.`;
+Report only real problems; return an empty array when the outline is sound. Reference each finding by its exact bracketed id (H1, F1, S1). Prefer insufficient_evidence over guessing. Set suggestedText/suggestedLevel only for a concrete fix, else null. Rationale under 50 words.`;
 
 /** Renders the page evidence into a compact prompt. */
 export function buildHeadingPrompt(evidence: HeadingEvidence): string {
