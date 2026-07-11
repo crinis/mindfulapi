@@ -424,11 +424,13 @@ describe('ScanService', () => {
         target: 'https://example.com',
       });
 
+      // The value is wrapped in JSON element quotes so the LIKE is an
+      // exact-element match, not a substring one.
       expect(scanQueryBuilder.andWhere).toHaveBeenCalledWith(
         'scan.targets LIKE :target',
-        { target: '%https://example.com/%' },
+        { target: '%"https://example.com/"%' },
       );
-      // The LIKE false-positive (example.com.evil) is dropped by the JS confirm.
+      // Any residual false positive (example.com.evil) is dropped by the JS confirm.
       expect(result.items).toHaveLength(1);
       expect(result.items[0].id).toBe(1);
     });
@@ -590,7 +592,7 @@ describe('ScanService', () => {
   });
 
   describe('create() enqueue failure', () => {
-    it('marks the scan FAILED and throws 503 when the queue is unavailable', async () => {
+    it('leaves the scan PENDING and throws 503 when the queue is unavailable', async () => {
       const saved = makeScan();
       mockRepo.create.mockReturnValue(saved);
       mockRepo.save.mockResolvedValue(saved);
@@ -604,9 +606,10 @@ describe('ScanService', () => {
         }),
       ).rejects.toThrow(ServiceUnavailableException);
 
-      expect(mockRepo.update).toHaveBeenCalledWith(saved.id, {
-        status: ScanStatus.FAILED,
-      });
+      // The row must stay PENDING (not moved to a terminal FAILED) so the
+      // reconciliation sweep, which only re-enqueues stale PENDING/RUNNING
+      // scans, can recover it. So the failure path performs no status update.
+      expect(mockRepo.update).not.toHaveBeenCalled();
     });
   });
 

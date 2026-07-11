@@ -2,7 +2,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { Job } from 'bullmq';
 import {
   BasicCrawler,
@@ -159,7 +159,13 @@ export class ScanProcessor extends WorkerHost {
     this.logger.log(`Processing scan ${scanId} in mode ${scan.mode}`);
 
     try {
-      await this.resetScanResults(scanId);
+      // A cancellation may land between reading the row above and resetting it
+      // below; resetScanResults refuses to revive a CANCELED scan and reports
+      // whether the run may proceed.
+      if (!(await this.resetScanResults(scanId))) {
+        this.logger.log(`Scan ${scanId} was canceled before processing`);
+        return;
+      }
 
       const scanOptions: ScanOptions = {
         rootElement: scan.rootElement || undefined,
@@ -229,9 +235,14 @@ export class ScanProcessor extends WorkerHost {
   }
 
   /**
-   * Clears previous results and marks a scan as running before processing starts.
+   * Clears previous results and marks a scan as running before processing
+   * starts. The status transition is guarded so a cancellation racing this
+   * reset is not clobbered back to RUNNING.
+   *
+   * @returns `true` when the scan was moved to RUNNING; `false` when it was
+   * already CANCELED (or gone) and processing should stop.
    */
-  private async resetScanResults(scanId: number): Promise<void> {
+  private async resetScanResults(scanId: number): Promise<boolean> {
     await this.issueRepository
       .createQueryBuilder()
       .delete()
@@ -241,12 +252,16 @@ export class ScanProcessor extends WorkerHost {
 
     await this.agentAudit.reset(scanId);
 
-    await this.scanRepository.update(scanId, {
-      status: ScanStatus.RUNNING,
-      pagesDiscovered: 0,
-      pagesScanned: 0,
-      pagesFailed: 0,
-    });
+    const result = await this.scanRepository.update(
+      { id: scanId, status: Not(ScanStatus.CANCELED) },
+      {
+        status: ScanStatus.RUNNING,
+        pagesDiscovered: 0,
+        pagesScanned: 0,
+        pagesFailed: 0,
+      },
+    );
+    return (result.affected ?? 0) > 0;
   }
 
   /** Persists page counters without changing the current status. */
@@ -282,7 +297,13 @@ export class ScanProcessor extends WorkerHost {
         issues,
         agent.buffer.length,
       );
-      agent.buffer.push(...units);
+      // Concurrent page handlers may each have read the same buffer length
+      // before awaiting collection, so re-check the scan-wide cap here where the
+      // push is synchronous and clamp to the room that is actually left.
+      const room = this.agentAudit.remainingScanUnits(agent.buffer.length);
+      if (room > 0) {
+        agent.buffer.push(...units.slice(0, room));
+      }
     } catch (error) {
       this.logger.warn(
         `Agent evidence collection failed for ${pageUrl}: ${String(error)}`,

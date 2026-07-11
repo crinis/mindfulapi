@@ -48,8 +48,14 @@ describe('ScanProcessor real URL integration', () => {
     scanRepository = dataSource.getRepository(Scan);
     issueRepository = dataSource.getRepository(Issue);
 
+    // Fixture site runs on localhost, which the default policy blocks — allow
+    // private targets so both the pre-navigation check and the in-browser
+    // request guard permit it.
+    const allowPrivateConfig = { ...scanConfig(), allowPrivateTargets: true };
+    const urlPolicy = new UrlPolicyService(allowPrivateConfig);
+
     browserService = new BrowserService(scanConfig());
-    scanner = new AxeAccessibilityScanner(scanConfig());
+    scanner = new AxeAccessibilityScanner(allowPrivateConfig, urlPolicy);
 
     // AI audit is disabled here; a no-op stub keeps the deterministic path.
     const agentAudit = {
@@ -66,8 +72,7 @@ describe('ScanProcessor real URL integration', () => {
       scanner,
       new BasicAuthCryptoService(),
       scanConfig(),
-      // Fixture site runs on localhost, which the default policy blocks.
-      new UrlPolicyService({ ...scanConfig(), allowPrivateTargets: true }),
+      urlPolicy,
       agentAudit as unknown as AgentAuditService,
     );
   });

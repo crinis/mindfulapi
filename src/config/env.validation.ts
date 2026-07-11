@@ -175,12 +175,6 @@ export class EnvironmentVariables {
   @Min(1)
   AGENT_MAX_TOKENS_PER_REQUEST?: number;
 
-  /** Total token budget per scan; 0 disables the check. */
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  AGENT_TOKEN_BUDGET_PER_SCAN?: number;
-
   @IsOptional()
   @IsInt()
   @Min(1000)

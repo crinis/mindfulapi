@@ -77,7 +77,6 @@ export class CrawlOptionsDto {
     description:
       'Glob patterns. A discovered URL must match at least one pattern to be crawled.',
     uniqueItems: true,
-    minItems: 1,
     maxItems: 20,
   })
   @IsOptional()
@@ -93,7 +92,6 @@ export class CrawlOptionsDto {
     description:
       'Glob patterns. URLs matching any pattern are skipped during crawl.',
     uniqueItems: true,
-    minItems: 1,
     maxItems: 20,
   })
   @IsOptional()

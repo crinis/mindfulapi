@@ -267,13 +267,6 @@ export const agentConfig = registerAs('agent', () => ({
     1,
     100000,
   ),
-  /** Total token budget per scan; 0 disables the budget check. */
-  tokenBudgetPerScan: clampInt(
-    process.env.AGENT_TOKEN_BUDGET_PER_SCAN,
-    2_000_000,
-    0,
-    1_000_000_000,
-  ),
   /** Per-request timeout in milliseconds. */
   requestTimeoutMs: clampInt(
     process.env.AGENT_REQUEST_TIMEOUT_MS,

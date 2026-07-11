@@ -131,15 +131,13 @@ export class ScanService {
     try {
       await this.scanQueueService.addScanJob(savedScan.id);
     } catch (error) {
-      // The row exists but could not be queued (e.g. Redis down). Mark it
-      // FAILED so the reconciliation sweep can re-enqueue it, and surface a
-      // 503 rather than a misleading PENDING resource.
+      // The row exists but could not be queued (e.g. Redis down). Leave it
+      // PENDING — the reconciliation sweep only re-enqueues stale PENDING/
+      // RUNNING scans, so marking it FAILED would strand it in a terminal
+      // state forever. The 503 tells the caller the create did not fully take.
       this.logger.error(
         `Failed to enqueue scan ${savedScan.id}: ${String(error)}`,
       );
-      await this.scanRepository.update(savedScan.id, {
-        status: ScanStatus.FAILED,
-      });
       throw new ServiceUnavailableException(
         'Scan was created but could not be queued for processing. Please retry.',
       );
@@ -230,10 +228,13 @@ export class ScanService {
       .take(options.limit);
 
     if (normalizedTarget) {
-      // Narrow in SQL against the simple-json text column, then confirm the
-      // exact normalized match in JS to eliminate LIKE false positives.
+      // Match against the simple-json text column. Wrapping the value in the
+      // JSON element quotes (`"<url>"`) makes the LIKE an exact-element match:
+      // it excludes substring hits like a stored `.../path` for target `...`,
+      // which would otherwise consume the SQL limit/offset and inflate `total`
+      // before the JS confirmation below. The confirm stays as defense in depth.
       query.andWhere('scan.targets LIKE :target', {
-        target: `%${normalizedTarget}%`,
+        target: `%"${normalizedTarget}"%`,
       });
     }
 

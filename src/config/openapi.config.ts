@@ -37,9 +37,31 @@ export const createOpenApiConfig = () =>
  * optional: the empty security requirement `{}` is the only OpenAPI-legal way
  * to say "no auth is also accepted" alongside the bearer scheme.
  *
+ * Each `@ApiBearerAuth()` controller also emits an operation-level
+ * `security: [{ bearer: [] }]`, which fully overrides the document default —
+ * so the empty requirement has to be appended to every such operation too,
+ * otherwise the spec still mandates auth on every non-health endpoint even in
+ * `AUTH_DISABLED=true` mode.
+ *
  * @param document The document produced by SwaggerModule.createDocument.
  */
 export function patchOpenApiDocument(document: OpenAPIObject): OpenAPIObject {
   document.security = [{ bearer: [] }, {}];
+
+  for (const pathItem of Object.values(document.paths ?? {})) {
+    for (const operation of Object.values(pathItem)) {
+      const security = (operation as { security?: unknown })?.security;
+      if (!Array.isArray(security)) {
+        continue;
+      }
+      const allowsNoAuth = security.some(
+        (requirement) => Object.keys(requirement as object).length === 0,
+      );
+      if (!allowsNoAuth) {
+        security.push({});
+      }
+    }
+  }
+
   return document;
 }

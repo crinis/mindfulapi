@@ -33,8 +33,9 @@ export interface CollectedUnit {
  * Collection is page-bound (called from the scan processor while a page is
  * live) and already trigger-filtered against axe findings. Evaluation runs
  * after the page loop: it fans out one structured request per unit with a
- * concurrency cap and a per-scan token budget, persists problem findings, and
- * updates the scan's AI-task counters.
+ * concurrency cap, persists problem findings, and updates the scan's AI-task
+ * counters. Spend is bounded up front by the unit caps and the per-request
+ * output-token cap, so no separate token budget is enforced here.
  */
 @Injectable()
 export class AgentAuditService {
@@ -86,8 +87,18 @@ export class AgentAuditService {
   }
 
   /**
+   * Units still collectable for a scan given how many are already buffered.
+   * Never negative. Used by the page loop to clamp concurrent pushes to the
+   * scan-wide cap where the check-and-append is synchronous.
+   */
+  remainingScanUnits(collectedSoFar: number): number {
+    return Math.max(0, this.config.maxUnitsPerScan - collectedSoFar);
+  }
+
+  /**
    * Collects trigger-filtered work units from a live page across all active
-   * skills, honoring the per-scan unit budget.
+   * skills. Both the per-scan unit budget and the per-page cap are shared
+   * across every skill on the page, so the skills together never exceed either.
    */
   async collectForPage(
     skills: AuditSkill[],
@@ -96,26 +107,29 @@ export class AgentAuditService {
     axeIssues: ScannedIssue[],
     collectedSoFar: number,
   ): Promise<CollectedUnit[]> {
-    const remaining = this.config.maxUnitsPerScan - collectedSoFar;
-    if (skills.length === 0 || remaining <= 0) {
+    const remaining = this.remainingScanUnits(collectedSoFar);
+    // The tightest cap that applies to this page: whichever of the scan-wide
+    // remainder and the per-page cap is smaller. Shared across all skills.
+    const cap = Math.min(remaining, this.config.maxUnitsPerPage);
+    if (skills.length === 0 || cap <= 0) {
       return [];
     }
 
     const units: CollectedUnit[] = [];
     for (const skill of skills) {
-      const budgetLeft = remaining - units.length;
+      const budgetLeft = cap - units.length;
       if (budgetLeft <= 0) break;
       try {
         const evidence = await skill.collect(page, {
           pageUrl,
           axeIssues,
           remainingUnits: budgetLeft,
-          maxUnitsPerPage: this.config.maxUnitsPerPage,
+          maxUnitsPerPage: budgetLeft,
           maxImageBytes: this.config.maxImageBytes,
         });
         for (const item of evidence) {
           units.push({ skill, evidence: item });
-          if (units.length >= remaining) break;
+          if (units.length >= cap) break;
         }
       } catch (error) {
         this.logger.warn(
@@ -128,8 +142,10 @@ export class AgentAuditService {
 
   /**
    * Evaluates all collected units: fans out structured requests with a
-   * concurrency cap, enforces the token budget, persists problem findings, and
-   * records task counters. Stops early when cancellation is observed.
+   * concurrency cap, persists problem findings, and records task counters.
+   * Stops early when cancellation is observed. Token usage is summed only for
+   * the log line — the unit caps and per-request output-token cap already bound
+   * total spend.
    */
   async evaluate(
     scan: Scan,
@@ -146,7 +162,6 @@ export class AgentAuditService {
       aiTasksFailed: 0,
     });
 
-    const budget = this.config.tokenBudgetPerScan;
     let index = 0;
     let completed = 0;
     let failed = 0;
@@ -159,10 +174,6 @@ export class AgentAuditService {
         const i = index++;
         if (i >= units.length) return;
 
-        if (budget > 0 && tokensSpent >= budget) {
-          failed++;
-          continue;
-        }
         if (await isCanceled()) {
           canceled = true;
           return;

@@ -5,10 +5,12 @@ import {
   BrowserContext,
   BrowserContextOptions,
   Page,
+  Route,
 } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
 import { IssueImpact } from '../enums/issue-impact.enum';
 import { scanConfig } from '../config/configuration';
+import { UrlPolicyService } from './url-policy.service';
 
 export interface BasicAuth {
   /** Username used for HTTP Basic Authentication. */
@@ -62,15 +64,24 @@ export class AxeAccessibilityScanner {
   private readonly logger = new Logger(AxeAccessibilityScanner.name);
 
   /**
-   * @param config Scan namespace configuration (TLS error handling).
+   * @param config Scan namespace configuration (TLS error handling, SSRF flags).
+   * @param urlPolicy Target policy used to vet every browser request.
    */
   constructor(
     @Inject(scanConfig.KEY)
     private readonly config: ConfigType<typeof scanConfig>,
+    private readonly urlPolicy: UrlPolicyService,
   ) {}
 
   /**
    * Creates a browser context configured for scan options such as basic auth.
+   *
+   * When private targets are not allowed, every request the browser makes
+   * (main navigation, redirect hops, and all subresources) is vetted against
+   * {@link UrlPolicyService}, so a permitted public page cannot redirect to — or
+   * pull a subresource from — a private/reserved address. This does not close
+   * the DNS-rebinding TOCTOU (the browser resolves independently of the policy
+   * check); that remains the documented limitation.
    *
    * @param browser Playwright browser instance.
    * @param options Optional scan configuration.
@@ -90,7 +101,59 @@ export class AxeAccessibilityScanner {
       };
     }
 
-    return browser.newContext(contextOptions);
+    const context = await browser.newContext(contextOptions);
+
+    // When private targets are allowed everything is permitted, so skip the
+    // per-request interception entirely to avoid its overhead.
+    if (!this.config.allowPrivateTargets) {
+      await this.installTargetPolicyGuard(context);
+    }
+
+    return context;
+  }
+
+  /**
+   * Aborts any browser request whose (HTTP/S) host violates the target policy.
+   * Decisions are cached per host for the context's lifetime so each distinct
+   * host is resolved at most once, keeping subresource-heavy pages cheap.
+   */
+  private async installTargetPolicyGuard(
+    context: BrowserContext,
+  ): Promise<void> {
+    const decisionByHost = new Map<string, boolean>();
+
+    await context.route('**/*', async (route: Route) => {
+      const requestUrl = route.request().url();
+      let parsed: URL;
+      try {
+        parsed = new URL(requestUrl);
+      } catch {
+        await route.abort('blockedbyclient');
+        return;
+      }
+
+      // Only HTTP(S) requests carry SSRF risk here; let the browser handle
+      // data:/blob:/about: and other schemes normally.
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        await route.continue();
+        return;
+      }
+
+      const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+      let allowed = decisionByHost.get(host);
+      if (allowed === undefined) {
+        const result = await this.urlPolicy.isAllowedTarget(requestUrl);
+        allowed = result.allowed;
+        decisionByHost.set(host, allowed);
+        if (!allowed) {
+          this.logger.warn(
+            `Blocked browser request to ${requestUrl}: ${result.reason ?? 'target not allowed'}`,
+          );
+        }
+      }
+
+      await (allowed ? route.continue() : route.abort('blockedbyclient'));
+    });
   }
 
   /**

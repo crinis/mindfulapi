@@ -21,7 +21,7 @@ MindfulAPI was built to serve as the external accessibility scanner backend for 
 - **Optional authentication** — protect the API with a Bearer token, or leave it open
 - **Automated cleanup** — configurable scheduled deletion of old scan data
 - **Flexible browser setup** — connects to a remote Playwright server via WebSocket (required in Docker); falls back to a locally installed Chromium when `PLAYWRIGHT_WS_URL` is unset (local development only)
-- **Optional AI audit** — opt-in LLM-agent skills that judge what axe-core cannot (image alt-text _quality_; heading _semantics_ up to WCAG AAA), returned alongside the deterministic results ([details](#ai-accessibility-audit-optional))
+- **Optional AI audit** — opt-in LLM-agent skills that judge what axe-core cannot: image alt-text _quality_, plus heading, link, and form-label _semantics_ and page-title descriptiveness (up to WCAG AAA) — returned alongside the deterministic results ([details](#ai-accessibility-audit-optional))
 
 ## Getting Started
 
@@ -213,9 +213,8 @@ All configuration is done via environment variables. Copy `.env.example` for a f
 | `AGENT_SKILL_<ID>_{PROVIDER,MODEL,API_KEY,BASE_URL,REASONING_EFFORT}` | _(inherits `AGENT_*` / profile)_ | Optional per-skill override (e.g. `AGENT_SKILL_HEADING_STRUCTURE_REASONING_EFFORT`). See [Per-skill model selection](#per-skill-model-selection) |
 | `AGENT_CONCURRENCY` | `4` | Concurrent per-unit requests during evaluation — one unit is an image (`image_alt_text`) or a page (the text-only skills) (1–16) |
 | `AGENT_MAX_UNITS_PER_PAGE` | `30` | Cap on collected work units per page |
-| `AGENT_MAX_UNITS_PER_SCAN` | `200` | Cap on evaluated work units per scan |
+| `AGENT_MAX_UNITS_PER_SCAN` | `200` | Cap on evaluated work units per scan. This times `AGENT_MAX_TOKENS_PER_REQUEST` is the per-scan output-token ceiling |
 | `AGENT_MAX_TOKENS_PER_REQUEST` | `2000` | Output-token cap per request (covers reasoning tokens) |
-| `AGENT_TOKEN_BUDGET_PER_SCAN` | `2000000` | Total token budget per scan (`0` disables the check) |
 | `AGENT_REQUEST_TIMEOUT_MS` | `60000` | Per-request timeout |
 | `AGENT_MAX_IMAGE_BYTES` | `1500000` | Skip element screenshots larger than this |
 | `AGENT_TEMPERATURE` | `0` | Sampling temperature (0–2); omitted for reasoning models |
@@ -231,8 +230,9 @@ openssl rand -base64 32
 ## Security
 
 - **Authentication is required by default.** The server will not start unless `AUTH_TOKEN` is set (or `AUTH_DISABLED=true` is set explicitly). Tokens are compared in constant time.
-- **SSRF protection.** Scan targets that resolve to private or reserved network ranges (loopback, RFC 1918, link-local/cloud-metadata `169.254.169.254`, CGNAT, ULA, etc.) are rejected. To scan intranet/staging sites, set `SCAN_ALLOW_PRIVATE_TARGETS=true` (only when the API is not exposed to untrusted clients) or allow specific hosts with `SCAN_TARGET_ALLOW_HOSTS`. Note: targets are resolved before navigation, so a DNS-rebinding attacker with a very low TTL could still reach an internal address between the check and the fetch — acceptable for a self-hosted tool, but keep the API access-controlled.
+- **SSRF protection.** Hosts that resolve to private or reserved network ranges (loopback, RFC 1918, link-local/cloud-metadata `169.254.169.254`, CGNAT, ULA, etc.) are blocked — and the block is enforced on **every** browser request, not just the submitted target: the initial navigation, any redirect it follows, and every subresource (image, script, iframe) the page loads are each checked, so a permitted public page cannot pivot to an internal address. To scan intranet/staging sites, set `SCAN_ALLOW_PRIVATE_TARGETS=true` (only when the API is not exposed to untrusted clients) or allow specific hosts with `SCAN_TARGET_ALLOW_HOSTS`. Note: the policy resolves hosts independently of the browser's own DNS resolution, so a DNS-rebinding attacker with a very low TTL could still flip a record between the check and the fetch — acceptable for a self-hosted tool, but keep the API access-controlled.
 - **Rate limiting** is applied globally (`THROTTLE_TTL` / `THROTTLE_LIMIT`); the `/health` probe is exempt.
+- **Runs as a non-root user.** The container process runs as the unprivileged `node` user (uid 1000), so the mounted `/data` volume must be writable by it. Fresh installs handle this automatically; upgrading from an older image that ran as root needs a one-time `chown` (see [Updating](#updating)).
 - **Single replica.** SQLite and the in-process cleanup schedule assume exactly one API instance. Scale scan throughput with `SCAN_CONCURRENCY`, not by running multiple replicas. Back up the `/data` volume before upgrading, since the schema is auto-synced (no migrations).
 
 ---
@@ -351,9 +351,9 @@ AGENT_API_KEY=sk-...
 # AGENT_SKILL_IMAGE_ALT_TEXT_API_KEY=sk-or-...
 ```
 
-The `<SKILL_ID>` is the upper-cased skill value (e.g. `image_alt_text` → `IMAGE_ALT_TEXT`, `page_title` → `PAGE_TITLE`). Each finding records the model that actually produced it, so you can audit which model judged what. (Non-model tuning knobs like token/budget limits below remain global.)
+The `<SKILL_ID>` is the upper-cased skill value (e.g. `image_alt_text` → `IMAGE_ALT_TEXT`, `page_title` → `PAGE_TITLE`). Each finding records the model that actually produced it, so you can audit which model judged what. (Non-model tuning knobs like the token/unit caps below remain global.)
 
-Cost/behaviour controls (all optional, global): `AGENT_CONCURRENCY`, `AGENT_MAX_UNITS_PER_PAGE`, `AGENT_MAX_UNITS_PER_SCAN`, `AGENT_MAX_TOKENS_PER_REQUEST`, `AGENT_TOKEN_BUDGET_PER_SCAN`, `AGENT_REQUEST_TIMEOUT_MS`, `AGENT_MAX_IMAGE_BYTES`, `AGENT_TEMPERATURE`. See [`.env.example`](.env.example) for defaults.
+Cost/behaviour controls (all optional, global): `AGENT_CONCURRENCY`, `AGENT_MAX_UNITS_PER_PAGE`, `AGENT_MAX_UNITS_PER_SCAN`, `AGENT_MAX_TOKENS_PER_REQUEST`, `AGENT_REQUEST_TIMEOUT_MS`, `AGENT_MAX_IMAGE_BYTES`, `AGENT_TEMPERATURE`. Per-scan spend is bounded by `AGENT_MAX_UNITS_PER_SCAN` × `AGENT_MAX_TOKENS_PER_REQUEST`; use your provider's account-level limits for a hard cost ceiling. See [`.env.example`](.env.example) for defaults.
 
 > **Privacy.** When the AI audit runs, cropped element screenshots and the associated attributes are sent to the configured LLM provider. Only enable it with a provider you trust, and consider a self-hosted/local model for sensitive sites.
 
@@ -463,6 +463,19 @@ systemctl is-enabled docker    # should print "enabled"
 cd /opt/mindfulapi
 git pull
 docker compose pull
+docker compose up -d
+```
+
+**Upgrading from an image that ran as root.** The container now runs as the
+unprivileged `node` user (uid 1000). If your `/data` volume was created by an
+older image that ran as root, the new container cannot write it and SQLite fails
+on startup with *"attempt to write a readonly database"*. Fix the ownership once
+(the one-off container mounts the same volume and re-owns it to `node`):
+
+```bash
+docker compose down
+docker compose run --rm --no-deps --user root --entrypoint sh mindfulapi \
+  -c 'chown -R node:node /data'
 docker compose up -d
 ```
 

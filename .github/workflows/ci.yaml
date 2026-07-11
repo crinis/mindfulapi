@@ -6,6 +6,8 @@ on:
   pull_request:
     branches:
       - main
+  # Allow other workflows (e.g. build.yaml) to run this pipeline as a gate.
+  workflow_call: {}
 
 jobs:
   test:

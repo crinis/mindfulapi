@@ -124,7 +124,9 @@ describe('ScanProcessor', () => {
 
     mockScanRepo = {
       findOne: jest.fn(),
-      update: jest.fn().mockResolvedValue(undefined),
+      // Mirrors TypeORM's UpdateResult; resetScanResults reads `affected` to
+      // detect a cancellation that raced the RUNNING transition.
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     mockScanQb = {
       addSelect: jest.fn().mockReturnThis(),
@@ -190,6 +192,21 @@ describe('ScanProcessor', () => {
       processor.process({ data: { scanId: 999 } } as any),
     ).rejects.toThrow('Scan 999 not found');
     expect(mockScanRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('aborts without scanning when a cancellation races the reset', async () => {
+    mockScanQb.getOne.mockResolvedValue(
+      makeScan({ targets: ['https://example.com'] }),
+    );
+    // The guarded RUNNING transition matches no row (status already CANCELED),
+    // so resetScanResults reports the run must not proceed.
+    mockScanRepo.update.mockResolvedValueOnce({ affected: 0 });
+
+    await processor.process({ data: { scanId: 1 } } as any);
+
+    expect(mockScanner.scanPage).not.toHaveBeenCalled();
+    // Only the reset attempt ran; no COMPLETED transition followed.
+    expect(mockScanRepo.update).toHaveBeenCalledTimes(1);
   });
 
   it('processes single_url runs and stores issues', async () => {

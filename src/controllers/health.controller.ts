@@ -1,5 +1,6 @@
 import { Controller, Get, Res, Version, VERSION_NEUTRAL } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Response } from 'express';
 import { HealthService } from '../services/health.service';
 import { HealthResponseDto } from '../dto/health-response.dto';
@@ -14,8 +15,11 @@ import { Public } from '../decorators/public.decorator';
 export class HealthController {
   constructor(private readonly healthService: HealthService) {}
 
+  // @Public() only bypasses the auth guard; the global ThrottlerGuard still
+  // applies, so a monitoring burst could otherwise 429 a healthy instance.
   @Get()
   @Public()
+  @SkipThrottle()
   @Version(VERSION_NEUTRAL)
   @ApiOperation({
     operationId: 'getHealth',

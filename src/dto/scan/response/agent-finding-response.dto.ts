@@ -17,6 +17,7 @@ export class AgentFindingResponseDto {
 
   /** WCAG success criterion the finding maps to (consistent across skills). */
   @ApiProperty({
+    type: 'string',
     nullable: true,
     example: '1.1.1',
     description: 'WCAG success criterion this finding maps to.',
@@ -41,6 +42,7 @@ export class AgentFindingResponseDto {
 
   /** URL of the page the finding relates to. */
   @ApiProperty({
+    type: 'string',
     nullable: true,
     example: 'https://example.com',
     description: 'Page the finding was found on.',
@@ -48,7 +50,7 @@ export class AgentFindingResponseDto {
   pageUrl: string | null;
 
   /** CSS selector for the evaluated element, when applicable. */
-  @ApiProperty({ nullable: true, example: 'img.hero' })
+  @ApiProperty({ type: 'string', nullable: true, example: 'img.hero' })
   selector: string | null;
 
   /** Human-readable description of the problem (present on every finding). */
@@ -60,7 +62,11 @@ export class AgentFindingResponseDto {
   message: string;
 
   /** Concrete remediation suggestion (e.g. proposed alt text), when offered. */
-  @ApiProperty({ nullable: true, example: 'Team celebrating a product launch' })
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    example: 'Team celebrating a product launch',
+  })
   suggestion: string | null;
 
   /** Skill-specific structured payload for richer client rendering. */
@@ -73,6 +79,6 @@ export class AgentFindingResponseDto {
   details: Record<string, unknown> | null;
 
   /** Model identifier that produced this finding (provenance). */
-  @ApiProperty({ nullable: true, example: 'gpt-5.4-mini' })
+  @ApiProperty({ type: 'string', nullable: true, example: 'gpt-5.4-mini' })
   model: string | null;
 }

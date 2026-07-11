@@ -82,7 +82,7 @@ export class ScanController {
     },
     type: ScanResponseDto,
   })
-  @ApiProblemResponses(400, 401, 429, 500)
+  @ApiProblemResponses(400, 401, 429, 500, 503)
   /**
    * Creates a new scan run and sets the resource `Location` header.
    */

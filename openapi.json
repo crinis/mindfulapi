@@ -151,12 +151,23 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Service temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsDto"
+                }
+              }
+            }
           }
         },
         "security": [
           {
             "bearer": []
-          }
+          },
+          {}
         ],
         "summary": "Start a new accessibility scan run",
         "tags": [
@@ -271,7 +282,8 @@
         "security": [
           {
             "bearer": []
-          }
+          },
+          {}
         ],
         "summary": "List scan runs",
         "tags": [
@@ -377,7 +389,8 @@
         "security": [
           {
             "bearer": []
-          }
+          },
+          {}
         ],
         "summary": "Get scan by ID",
         "tags": [
@@ -457,7 +470,8 @@
         "security": [
           {
             "bearer": []
-          }
+          },
+          {}
         ],
         "summary": "Delete a scan run",
         "tags": [
@@ -556,7 +570,8 @@
         "security": [
           {
             "bearer": []
-          }
+          },
+          {}
         ],
         "summary": "Cancel a scan run",
         "tags": [
@@ -620,7 +635,8 @@
         "security": [
           {
             "bearer": []
-          }
+          },
+          {}
         ],
         "summary": "List all axe-core rules",
         "tags": [
@@ -712,7 +728,8 @@
         "security": [
           {
             "bearer": []
-          }
+          },
+          {}
         ],
         "summary": "Generate an HTML accessibility report for a scan",
         "tags": [
@@ -805,7 +822,8 @@
         "security": [
           {
             "bearer": []
-          }
+          },
+          {}
         ],
         "summary": "Generate a PDF accessibility report for a scan",
         "tags": [
@@ -863,7 +881,8 @@
         "security": [
           {
             "bearer": []
-          }
+          },
+          {}
         ],
         "summary": "Trigger manual cleanup",
         "tags": [
@@ -921,7 +940,8 @@
         "security": [
           {
             "bearer": []
-          }
+          },
+          {}
         ],
         "summary": "Get cleanup retention policy",
         "tags": [
@@ -1192,7 +1212,6 @@
             ],
             "description": "Glob patterns. A discovered URL must match at least one pattern to be crawled.",
             "uniqueItems": true,
-            "minItems": 1,
             "maxItems": 20,
             "type": "array",
             "items": {
@@ -1205,7 +1224,6 @@
             ],
             "description": "Glob patterns. URLs matching any pattern are skipped during crawl.",
             "uniqueItems": true,
-            "minItems": 1,
             "maxItems": 20,
             "type": "array",
             "items": {
@@ -1547,7 +1565,7 @@
             "description": "Per-skill verdict."
           },
           "wcag": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "1.1.1",
             "description": "WCAG success criterion this finding maps to."
@@ -1574,13 +1592,13 @@
             "description": "True when the finding is low-confidence and needs review."
           },
           "pageUrl": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "https://example.com",
             "description": "Page the finding was found on."
           },
           "selector": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "img.hero"
           },
@@ -1590,7 +1608,7 @@
             "description": "Human-readable problem description, consistent across skills."
           },
           "suggestion": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "Team celebrating a product launch"
           },
@@ -1601,7 +1619,7 @@
             "description": "Skill-specific details (e.g. needsHumanReview flag)."
           },
           "model": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "gpt-5.4-mini"
           }
