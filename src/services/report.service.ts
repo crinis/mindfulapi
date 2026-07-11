@@ -4,6 +4,7 @@ import { ScanResponseDto } from '../dto/scan/response/scan-response.dto';
 import { IssueImpact } from '../enums/issue-impact.enum';
 import { ScanMode } from '../enums/scan-mode.enum';
 import { ViolationResponseDto } from '../dto/scan/response/violation-response.dto';
+import { AgentFindingResponseDto } from '../dto/scan/response/agent-finding-response.dto';
 
 const IMPACT_ORDER: IssueImpact[] = [
   IssueImpact.CRITICAL,
@@ -239,6 +240,59 @@ const REPORT_STYLES = `
     padding: 1px 5px;
     border-radius: 3px;
   }
+  /* AI findings */
+  .badge-ai { background: #ede9fe; color: #5b21b6; }
+  .badge-review { background: #fef9c3; color: #854d0e; }
+  .ai-notice {
+    display: flex;
+    gap: 14px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-left: 4px solid #2563eb;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+    color: #1e3a8a;
+    font-size: 0.875rem;
+    line-height: 1.55;
+  }
+  .ai-notice-icon { font-size: 1.35rem; line-height: 1.2; flex-shrink: 0; }
+  .ai-notice strong { display: block; margin-bottom: 4px; font-size: 0.95rem; }
+  .ai-finding .violation-header { gap: 10px; }
+  .finding-message { font-size: 0.9rem; color: #374151; }
+  .finding-suggestion {
+    margin-top: 4px;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+    color: #166534;
+  }
+  .finding-suggestion .suggestion-label {
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.7rem;
+    display: block;
+    margin-bottom: 2px;
+  }
+  dl.finding-meta {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 4px 20px;
+    margin: 0;
+  }
+  dl.finding-meta dt {
+    font-weight: 600;
+    color: #374151;
+    font-size: 0.8125rem;
+  }
+  dl.finding-meta dd {
+    color: #6b7280;
+    font-size: 0.8125rem;
+    word-break: break-word;
+  }
   /* Footer */
   .site-footer {
     background: #0f172a;
@@ -254,6 +308,7 @@ const REPORT_STYLES = `
     .site-header { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .badge, .rule-chip, .stat-card { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .violation { page-break-inside: avoid; }
+    .ai-notice { -webkit-print-color-adjust: exact; print-color-adjust: exact; page-break-inside: avoid; }
     a[href]::after { content: none !important; }
   }
 `;
@@ -328,6 +383,7 @@ export class ReportService {
     ${this.renderScanOptionsSection(scan)}
     ${this.renderCrawlOptionsSection(scan)}
     ${this.renderViolationsSection(sortedViolations)}
+    ${this.renderAgentFindingsSection(scan)}
 
   </main>
 
@@ -531,6 +587,103 @@ export class ReportService {
               ${rows}
             </tbody>
           </table>
+        </div>
+      </article>`;
+  }
+
+  /**
+   * Renders the AI-assisted findings produced by the optional LLM-audit phase.
+   *
+   * The section is emitted whenever the AI audit ran (`aiAudit` present) or any
+   * findings exist, and always leads with a disclaimer: LLM output is
+   * non-deterministic and can be incomplete or wrong, so each finding is a
+   * suggestion to verify rather than a definitive result.
+   *
+   * @param scan Scan whose AI-audit results should be rendered.
+   */
+  private renderAgentFindingsSection(scan: ScanResponseDto): string {
+    const findings = scan.agentFindings ?? [];
+    if (scan.aiAudit === null && findings.length === 0) return '';
+
+    const sorted = [...findings].sort(
+      (a, b) =>
+        IMPACT_ORDER.indexOf(a.severity) - IMPACT_ORDER.indexOf(b.severity),
+    );
+
+    const notice = `<div class="ai-notice" role="note">
+        <span class="ai-notice-icon" aria-hidden="true">⚠️</span>
+        <div>
+          <strong>AI-generated — verify before acting</strong>
+          The findings below were produced by a large language model (LLM), not
+          the deterministic axe-core engine. They may be incomplete, inaccurate,
+          or reflect subjective judgement. Confidence values are the model's own
+          estimates; items marked <em>Needs review</em> were low-confidence or
+          could not be judged reliably. Treat every item as a suggestion to
+          confirm manually, not a definitive accessibility result.
+        </div>
+      </div>`;
+
+    const body =
+      sorted.length === 0
+        ? `<div class="success-box">
+          <span class="success-icon" aria-hidden="true">✓</span>
+          <span>No AI-Assisted Findings</span>
+        </div>`
+        : sorted.map((f) => this.renderAgentFinding(f)).join('\n      ');
+
+    return `<section aria-labelledby="ai-findings-heading">
+      <h2 id="ai-findings-heading" class="section-title">AI-Assisted Findings</h2>
+      ${notice}
+      ${body}
+    </section>`;
+  }
+
+  private renderAgentFinding(f: AgentFindingResponseDto): string {
+    const severityClass = `badge badge-${escapeHtml(f.severity)}`;
+    const reviewBadge = f.needsHumanReview
+      ? `<span class="badge badge-review" aria-label="Needs human review">Needs review</span>`
+      : '';
+
+    const rows: string[] = [];
+    if (f.pageUrl) {
+      rows.push(
+        `<dt>Page</dt><dd><a href="${escapeHtml(f.pageUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(f.pageUrl)}</a></dd>`,
+      );
+    }
+    if (f.selector) {
+      rows.push(
+        `<dt>Selector</dt><dd><code>${escapeHtml(f.selector)}</code></dd>`,
+      );
+    }
+    rows.push(`<dt>Category</dt><dd>${escapeHtml(f.category)}</dd>`);
+    if (f.wcag) {
+      rows.push(`<dt>WCAG</dt><dd>${escapeHtml(f.wcag)}</dd>`);
+    }
+    rows.push(`<dt>Confidence</dt><dd>${Math.round(f.confidence * 100)}%</dd>`);
+    if (f.model) {
+      rows.push(`<dt>Model</dt><dd><code>${escapeHtml(f.model)}</code></dd>`);
+    }
+
+    const suggestion = f.suggestion
+      ? `<div class="finding-suggestion">
+            <span class="suggestion-label">Suggested fix</span>
+            ${escapeHtml(f.suggestion)}
+          </div>`
+      : '';
+
+    return `<article class="violation ai-finding">
+        <div class="violation-header">
+          <div class="violation-title-row">
+            <span class="badge badge-ai" aria-label="AI-generated finding">AI</span>
+            <span class="rule-chip">${escapeHtml(f.skill)}</span>
+            <span class="${severityClass}" aria-label="Severity: ${escapeHtml(f.severity)}">${escapeHtml(f.severity)}</span>
+            ${reviewBadge}
+          </div>
+          <p class="finding-message">${escapeHtml(f.message)}</p>
+          <dl class="finding-meta">
+            ${rows.join('\n            ')}
+          </dl>
+          ${suggestion}
         </div>
       </article>`;
   }

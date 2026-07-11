@@ -6,6 +6,29 @@ import { ScanStatus } from '../enums/scan-status.enum';
 import { ScanMode } from '../enums/scan-mode.enum';
 import { IssueImpact } from '../enums/issue-impact.enum';
 import { CrawlStrategy } from '../enums/crawl-strategy.enum';
+import { AgentSkill } from '../enums/agent-skill.enum';
+import { AiAuditStatus } from '../dto/scan/response/ai-audit-response.dto';
+import { AgentFindingResponseDto } from '../dto/scan/response/agent-finding-response.dto';
+
+function makeFinding(
+  overrides: Partial<AgentFindingResponseDto> = {},
+): AgentFindingResponseDto {
+  return {
+    skill: AgentSkill.IMAGE_ALT_TEXT,
+    category: 'redundant',
+    wcag: '1.1.1',
+    severity: IssueImpact.MODERATE,
+    confidence: 0.82,
+    needsHumanReview: false,
+    pageUrl: 'https://example.com',
+    selector: 'img.hero',
+    message: 'The alt text repeats the adjacent caption verbatim.',
+    suggestion: 'Team celebrating a product launch',
+    details: null,
+    model: 'gpt-5.4-mini',
+    ...overrides,
+  };
+}
 
 function makeScan(overrides: Partial<ScanResponseDto> = {}): ScanResponseDto {
   return {
@@ -313,6 +336,87 @@ describe('ReportService', () => {
       expect(html).toContain('Pages Failed');
       expect(html).toContain('Violation Types');
       expect(html).toContain('Total Issues');
+    });
+
+    it('renders the AI-Assisted Findings section with findings', () => {
+      const html = service.generateHtml(
+        makeScan({
+          aiAudit: {
+            status: AiAuditStatus.COMPLETED,
+            requestedSkills: [AgentSkill.IMAGE_ALT_TEXT],
+            tasksTotal: 1,
+            tasksCompleted: 1,
+            tasksFailed: 0,
+          },
+          agentFindings: [makeFinding()],
+        }),
+      );
+      expect(html).toContain('AI-Assisted Findings');
+      expect(html).toContain('image_alt_text');
+      expect(html).toContain(
+        'The alt text repeats the adjacent caption verbatim.',
+      );
+      expect(html).toContain('Team celebrating a product launch');
+      expect(html).toContain('1.1.1');
+      expect(html).toContain('82%');
+    });
+
+    it('shows an accuracy disclaimer whenever AI findings are rendered', () => {
+      const html = service.generateHtml(
+        makeScan({ agentFindings: [makeFinding()] }),
+      );
+      expect(html).toContain('AI-generated — verify before acting');
+      expect(html).toMatch(/large language model/i);
+    });
+
+    it('marks low-confidence findings as needing review', () => {
+      const html = service.generateHtml(
+        makeScan({
+          agentFindings: [makeFinding({ needsHumanReview: true })],
+        }),
+      );
+      expect(html).toContain('Needs review');
+    });
+
+    it('escapes HTML entities in AI finding fields', () => {
+      const html = service.generateHtml(
+        makeScan({
+          agentFindings: [
+            makeFinding({
+              message: '<script>alert(1)</script>',
+              selector: '<img onerror=alert(1)>',
+              suggestion: null,
+            }),
+          ],
+        }),
+      );
+      expect(html).not.toContain('<script>alert(1)</script>');
+      expect(html).toContain('&lt;script&gt;');
+      expect(html).not.toContain('<img onerror=alert(1)>');
+    });
+
+    it('shows "No AI-Assisted Findings" when the audit ran but found nothing', () => {
+      const html = service.generateHtml(
+        makeScan({
+          aiAudit: {
+            status: AiAuditStatus.COMPLETED,
+            requestedSkills: [AgentSkill.IMAGE_ALT_TEXT],
+            tasksTotal: 3,
+            tasksCompleted: 3,
+            tasksFailed: 0,
+          },
+          agentFindings: [],
+        }),
+      );
+      expect(html).toContain('AI-Assisted Findings');
+      expect(html).toContain('No AI-Assisted Findings');
+    });
+
+    it('omits the AI section entirely when the audit never ran', () => {
+      const html = service.generateHtml(
+        makeScan({ aiAudit: null, agentFindings: [] }),
+      );
+      expect(html).not.toContain('AI-Assisted Findings');
     });
   });
 
