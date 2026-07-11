@@ -146,6 +146,12 @@ docker compose -f docker-compose.yml -f docker-compose.ddev.yml up -d
 IGNORE_HTTPS_ERRORS=true
 ```
 
+**`*.ddev.site` resolves to a private address, which the SSRF policy blocks.** List the specific DDEV hostname(s) you want to scan in `SCAN_TARGET_ALLOW_HOSTS` (the override passes this through) so only those are exempted — the per-request block stays active for every other address:
+
+```bash
+SCAN_TARGET_ALLOW_HOSTS=myproject.ddev.site
+```
+
 **If you are not using DDEV,** use `docker compose` without any extra `-f` flags — only the base `docker-compose.yml` is needed, and keep `IGNORE_HTTPS_ERRORS=false` (the default).
 
 ---
