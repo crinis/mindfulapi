@@ -119,6 +119,39 @@ docker compose pull
 docker compose up -d
 ```
 
+### Container image tags
+
+Images are published to `ghcr.io/crinis/mindfulapi` for AMD64 and ARM64. The
+tags are channels with deliberately different stability guarantees:
+
+| Tag | Meaning |
+|---|---|
+| `latest` | Newest stable release. Updated only by a stable SemVer Git tag, never by `main` or a prerelease. |
+| `0.7.0` / `v0.7.0` | One exact release. The `v` form mirrors the Git tag; the unprefixed form follows container-version conventions. |
+| `0.7` | Newest stable patch release in that minor line. |
+| `1` | Newest stable release in that major line. A broad `0` tag is intentionally not published because pre-1.0 releases may be incompatible. |
+| `dev` | Newest successful build from `main`. This is unreleased and may be unstable. |
+| `sha-abcdef0` | Build from one exact Git commit. |
+
+Prerelease tags such as `v0.8.0-rc.1` publish only their exact version tags and
+never update `latest`, `0.8`, or a major-version tag. For reproducible
+deployments, pin an exact version or the image digest; moving tags such as
+`latest`, `0.7`, and `dev` are intended to receive updates.
+
+The Compose file defaults to `latest`. Select another channel in `.env`, for
+example:
+
+```bash
+MINDFULAPI_IMAGE=ghcr.io/crinis/mindfulapi:0.7.0
+```
+
+Then pull and recreate the service normally:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
 ---
 
 ### Network note (DDEV / TYPO3 integration)

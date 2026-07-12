@@ -1,12 +1,10 @@
 name: ci
 on:
-  push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
-  # Allow other workflows (e.g. build.yaml) to run this pipeline as a gate.
+  # Main and release-tag pushes run this pipeline through build.yaml, avoiding
+  # a duplicate CI run while retaining the publish gate.
   workflow_call: {}
 
 jobs:

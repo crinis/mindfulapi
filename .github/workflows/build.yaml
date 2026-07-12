@@ -1,11 +1,19 @@
-name: build
+name: Publish container image
+
 on:
   workflow_dispatch: {}
   push:
     branches:
       - main
     tags:
-      - 'v*'
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+      - '[0-9]*.[0-9]*.[0-9]*'
+
+# A newer main build should win the moving development tag. Release builds use
+# their own ref-specific group and are never cancelled by a different release.
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
 
 env:
   REGISTRY: ghcr.io
@@ -23,10 +31,10 @@ jobs:
       packages: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
 
       - name: Login to Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -40,20 +48,44 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
+        env:
+          # GHCR reads multi-platform package metadata from the image index.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # metadata-action's automatic latest flavor applies only to stable
+          # SemVer tags. Pre-release tags therefore cannot move latest.
+          flavor: |
+            latest=auto
           tags: |
-            type=ref,event=branch
-            type=ref,event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
+            # Moving development channel: successful builds from main only.
+            type=raw,value=dev,enable={{is_default_branch}}
+            # Preserve the literal Git tag (for example v1.2.3).
+            type=semver,pattern={{raw}}
+            # Conventional release channels: 1.2.3, 1.2, and 1.
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            # Do not publish a broad 0 tag while the API is pre-1.0.
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') && !startsWith(github.ref, 'refs/tags/0.') }}
+            # Traceable tag for every published commit.
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.description=Self-hosted REST API for automated web accessibility scanning
+            org.opencontainers.image.licenses=MIT
+          annotations: |
+            org.opencontainers.image.description=Self-hosted REST API for automated web accessibility scanning
+            org.opencontainers.image.licenses=MIT
 
-      - name: Build and push release
-        uses: docker/build-push-action@v6
+      - name: Build and push image
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           platforms: linux/amd64, linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

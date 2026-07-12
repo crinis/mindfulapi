@@ -31,7 +31,7 @@ services:
       start_period: 15s
 
   mindfulapi:
-    image: ghcr.io/crinis/mindfulapi:latest
+    image: ${MINDFULAPI_IMAGE:-ghcr.io/crinis/mindfulapi:latest}
     build:
       context: .
       dockerfile: Dockerfile
