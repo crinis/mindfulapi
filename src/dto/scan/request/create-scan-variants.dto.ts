@@ -9,8 +9,10 @@ import {
   ArrayUnique,
   Equals,
   IsArray,
+  IsObject,
   IsOptional,
   IsUrl,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -57,7 +59,8 @@ export class CreateSingleUrlScanDto {
 
   /** Optional opt-in to the LLM-agent audit for this run. */
   @ApiPropertyOptional(aiAuditApiProperty)
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsObject()
   @ValidateNested()
   @Type(() => AiAuditRequestDto)
   aiAudit?: AiAuditRequestDto;
@@ -98,7 +101,8 @@ export class CreateUrlListScanDto {
 
   /** Optional opt-in to the LLM-agent audit for this run. */
   @ApiPropertyOptional(aiAuditApiProperty)
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsObject()
   @ValidateNested()
   @Type(() => AiAuditRequestDto)
   aiAudit?: AiAuditRequestDto;
@@ -140,7 +144,8 @@ export class CreateCrawlScanDto {
 
   /** Optional opt-in to the LLM-agent audit for this run. */
   @ApiPropertyOptional(aiAuditApiProperty)
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsObject()
   @ValidateNested()
   @Type(() => AiAuditRequestDto)
   aiAudit?: AiAuditRequestDto;

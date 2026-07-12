@@ -986,7 +986,7 @@
   "info": {
     "title": "MindfulAPI",
     "description": "Automated web accessibility scanning API powered by axe-core and Playwright. Built for use with the [mindfula11y](https://github.com/crinis/mindfula11y) TYPO3 extension. Errors are returned as RFC 9457 `application/problem+json`.",
-    "version": "0.7.0",
+    "version": "0.7.1",
     "contact": {}
   },
   "tags": [
@@ -1093,7 +1093,7 @@
             ],
             "uniqueItems": true,
             "minItems": 1,
-            "description": "Agent audit skills to run in addition to axe-core. Each must be enabled server-side.",
+            "description": "Agent audit skills to run in addition to axe-core. Omit to run every skill enabled server-side.",
             "items": {
               "type": "string",
               "enum": [
@@ -1105,10 +1105,7 @@
               ]
             }
           }
-        },
-        "required": [
-          "skills"
-        ]
+        }
       },
       "CreateSingleUrlScanDto": {
         "type": "object",

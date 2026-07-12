@@ -158,20 +158,33 @@ export class ScanService {
   private resolveRequestedSkills(
     aiAudit?: AiAuditRequestDto,
   ): AgentSkill[] | null {
-    if (!aiAudit?.skills?.length) {
+    // The request validator rejects null, but keep this boundary defensive for
+    // callers that invoke the service without going through the HTTP pipe.
+    if (aiAudit === undefined || aiAudit === null) {
       return null;
     }
     if (!this.agentSettings.enabled) {
       throw new BadRequestException('AI audit is not enabled on this server.');
     }
-    const allowed = new Set(this.agentSettings.allowedSkills);
-    const rejected = aiAudit.skills.filter((skill) => !allowed.has(skill));
+    const known = new Set<string>(Object.values(AgentSkill));
+    const allowed = new Set<AgentSkill>(
+      this.agentSettings.allowedSkills.filter((skill): skill is AgentSkill =>
+        known.has(skill),
+      ),
+    );
+    const requested = aiAudit.skills ?? [...allowed];
+    if (requested.length === 0) {
+      throw new BadRequestException(
+        'No AI audit skills are enabled on this server.',
+      );
+    }
+    const rejected = requested.filter((skill) => !allowed.has(skill));
     if (rejected.length > 0) {
       throw new BadRequestException(
         `Requested AI audit skills are not enabled on this server: ${rejected.join(', ')}`,
       );
     }
-    return Array.from(new Set(aiAudit.skills));
+    return Array.from(new Set(requested));
   }
 
   /**

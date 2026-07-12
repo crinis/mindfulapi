@@ -24,6 +24,56 @@ describe('DiscriminatedBodyPipe', () => {
     expect(result.mode).toBe(ScanMode.SINGLE_URL);
   });
 
+  it('accepts an AI audit without a skill list', async () => {
+    const result = (await pipe.transform({
+      mode: ScanMode.SINGLE_URL,
+      url: 'https://example.com',
+      aiAudit: {},
+    })) as CreateSingleUrlScanDto;
+    expect(result.aiAudit).toBeDefined();
+    expect(result.aiAudit?.skills).toBeUndefined();
+  });
+
+  it('rejects an explicitly empty AI skill list', async () => {
+    await expect(
+      pipe.transform({
+        mode: ScanMode.SINGLE_URL,
+        url: 'https://example.com',
+        aiAudit: { skills: [] },
+      }),
+    ).rejects.toThrow(ValidationProblemException);
+  });
+
+  it('rejects a null AI skill list instead of enabling every skill', async () => {
+    await expect(
+      pipe.transform({
+        mode: ScanMode.SINGLE_URL,
+        url: 'https://example.com',
+        aiAudit: { skills: null },
+      }),
+    ).rejects.toThrow(ValidationProblemException);
+  });
+
+  it('rejects a null AI-audit object', async () => {
+    await expect(
+      pipe.transform({
+        mode: ScanMode.SINGLE_URL,
+        url: 'https://example.com',
+        aiAudit: null,
+      }),
+    ).rejects.toThrow(ValidationProblemException);
+  });
+
+  it('rejects an unknown AI skill instead of falling back to all skills', async () => {
+    await expect(
+      pipe.transform({
+        mode: ScanMode.SINGLE_URL,
+        url: 'https://example.com',
+        aiAudit: { skills: ['imag_alt_text'] },
+      }),
+    ).rejects.toThrow(ValidationProblemException);
+  });
+
   it('accepts a valid crawl payload with nested crawlOptions', async () => {
     const result = (await pipe.transform({
       mode: ScanMode.CRAWL,

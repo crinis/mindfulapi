@@ -280,7 +280,7 @@ openssl rand -base64 32
 
 Axe-core is deterministic: it can tell that an image _has_ an `alt` attribute, but not whether that text is _accurate, meaningful, or correctly decorative_. The optional AI audit adds LLM-agent **skills** that make exactly those judgments and returns them **alongside** the axe results — never replacing them.
 
-The feature is **disabled by default**. When enabled server-side, each scan still opts in per request and picks which skills to run.
+The feature is **disabled by default**. When enabled server-side, each scan still opts in per request; by default it runs every server-enabled skill, while clients may request a subset.
 
 ### How it works
 
@@ -308,11 +308,11 @@ POST /v1/scans
 {
   "mode": "single_url",
   "url": "https://example.com",
-  "aiAudit": { "skills": ["image_alt_text"] }
+  "aiAudit": {}
 }
 ```
 
-Scan responses gain an `aiAudit` summary (`status`, `requestedSkills`, task counters) and an `agentFindings` array; list summaries gain `agentFindingCount`. Requesting the audit when it is disabled server-side, or requesting a non-whitelisted skill, returns a `400` problem.
+Omitting `skills` runs every skill enabled by the server's `AGENT_SKILLS` setting. Clients may still provide an explicit list to request a subset. Scan responses gain an `aiAudit` summary (`status`, `requestedSkills`, task counters) and an `agentFindings` array; list summaries gain `agentFindingCount`. Requesting the audit when it is disabled server-side, or requesting a non-whitelisted skill, returns a `400` problem.
 
 Every `agentFindings` entry has the **same shape regardless of skill**, so clients render them uniformly:
 
@@ -349,7 +349,7 @@ AGENT_PROVIDER=openai-compatible
 AGENT_BASE_URL=https://openrouter.ai/api/v1
 AGENT_MODEL=openai/gpt-4o-mini
 AGENT_API_KEY=sk-or-...
-AGENT_SKILLS=image_alt_text,heading_structure,link_purpose,form_labels,page_title   # skills clients may request
+AGENT_SKILLS=image_alt_text,heading_structure,link_purpose,form_labels,page_title   # skills available to audit requests
 ```
 
 **Picking a model.** Each skill has different needs, so rather than forcing one model everywhere the server ships a **tuned per-provider profile**: select a provider, leave `AGENT_MODEL` unset, and every skill automatically runs on the model — and reasoning effort — that tested best for it, no per-skill config required. The profile targets OpenAI's current **GPT-5 line** (the gpt-4.x family is now legacy). These are reasoning models, so each entry pairs a model with a **reasoning effort**; the profile comes from per-skill A/B testing, chosen for accuracy **without over-flagging** (a false "issue" on a clean page erodes trust as much as a miss):

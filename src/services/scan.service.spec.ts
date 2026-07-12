@@ -329,6 +329,31 @@ describe('ScanService', () => {
         ).rejects.toThrow(BadRequestException);
       });
 
+      it('uses every server-enabled skill when the request omits a list', async () => {
+        const enabled = buildService({
+          enabled: true,
+          allowedSkills: ['image_alt_text', 'page_title'],
+        });
+        const saved = makeScan({
+          aiAuditSkills: [AgentSkill.IMAGE_ALT_TEXT, AgentSkill.PAGE_TITLE],
+        });
+        mockRepo.create.mockReturnValue(saved);
+        mockRepo.save.mockResolvedValue(saved);
+        mockRepo.findOne.mockResolvedValue({ ...saved, issues: [] });
+
+        await enabled.create({
+          mode: ScanMode.SINGLE_URL,
+          url: 'https://example.com',
+          aiAudit: {},
+        });
+
+        expect(mockRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            aiAuditSkills: [AgentSkill.IMAGE_ALT_TEXT, AgentSkill.PAGE_TITLE],
+          }),
+        );
+      });
+
       it('persists requested skills when enabled and whitelisted', async () => {
         const enabled = buildService({
           enabled: true,
