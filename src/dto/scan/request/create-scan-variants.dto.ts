@@ -23,7 +23,11 @@ import { ScanOptionsDto } from './scan-options.dto';
 import { AiAuditRequestDto } from './ai-audit.dto';
 
 /** Optional AI-audit opt-in field shared by every create-scan variant. */
-const aiAuditApiProperty = { type: () => AiAuditRequestDto } as const;
+const aiAuditApiProperty = {
+  type: () => AiAuditRequestDto,
+  description:
+    'Optional AI audit. Availability depends on the server-configured allowed scan modes (single_url by default); requests for a disallowed mode return 400.',
+} as const;
 
 /** Upper bound on url_list targets per scan. */
 const MAX_URL_LIST_ITEMS = 500;
@@ -225,6 +229,7 @@ export const createScanRequestExamples: Record<string, OpenApiExampleObject> = {
           password: 'scanner-password',
         },
       },
+      aiAudit: {},
     },
   },
   urlList: {

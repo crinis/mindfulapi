@@ -3,7 +3,7 @@
   "paths": {
     "/v1/scans": {
       "post": {
-        "description": "Queues a new axe-core scan run in one of three modes: single URL, URL list, or crawl. Processing runs asynchronously in the background. Poll GET /scans/:id for status and results.",
+        "description": "Queues a new axe-core scan run in one of three modes: single URL, URL list, or crawl. Processing runs asynchronously in the background. The optional AI audit is available only for scan modes enabled by the server (single URL by default); requesting it for a disallowed mode returns 400. Poll GET /scans/:id for status and results.",
         "operationId": "createScan",
         "parameters": [],
         "requestBody": {
@@ -44,7 +44,8 @@
                         "username": "scanner-user",
                         "password": "scanner-password"
                       }
-                    }
+                    },
+                    "aiAudit": {}
                   }
                 },
                 "urlList": {
@@ -1127,7 +1128,12 @@
             "$ref": "#/components/schemas/ScanOptionsDto"
           },
           "aiAudit": {
-            "$ref": "#/components/schemas/AiAuditRequestDto"
+            "description": "Optional AI audit. Availability depends on the server-configured allowed scan modes (single_url by default); requests for a disallowed mode return 400.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AiAuditRequestDto"
+              }
+            ]
           }
         },
         "required": [
@@ -1164,7 +1170,12 @@
             "$ref": "#/components/schemas/ScanOptionsDto"
           },
           "aiAudit": {
-            "$ref": "#/components/schemas/AiAuditRequestDto"
+            "description": "Optional AI audit. Availability depends on the server-configured allowed scan modes (single_url by default); requests for a disallowed mode return 400.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AiAuditRequestDto"
+              }
+            ]
           }
         },
         "required": [
@@ -1257,7 +1268,12 @@
             "$ref": "#/components/schemas/ScanOptionsDto"
           },
           "aiAudit": {
-            "$ref": "#/components/schemas/AiAuditRequestDto"
+            "description": "Optional AI audit. Availability depends on the server-configured allowed scan modes (single_url by default); requests for a disallowed mode return 400.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AiAuditRequestDto"
+              }
+            ]
           },
           "crawlOptions": {
             "$ref": "#/components/schemas/CrawlOptionsDto"

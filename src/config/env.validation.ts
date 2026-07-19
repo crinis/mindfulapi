@@ -5,6 +5,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   Max,
   Min,
   validateSync,
@@ -149,6 +150,18 @@ export class EnvironmentVariables {
   @IsOptional()
   @IsString()
   AGENT_SKILLS?: string;
+
+  /** Comma-separated scan modes for which AI audits may be requested. */
+  @IsOptional()
+  @IsString()
+  @Matches(
+    /^\s*(?:(?:single_url|url_list|crawl)(?:\s*,\s*(?:single_url|url_list|crawl))*)?\s*$/,
+    {
+      message:
+        'AGENT_ALLOWED_SCAN_MODES must be a comma-separated list containing only single_url, url_list, or crawl',
+    },
+  )
+  AGENT_ALLOWED_SCAN_MODES?: string;
 
   /** Concurrent per-unit requests during evaluation. */
   @IsOptional()

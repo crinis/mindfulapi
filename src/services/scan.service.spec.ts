@@ -25,6 +25,7 @@ import {
 } from '../dto/scan/request';
 import { ScanMode } from '../enums/scan-mode.enum';
 import { CrawlStrategy } from '../enums/crawl-strategy.enum';
+import { ValidationProblemException } from '../exceptions/validation-problem.exception';
 
 const makeIssue = (overrides: Partial<Issue> = {}): Issue =>
   ({
@@ -168,7 +169,13 @@ describe('ScanService', () => {
         { provide: ScanQueueService, useValue: mockQueue },
         { provide: BasicAuthCryptoService, useValue: mockBasicAuthCrypto },
         { provide: UrlPolicyService, useValue: mockUrlPolicy },
-        { provide: agentConfig.KEY, useValue: agentConfig() },
+        {
+          provide: agentConfig.KEY,
+          useValue: {
+            ...agentConfig(),
+            allowedScanModes: [ScanMode.SINGLE_URL],
+          },
+        },
       ],
     }).compile();
 
@@ -327,6 +334,65 @@ describe('ScanService', () => {
             aiAudit: { skills: [AgentSkill.IMAGE_ALT_TEXT] },
           }),
         ).rejects.toThrow(BadRequestException);
+      });
+
+      it.each([ScanMode.URL_LIST, ScanMode.CRAWL])(
+        'rejects an AI audit for disallowed %s scans before persistence',
+        async (mode) => {
+          const enabled = buildService({
+            enabled: true,
+            allowedSkills: ['image_alt_text'],
+            allowedScanModes: [ScanMode.SINGLE_URL],
+          });
+          const dto: CreateUrlListScanDto | CreateCrawlScanDto =
+            mode === ScanMode.URL_LIST
+              ? {
+                  mode: ScanMode.URL_LIST,
+                  urls: ['https://example.com', 'https://example.com/about'],
+                  aiAudit: { skills: [AgentSkill.IMAGE_ALT_TEXT] },
+                }
+              : {
+                  mode: ScanMode.CRAWL,
+                  startUrls: ['https://example.com'],
+                  aiAudit: { skills: [AgentSkill.IMAGE_ALT_TEXT] },
+                };
+
+          try {
+            await enabled.create(dto);
+            fail('expected rejection');
+          } catch (error) {
+            expect(error).toBeInstanceOf(ValidationProblemException);
+            expect(
+              (error as ValidationProblemException).fieldErrors,
+            ).toContainEqual(expect.objectContaining({ pointer: '/aiAudit' }));
+          }
+          expect(mockRepo.save).not.toHaveBeenCalled();
+          expect(mockQueue.addScanJob).not.toHaveBeenCalled();
+          expect(mockUrlPolicy.assertAllowedTargets).not.toHaveBeenCalled();
+        },
+      );
+
+      it('accepts a multi-page AI audit when its mode is explicitly allowed', async () => {
+        const enabled = buildService({
+          enabled: true,
+          allowedSkills: ['image_alt_text'],
+          allowedScanModes: [ScanMode.SINGLE_URL, ScanMode.URL_LIST],
+        });
+        const saved = makeScan({
+          mode: ScanMode.URL_LIST,
+          targets: ['https://example.com/', 'https://example.com/about'],
+          aiAuditSkills: [AgentSkill.IMAGE_ALT_TEXT],
+        });
+        mockRepo.create.mockReturnValue(saved);
+        mockRepo.save.mockResolvedValue(saved);
+
+        await enabled.create({
+          mode: ScanMode.URL_LIST,
+          urls: ['https://example.com', 'https://example.com/about'],
+          aiAudit: { skills: [AgentSkill.IMAGE_ALT_TEXT] },
+        });
+
+        expect(mockQueue.addScanJob).toHaveBeenCalledWith(saved.id);
       });
 
       it('uses every server-enabled skill when the request omits a list', async () => {

@@ -1,6 +1,7 @@
 import { registerAs } from '@nestjs/config';
 import { CronExpression } from '@nestjs/schedule';
 import { AgentSkill } from '../enums/agent-skill.enum';
+import { ScanMode } from '../enums/scan-mode.enum';
 
 /** Provider/model/credentials for a single agent skill (or the global default). */
 export interface AgentModelConfig {
@@ -244,6 +245,12 @@ export const agentConfig = registerAs('agent', () => ({
           'form_labels',
           'page_title',
         ];
+  })(),
+  /** Scan modes for which clients may request an AI audit. */
+  allowedScanModes: ((): ScanMode[] => {
+    const configured = splitList(process.env.AGENT_ALLOWED_SCAN_MODES);
+    const modes = configured.length > 0 ? configured : [ScanMode.SINGLE_URL];
+    return Array.from(new Set(modes)) as ScanMode[];
   })(),
   /** Concurrent per-unit requests (subagent fan-out) during evaluation. */
   concurrency: clampInt(process.env.AGENT_CONCURRENCY, 4, 1, 16),

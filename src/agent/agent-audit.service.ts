@@ -76,11 +76,17 @@ export class AgentAuditService {
   }
 
   /**
-   * Resolves the skills to run for a scan: empty unless the feature is enabled
-   * and the scan requested one or more whitelisted skills.
+   * Resolves the skills to run for a scan: empty unless the feature and scan
+   * mode are enabled and the scan requested one or more whitelisted skills.
    */
   resolveSkills(scan: Scan): AuditSkill[] {
     if (!this.config.enabled || !scan.aiAuditSkills?.length) {
+      return [];
+    }
+    if (!this.config.allowedScanModes.includes(scan.mode)) {
+      this.logger.warn(
+        `Skipping AI audit for scan ${scan.id}: scan mode '${scan.mode}' is not allowed by AGENT_ALLOWED_SCAN_MODES.`,
+      );
       return [];
     }
     return this.registry.resolve(scan.aiAuditSkills, this.config.allowedSkills);

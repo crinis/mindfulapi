@@ -27,6 +27,7 @@ import { Issue } from '../src/entities/issue.entity';
 import { ScanStatus } from '../src/enums/scan-status.enum';
 import { IssueImpact } from '../src/enums/issue-impact.enum';
 import { ScanMode } from '../src/enums/scan-mode.enum';
+import { AgentSkill } from '../src/enums/agent-skill.enum';
 import { normalizeHttpUrl } from '../src/utils/url-normalization.util';
 
 const mockAddScanJob = jest.fn().mockResolvedValue(undefined);
@@ -153,6 +154,9 @@ describe('MindfulAPI (e2e)', () => {
     process.env.AUTH_TOKEN = 'testtoken';
     // Keep scan creation independent of live DNS in CI.
     process.env.SCAN_ALLOW_PRIVATE_TARGETS = 'true';
+    process.env.AGENT_ENABLED = 'true';
+    process.env.AGENT_SKILLS = AgentSkill.IMAGE_ALT_TEXT;
+    process.env.AGENT_ALLOWED_SCAN_MODES = ScanMode.SINGLE_URL;
     delete process.env.NODE_ENV;
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -194,6 +198,9 @@ describe('MindfulAPI (e2e)', () => {
     delete process.env.AUTH_TOKEN;
     delete process.env.DATABASE_PATH;
     delete process.env.SCAN_ALLOW_PRIVATE_TARGETS;
+    delete process.env.AGENT_ENABLED;
+    delete process.env.AGENT_SKILLS;
+    delete process.env.AGENT_ALLOWED_SCAN_MODES;
   });
 
   beforeEach(() => mockAddScanJob.mockClear());
@@ -396,6 +403,25 @@ describe('MindfulAPI (e2e)', () => {
           crawlOptions: { maxPages: 10 },
         })
         .expect(400));
+
+    it('returns a validation problem when AI audit is disallowed for the scan mode', async () => {
+      const { body, headers } = await request(app.getHttpServer())
+        .post('/v1/scans')
+        .set(authHeader())
+        .send({
+          mode: ScanMode.CRAWL,
+          startUrls: ['https://example.com'],
+          aiAudit: { skills: [AgentSkill.IMAGE_ALT_TEXT] },
+        })
+        .expect(400);
+
+      expect(headers['content-type']).toContain('application/problem+json');
+      expect(body.title).toBe('Validation Failed');
+      expect(body.errors).toEqual([
+        expect.objectContaining({ pointer: '/aiAudit' }),
+      ]);
+      expect(mockAddScanJob).not.toHaveBeenCalled();
+    });
 
     it('returns 400 when crawl globs contains duplicates', () =>
       request(app.getHttpServer())
@@ -737,6 +763,10 @@ describe('MindfulAPI (e2e)', () => {
           .schema;
       expect(requestBodySchema.oneOf).toBeDefined();
       expect(requestBodySchema.discriminator.propertyName).toBe('mode');
+      expect(
+        body.components.schemas.CreateSingleUrlScanDto.properties.aiAudit
+          .description,
+      ).toContain('single_url by default');
     });
 
     it('documents request examples and operationIds for API usability', async () => {

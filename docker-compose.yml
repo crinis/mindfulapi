@@ -59,6 +59,7 @@ services:
       - AGENT_API_KEY=${AGENT_API_KEY:-}
       - AGENT_BASE_URL=${AGENT_BASE_URL:-}
       - AGENT_SKILLS=${AGENT_SKILLS:-image_alt_text}
+      - AGENT_ALLOWED_SCAN_MODES=${AGENT_ALLOWED_SCAN_MODES:-single_url}
     volumes:
       - mindfulapi_data:/data
     depends_on:

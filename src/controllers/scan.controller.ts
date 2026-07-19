@@ -65,7 +65,7 @@ export class ScanController {
     operationId: 'createScan',
     summary: 'Start a new accessibility scan run',
     description:
-      'Queues a new axe-core scan run in one of three modes: single URL, URL list, or crawl. Processing runs asynchronously in the background. Poll GET /scans/:id for status and results.',
+      'Queues a new axe-core scan run in one of three modes: single URL, URL list, or crawl. Processing runs asynchronously in the background. The optional AI audit is available only for scan modes enabled by the server (single URL by default); requesting it for a disallowed mode returns 400. Poll GET /scans/:id for status and results.',
   })
   @ApiBody({
     schema: createScanRequestOneOfSchema,

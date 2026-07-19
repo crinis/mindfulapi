@@ -45,6 +45,7 @@ import {
   normalizeAndDedupeHttpUrls,
   normalizeHttpUrl,
 } from '../utils/url-normalization.util';
+import { ValidationProblemException } from '../exceptions/validation-problem.exception';
 
 /**
  * Canonical normalized create payload used internally for persistence/queueing.
@@ -97,7 +98,10 @@ export class ScanService {
    */
   async create(createScanDto: CreateScanRequest): Promise<ScanResponseDto> {
     const normalized = this.normalizeCreateInput(createScanDto);
-    const aiAuditSkills = this.resolveRequestedSkills(createScanDto.aiAudit);
+    const aiAuditSkills = this.resolveRequestedSkills(
+      normalized.mode,
+      createScanDto.aiAudit,
+    );
     await this.urlPolicyService.assertAllowedTargets(normalized.targets);
     const encryptedBasicAuth = normalized.scanOptions.basicAuth
       ? this.basicAuthCryptoService.encryptCredentials(
@@ -152,10 +156,11 @@ export class ScanService {
    * Validates a requested AI audit against the server configuration, returning
    * the deduped skill list to persist (or `null` when not requested).
    *
-   * @throws BadRequestException When AI audit is disabled server-side or a
-   * requested skill is not on the server whitelist.
+   * @throws BadRequestException When AI audit is disabled server-side, the
+   * scan mode is not allowed, or a requested skill is not whitelisted.
    */
   private resolveRequestedSkills(
+    scanMode: ScanMode,
     aiAudit?: AiAuditRequestDto,
   ): AgentSkill[] | null {
     // The request validator rejects null, but keep this boundary defensive for
@@ -165,6 +170,16 @@ export class ScanService {
     }
     if (!this.agentSettings.enabled) {
       throw new BadRequestException('AI audit is not enabled on this server.');
+    }
+    if (!this.agentSettings.allowedScanModes.includes(scanMode)) {
+      throw new ValidationProblemException([
+        {
+          pointer: '/aiAudit',
+          message:
+            `AI audit is not allowed for scan mode '${scanMode}' on this server. ` +
+            `Allowed scan modes: ${this.agentSettings.allowedScanModes.join(', ')}.`,
+        },
+      ]);
     }
     const known = new Set<string>(Object.values(AgentSkill));
     const allowed = new Set<AgentSkill>(

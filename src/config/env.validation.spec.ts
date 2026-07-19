@@ -17,8 +17,19 @@ describe('env validation', () => {
         CLEANUP_ENABLED: 'true',
         CLEANUP_RETENTION_DAYS: '30',
         CRAWL_CONCURRENCY: '4',
+        AGENT_ALLOWED_SCAN_MODES: 'single_url, url_list, crawl',
       }),
     ).not.toThrow();
+  });
+
+  it('accepts a blank AI-audit scan-mode allowlist for defaulting', () => {
+    expect(() => validate({ AGENT_ALLOWED_SCAN_MODES: '  ' })).not.toThrow();
+  });
+
+  it('rejects an unknown AI-audit scan mode', () => {
+    expect(() =>
+      validate({ AGENT_ALLOWED_SCAN_MODES: 'single_url,site_crawl' }),
+    ).toThrow(/AGENT_ALLOWED_SCAN_MODES/);
   });
 
   it('rejects a non-numeric PORT', () => {

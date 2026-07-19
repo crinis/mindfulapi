@@ -9,6 +9,7 @@ import type {
   AgentFindingDraft,
   AuditSkill,
 } from './skills/audit-skill.interface';
+import { ScanMode } from '../enums/scan-mode.enum';
 
 type AgentSettings = ReturnType<typeof agentConfig>;
 
@@ -16,6 +17,7 @@ const settings = (overrides: Partial<AgentSettings> = {}): AgentSettings => ({
   ...agentConfig(),
   enabled: true,
   allowedSkills: ['image_alt_text'],
+  allowedScanModes: [ScanMode.SINGLE_URL],
   concurrency: 2,
   ...overrides,
 });
@@ -45,7 +47,7 @@ const makeService = (overrides: Partial<AgentSettings> = {}) => {
 };
 
 const scanWith = (skills: AgentSkill[] | null): Scan =>
-  ({ id: 1, aiAuditSkills: skills }) as Scan;
+  ({ id: 1, mode: ScanMode.SINGLE_URL, aiAuditSkills: skills }) as Scan;
 
 const problemDraft = (): AgentFindingDraft => ({
   skill: AgentSkill.IMAGE_ALT_TEXT,
@@ -70,6 +72,17 @@ describe('AgentAuditService.resolveSkills', () => {
   it('returns [] when no skills were requested', () => {
     const { service } = makeService();
     expect(service.resolveSkills(scanWith(null))).toEqual([]);
+  });
+
+  it('returns [] when the queued scan mode is no longer allowed', () => {
+    const { service, registry } = makeService();
+    const scan = {
+      ...scanWith([AgentSkill.IMAGE_ALT_TEXT]),
+      mode: ScanMode.CRAWL,
+    };
+
+    expect(service.resolveSkills(scan)).toEqual([]);
+    expect(registry.resolve).not.toHaveBeenCalled();
   });
 
   it('delegates to the registry with the whitelist when enabled', () => {

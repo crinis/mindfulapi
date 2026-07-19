@@ -248,6 +248,7 @@ All configuration is done via environment variables. Copy `.env.example` for a f
 | `AGENT_API_KEY` | _(unset)_ | Provider API key; validated lazily, never logged |
 | `AGENT_BASE_URL` | _(unset)_ | Base URL for the `openai-compatible` provider (OpenRouter or a local server) |
 | `AGENT_SKILLS` | `image_alt_text,heading_structure,link_purpose,form_labels,page_title` | Comma-separated skills clients may request |
+| `AGENT_ALLOWED_SCAN_MODES` | `single_url` | Comma-separated scan modes for which clients may request an AI audit: `single_url`, `url_list`, `crawl` |
 | `AGENT_REASONING_EFFORT` | _(unset)_ | Reasoning effort (`none`…`high`) when `AGENT_MODEL` is a reasoning model; the profile sets this per skill otherwise. Note: `gpt-5.4+` reject `minimal` — use `none`; only the original `gpt-5-nano`/`gpt-5-mini` accept `minimal` |
 | `AGENT_SKILL_<ID>_{PROVIDER,MODEL,API_KEY,BASE_URL,REASONING_EFFORT}` | _(inherits `AGENT_*` / profile)_ | Optional per-skill override (e.g. `AGENT_SKILL_HEADING_STRUCTURE_REASONING_EFFORT`). See [Per-skill model selection](#per-skill-model-selection) |
 | `AGENT_CONCURRENCY` | `4` | Concurrent per-unit requests during evaluation — one unit is an image (`image_alt_text`) or a page (the text-only skills) (1–16) |
@@ -280,7 +281,7 @@ openssl rand -base64 32
 
 Axe-core is deterministic: it can tell that an image _has_ an `alt` attribute, but not whether that text is _accurate, meaningful, or correctly decorative_. The optional AI audit adds LLM-agent **skills** that make exactly those judgments and returns them **alongside** the axe results — never replacing them.
 
-The feature is **disabled by default**. When enabled server-side, each scan still opts in per request; by default it runs every server-enabled skill, while clients may request a subset.
+The feature is **disabled by default**. When enabled server-side, each scan still opts in per request; by default it runs every server-enabled skill, while clients may request a subset. Agent use is restricted to `single_url` scans by default. Operators can allow additional modes with `AGENT_ALLOWED_SCAN_MODES=single_url,url_list,crawl`.
 
 ### How it works
 
@@ -312,7 +313,7 @@ POST /v1/scans
 }
 ```
 
-Omitting `skills` runs every skill enabled by the server's `AGENT_SKILLS` setting. Clients may still provide an explicit list to request a subset. Scan responses gain an `aiAudit` summary (`status`, `requestedSkills`, task counters) and an `agentFindings` array; list summaries gain `agentFindingCount`. Requesting the audit when it is disabled server-side, or requesting a non-whitelisted skill, returns a `400` problem.
+Omitting `skills` runs every skill enabled by the server's `AGENT_SKILLS` setting. Clients may still provide an explicit list to request a subset. Scan responses gain an `aiAudit` summary (`status`, `requestedSkills`, task counters) and an `agentFindings` array; list summaries gain `agentFindingCount`. Requesting the audit when it is disabled server-side, for a mode excluded by `AGENT_ALLOWED_SCAN_MODES`, or with a non-whitelisted skill returns a `400` problem. Deployments that need the previous all-mode behavior must explicitly set `AGENT_ALLOWED_SCAN_MODES=single_url,url_list,crawl`.
 
 Every `agentFindings` entry has the **same shape regardless of skill**, so clients render them uniformly:
 
