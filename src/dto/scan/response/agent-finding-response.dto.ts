@@ -74,7 +74,8 @@ export class AgentFindingResponseDto {
     type: 'object',
     additionalProperties: true,
     nullable: true,
-    description: 'Skill-specific details (e.g. needsHumanReview flag).',
+    description:
+      'Skill-specific details (e.g. verdict, currentAlt, suggestedLevel).',
   })
   details: Record<string, unknown> | null;
 
