@@ -269,7 +269,7 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
         details: {
           verdict: verdict.verdict,
           currentAlt: evidence.alt,
-          src: evidence.src ?? null,
+          src: storedSource(evidence.src),
         },
         usage,
         model,
@@ -451,6 +451,17 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
       },
     );
   }
+}
+
+/**
+ * The image source as stored with a finding. An inline `data:` URI is
+ * reduced to its media type (`data:image/png;…`): its payload locates
+ * nothing and only bloats the row.
+ */
+export function storedSource(src: string | undefined): string | null {
+  if (!src) return null;
+  const inline = /^data:([^;,]*)/i.exec(src);
+  return inline ? `data:${inline[1]};…` : src;
 }
 
 /** Maps a verdict category to the client-facing severity. */

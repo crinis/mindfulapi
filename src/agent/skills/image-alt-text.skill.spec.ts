@@ -235,6 +235,19 @@ describe('ImageAltTextSkill.evaluate', () => {
     expect(draft?.needsHumanReview).toBe(false);
   });
 
+  it('records only the media type of an inline data: image source', async () => {
+    const [draft] = await skill.evaluate(
+      baseEvidence({ src: `data:image/svg+xml;base64,${'A'.repeat(480)}` }),
+      harnessReturning({
+        verdict: 'redundant',
+        confidence: 0.9,
+        rationale: 'Repeats the caption.',
+        suggestedAlt: null,
+      }),
+    );
+    expect(draft?.details).toMatchObject({ src: 'data:image/svg+xml;…' });
+  });
+
   it('locates the finding by CSS selector and records the image source', async () => {
     const [draft] = await skill.evaluate(
       baseEvidence(),
