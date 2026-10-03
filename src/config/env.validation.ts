@@ -225,7 +225,10 @@ export class EnvironmentVariables {
   @IsString()
   AGENT_MODEL?: string;
 
-  /** Provider API key; length/validity checked lazily by the harness. */
+  /**
+   * Provider API key. Its presence is checked when a scan requests the AI
+   * audit; whether the provider accepts it shows only when requests run.
+   */
   @IsOptional()
   @IsString()
   AGENT_API_KEY?: string;
@@ -283,8 +286,10 @@ export class EnvironmentVariables {
 
   // Per-skill overrides (AGENT_SKILL_<ID>_{PROVIDER,MODEL,API_KEY,BASE_URL,
   // REASONING_EFFORT}) are read dynamically per registered skill in
-  // configuration.ts and validated lazily by the model harness, so they are not
-  // declared here.
+  // configuration.ts, so they are not declared here. A scan that requests a
+  // skill is rejected with 400 when the skill's resolved provider, model, key
+  // or base URL is missing or unsupported; anything else surfaces when its
+  // requests run.
 }
 
 /**

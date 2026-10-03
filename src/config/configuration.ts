@@ -186,9 +186,11 @@ export const scanConfig = registerAs('scan', () => ({
  * Optional LLM-agent audit settings.
  *
  * Powers the agentic accessibility skills that run in addition to axe-core.
- * The API key is read here but only validated lazily by the model harness
- * (mirrors the ENCRYPTION_KEY handling) so the app boots without a key when
- * the feature is disabled.
+ * Provider, model, API key and base URL are not checked at startup, so the app
+ * boots without them while the feature is unused. A scan that requests the AI
+ * audit is rejected with 400 when a requested skill lacks a usable provider,
+ * model, key or base URL (ModelProviderFactory.resolveUsableModelConfig); a
+ * key the provider refuses only shows when the requests run.
  */
 export const agentConfig = registerAs('agent', () => ({
   /** Master switch for the AI audit capability. */
@@ -197,7 +199,7 @@ export const agentConfig = registerAs('agent', () => ({
   provider: process.env.AGENT_PROVIDER || null,
   /** Default model identifier passed to the provider (e.g. `gpt-5.4-mini`). */
   model: process.env.AGENT_MODEL || null,
-  /** Default provider API key; validated lazily by the harness, never logged. */
+  /** Default provider API key; checked for presence per scan request, never logged. */
   apiKey: process.env.AGENT_API_KEY || null,
   /**
    * Default base URL for the `openai-compatible` provider — point at OpenRouter
