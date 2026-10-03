@@ -113,11 +113,23 @@ describe('Rate limiting (e2e)', () => {
       .get('/v1/rules')
       .set('Authorization', 'Bearer wrong-again')
       .expect(429);
-    // The client is limited as a whole, the right token included.
+    // The client is limited on this endpoint, the right token included.
     await request(app.getHttpServer())
       .get('/v1/rules')
       .set('Authorization', 'Bearer testtoken')
       .expect(429);
+  });
+
+  it('counts per client address and endpoint, for the API routes only', async () => {
+    // GET /v1/rules is exhausted by the test above; other endpoints keep
+    // their own budget, and paths without a route are not counted at all.
+    await request(app.getHttpServer())
+      .get('/v1/scans')
+      .set('Authorization', 'Bearer wrong')
+      .expect(401);
+    for (let attempt = 0; attempt <= LIMIT; attempt++) {
+      await request(app.getHttpServer()).get('/v1/no-such-route').expect(404);
+    }
   });
 
   it('keeps /health out of the limit', () =>

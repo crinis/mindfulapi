@@ -314,7 +314,7 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 | `AUTH_DISABLED` | `false` | `true` runs without authentication (only when `AUTH_TOKEN` is unset). **Not recommended** |
 | `CORS_ORIGINS` | _(unset)_ | Comma-separated allowed CORS origins; unset disables CORS |
 | `THROTTLE_TTL` | `60` | Rate-limit window in seconds (1–86400) |
-| `THROTTLE_LIMIT` | `100` | Allowed requests per window per client (1–1000000) |
+| `THROTTLE_LIMIT` | `100` | Allowed requests per window per client address and endpoint (1–1000000) |
 | `TRUST_PROXY` | _(unset)_ | Proxies whose `X-Forwarded-For` the API trusts for the client address that rate limiting counts by: `false`, a hop count (1–32), or a comma-separated list of IP addresses, CIDR subnets, `loopback`, `linklocal`, `uniquelocal`. Unset trusts none. `true` is refused at startup, because it would make the first `X-Forwarded-For` entry, which the client chooses, the client address. See [Security](#security) |
 
 **Storage and services**
@@ -386,7 +386,7 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
   - The run-server tells plain HTTP clients its path (`GET /json`). That response has no `Access-Control-Allow-Origin` header, so page script on another origin cannot read it, and the SSRF protection blocks direct requests to the run-server's addresses. A page whose host name is rebound to the run-server's address (DNS rebinding, see Limitations above) would be same-origin with it and could read the path, so the secret path does not close that case.
   - Never add `--unsafe` to the run-server. Complete protection needs an egress proxy or scanning only trusted sites; keep the API access-controlled.
 - **Basic Auth credentials** (`scanOptions.basicAuth`) are sent only to the origin (scheme, host and port) of the first target URL, in answer to its 401 challenge. Subresources, redirect targets and crawled pages on other origins never receive them. If the target redirects to another origin (http → https, `example.com` → `www.example.com`), use the final URL as the target. Split scans whose targets span several protected origins.
-- **Rate limiting** applies to every request per client address (`THROTTLE_TTL` / `THROTTLE_LIMIT`) before authentication, so requests with a wrong token count too and tokens cannot be guessed at full speed. `/health` is exempt.
+- **Rate limiting** counts requests per client address and endpoint, for the API routes (`THROTTLE_TTL` / `THROTTLE_LIMIT`). It runs before authentication, so requests with a wrong token count too and tokens cannot be guessed at full speed. `/health`, the documentation pages and paths without a route are not counted.
   - Behind a reverse proxy every request comes from the proxy's address, so all clients share one limit until `TRUST_PROXY` names the proxy. For one proxy in front, set `TRUST_PROXY=1`: the client address is then the last `X-Forwarded-For` entry, the one the proxy adds (Caddy does this by default; Nginx needs `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`).
   - With Docker Compose, a proxy on the host reaches the container from the Docker network's gateway address, not from loopback, so `TRUST_PROXY=loopback` does not match; use the hop count.
   - Set `TRUST_PROXY` only when every request passes the proxy (the default `BIND_ADDRESS=127.0.0.1` with the proxy on the same host). A client that reaches the API directly could otherwise pick its own address with `X-Forwarded-For` and escape the limit.
