@@ -1,5 +1,5 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Not, Repository } from 'typeorm';
@@ -12,7 +12,7 @@ import {
   RequestQueue,
 } from 'crawlee';
 import { MemoryStorage } from '@crawlee/memory-storage';
-import type { Page } from 'playwright';
+import type { Browser, BrowserContext, Page } from 'playwright';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 import { ScanStatus } from '../enums/scan-status.enum';
@@ -78,6 +78,19 @@ const CRAWL_HANDLER_TIMEOUT_SECS = PAGE_DEADLINE_MS / 1000 + 60;
 
 /** A page's browser work outlived the page deadline; the page was closed. */
 export class PageDeadlineError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = new.target.name;
+  }
+}
+
+/**
+ * The browser went away while pages were being scanned (a crash, a restart of
+ * the remote Playwright server, or a shutdown closing it). The page results
+ * are partial, so the attempt fails — BullMQ retries it with a new browser —
+ * instead of completing.
+ */
+export class ScanInterruptedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = new.target.name;
@@ -160,7 +173,7 @@ function resolveScanConcurrency(): number {
 
 @Injectable()
 @Processor(SCAN_QUEUE_NAME, { concurrency: resolveScanConcurrency() })
-export class ScanProcessor extends WorkerHost {
+export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
   /** Structured service logger for scan processing lifecycle events. */
   private readonly logger = new Logger(ScanProcessor.name);
   /** {@link PAGE_DEADLINE_MS}; an instance field so real-browser tests can shorten it. */
@@ -186,6 +199,28 @@ export class ScanProcessor extends WorkerHost {
     private readonly agentAudit: AgentAuditService,
   ) {
     super();
+  }
+
+  /**
+   * Closes the BullMQ worker on shutdown: it takes no new jobs and waits for
+   * the active ones to finish. Nest runs every onModuleDestroy hook before any
+   * onApplicationShutdown hook, so the browser (BrowserService), the database
+   * and Redis are still available to the active scans. BullModule would close
+   * the worker only in its own onApplicationShutdown, after BrowserService
+   * closed the browser under the running scans.
+   *
+   * A scan that outlives the container's stop grace period is killed with the
+   * process; its job stalls and BullMQ runs it again after the restart.
+   */
+  async onModuleDestroy(): Promise<void> {
+    let worker: WorkerHost['worker'];
+    try {
+      worker = this.worker;
+    } catch {
+      return; // never registered with BullMQ (e.g. in tests)
+    }
+    this.logger.log('Closing the scan worker; waiting for active scans');
+    await worker.close();
   }
 
   /**
@@ -495,8 +530,9 @@ export class ScanProcessor extends WorkerHost {
         tasks,
         this.config.crawlConcurrency,
         async (task) => {
-          // Stop early if the scan was cancelled out of band.
-          if (await isCanceled()) {
+          // Stop early if the scan was cancelled out of band, or once the
+          // browser is gone (the attempt fails after the loop).
+          if ((await isCanceled()) || !browser.isConnected()) {
             return;
           }
           // Re-checked at scan time: DNS may have changed since creation.
@@ -544,8 +580,9 @@ export class ScanProcessor extends WorkerHost {
       );
       await progressWriter.flush(progress);
     } finally {
-      await context.close();
+      await this.closeContext(context, scan.id);
     }
+    this.assertBrowserSurvived(browser, scan.id);
 
     return progress;
   }
@@ -759,8 +796,9 @@ export class ScanProcessor extends WorkerHost {
         maxRequestRetries: 0,
         requestHandlerTimeoutSecs: CRAWL_HANDLER_TIMEOUT_SECS,
         requestHandler: async ({ request, enqueueLinks }) => {
-          // Stop processing further pages once cancelled; drains quietly.
-          if (await isCanceled()) {
+          // Stop processing further pages once cancelled, or once the browser
+          // is gone (the attempt fails after the crawl); drains quietly.
+          if ((await isCanceled()) || !browser.isConnected()) {
             return;
           }
           const key = request.uniqueKey;
@@ -861,15 +899,45 @@ export class ScanProcessor extends WorkerHost {
       await crawler.run();
       await progressWriter.flush(progress);
     } finally {
-      await context.close();
+      await this.closeContext(context, scan.id);
       await requestQueue.drop().catch((error: unknown) => {
         this.logger.warn(
           `Failed to drop temporary crawl queue for scan ${scan.id}: ${String(error)}`,
         );
       });
     }
+    this.assertBrowserSurvived(browser, scan.id);
 
     return progress;
+  }
+
+  /**
+   * Closes a scan's browser context without letting a failure replace the
+   * scan's own outcome: closing throws while the browser is going away.
+   */
+  private async closeContext(
+    context: BrowserContext,
+    scanId: number,
+  ): Promise<void> {
+    await context.close().catch((error: unknown) => {
+      this.logger.warn(
+        `Failed to close the browser context of scan ${scanId}: ${String(error)}`,
+      );
+    });
+  }
+
+  /**
+   * Fails the attempt when the browser disconnected during the page phase:
+   * pages that failed because of it are not failures of the site.
+   *
+   * @throws ScanInterruptedError When the browser is no longer connected.
+   */
+  private assertBrowserSurvived(browser: Browser, scanId: number): void {
+    if (!browser.isConnected()) {
+      throw new ScanInterruptedError(
+        `The browser disconnected while scan ${scanId} was loading pages`,
+      );
+    }
   }
 
   /**

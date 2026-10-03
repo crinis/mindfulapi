@@ -33,7 +33,11 @@ jest.mock('@crawlee/memory-storage', () => ({
 }));
 
 import { enqueueLinks as crawleeEnqueueLinks } from '@crawlee/core';
-import { PAGE_DEADLINE_MS, ScanProcessor } from './scan.processor';
+import {
+  PAGE_DEADLINE_MS,
+  ScanInterruptedError,
+  ScanProcessor,
+} from './scan.processor';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
 import {
   PageNavigationError,
@@ -194,6 +198,7 @@ describe('ScanProcessor', () => {
     where: jest.Mock;
     getOne: jest.Mock;
   };
+  let mockBrowser: { isConnected: jest.Mock };
   let mockBrowserService: { getBrowser: jest.Mock };
   let mockScanner: {
     createContext: jest.Mock;
@@ -251,7 +256,10 @@ describe('ScanProcessor', () => {
       save: jest.fn().mockResolvedValue(undefined),
     };
 
-    mockBrowserService = { getBrowser: jest.fn().mockResolvedValue({}) };
+    mockBrowser = { isConnected: jest.fn().mockReturnValue(true) };
+    mockBrowserService = {
+      getBrowser: jest.fn().mockResolvedValue(mockBrowser),
+    };
 
     mockContext = {
       close: jest.fn().mockResolvedValue(undefined),
@@ -358,7 +366,7 @@ describe('ScanProcessor', () => {
     await processor.process({ data: { scanId: 1 } } as any);
 
     expect(mockScanner.createContext).toHaveBeenCalledWith(
-      {},
+      mockBrowser,
       expect.objectContaining({
         rootElement: 'main',
         ruleIds: ['image-alt'],
@@ -1382,6 +1390,92 @@ describe('ScanProcessor', () => {
     });
   });
 
+  describe('browser lost mid-scan', () => {
+    const firstAttempt = {
+      data: { scanId: 1 },
+      attemptsMade: 0,
+      opts: { attempts: 3 },
+    };
+
+    /** The browser goes away while the given page is loading. */
+    const loseBrowserDuring = (mock: jest.Mock, url?: string) => {
+      mock.mockImplementation((_page: unknown, pageUrl: string) => {
+        if (url && pageUrl !== url) {
+          return Promise.resolve({
+            finalUrl: pageUrl,
+            issues: [],
+            status: 200,
+          });
+        }
+        mockBrowser.isConnected.mockReturnValue(false);
+        return Promise.reject(
+          new Error('Target page, context or browser has been closed'),
+        );
+      });
+    };
+
+    const statusWrites = () =>
+      mockScanRepo.update.mock.calls
+        .map(([, values]) => (values as { status?: ScanStatus }).status)
+        .filter(Boolean);
+
+    it('fails the attempt retryably instead of completing a single_url scan', async () => {
+      mockScanQb.getOne.mockResolvedValue(makeScan());
+      loseBrowserDuring(mockScanner.scanPage);
+
+      await expect(processor.process(firstAttempt as any)).rejects.toThrow(
+        ScanInterruptedError,
+      );
+
+      expect(statusWrites()).toEqual([ScanStatus.RUNNING, ScanStatus.PENDING]);
+    });
+
+    it('stops starting pages once the browser is gone', async () => {
+      mockScanQb.getOne.mockResolvedValue(
+        makeScan({
+          mode: ScanMode.URL_LIST,
+          targets: [
+            'https://example.com/a',
+            'https://example.com/b',
+            'https://example.com/c',
+          ],
+        }),
+      );
+      const config = { ...scanConfig(), crawlConcurrency: 1 };
+      processor = new ScanProcessor(
+        mockScanRepo as any,
+        mockIssueRepo as any,
+        mockBrowserService as any,
+        mockScanner as any,
+        mockBasicAuthCrypto as any,
+        config,
+        mockUrlPolicy as any,
+        mockAgentAudit as any,
+      );
+      loseBrowserDuring(mockScanner.scanPage, 'https://example.com/a');
+
+      await expect(processor.process(firstAttempt as any)).rejects.toThrow(
+        ScanInterruptedError,
+      );
+
+      expect(mockContext.newPage).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails the attempt retryably instead of completing a crawl', async () => {
+      mockScanQb.getOne.mockResolvedValue(
+        makeScan({ mode: ScanMode.CRAWL, targets: ['https://example.com'] }),
+      );
+      loseBrowserDuring(mockScanner.openPage);
+      mockCrawlerRunHandler = simulateCrawl(['https://example.com/']).run;
+
+      await expect(processor.process(firstAttempt as any)).rejects.toThrow(
+        ScanInterruptedError,
+      );
+
+      expect(statusWrites()).toEqual([ScanStatus.RUNNING, ScanStatus.PENDING]);
+    });
+  });
+
   it('marks scan PENDING when a non-final attempt fails', async () => {
     mockScanQb.getOne.mockResolvedValue(makeScan());
     mockBrowserService.getBrowser.mockRejectedValue(
@@ -1470,7 +1564,7 @@ describe('ScanProcessor', () => {
       'enc-pass',
     );
     expect(mockScanner.createContext).toHaveBeenCalledWith(
-      {},
+      mockBrowser,
       expect.objectContaining({
         basicAuth: {
           username: 'scanner-user',
@@ -1505,7 +1599,7 @@ describe('ScanProcessor', () => {
     await processor.process({ data: { scanId: 1 } } as any);
 
     expect(mockScanner.createContext).toHaveBeenCalledWith(
-      {},
+      mockBrowser,
       expect.objectContaining({
         basicAuth: expect.objectContaining({
           origin: 'https://staging.example.com:8443',
