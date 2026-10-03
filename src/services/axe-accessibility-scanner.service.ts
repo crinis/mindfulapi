@@ -96,12 +96,29 @@ const WS_POLICY_VIOLATION = 1008;
  * give for blocked names. The browser resolves names on its own and normally
  * fails such a request too (`net::ERR_NAME_NOT_RESOLVED`, or nothing listening
  * at the unspecified address), so a redirect hop to such a host is held against
- * its page only when the browser got a response.
+ * its page only when the browser reached the host (see checkRedirectHop).
  */
 const UNVETTED_CODES: ReadonlySet<TargetPolicyBlockCode | undefined> = new Set([
   'unresolvable',
   'lookup_failed',
   'null_route',
+]);
+
+/**
+ * Chromium's net errors (`request.failure().errorText`) for a request that
+ * never reached its host: the name did not resolve for the browser either, or
+ * no connection could be made. Any other failure — CORS (`net::ERR_FAILED`),
+ * ORB, a reset or empty response — may come after the host received the
+ * request and answered it.
+ */
+const NOT_REACHED_FAILURES: ReadonlySet<string> = new Set([
+  'net::ERR_NAME_NOT_RESOLVED',
+  'net::ERR_NAME_RESOLUTION_FAILED',
+  'net::ERR_CONNECTION_REFUSED',
+  'net::ERR_ADDRESS_INVALID',
+  'net::ERR_ADDRESS_UNREACHABLE',
+  'net::ERR_CONNECTION_TIMED_OUT',
+  'net::ERR_UNSAFE_PORT',
 ]);
 
 /** Target-policy violations the guard observed for one page. */
@@ -229,10 +246,12 @@ export class AxeAccessibilityScanner {
    *   synchronous; fully closing this needs an egress proxy.
    * - A hop to a host the policy has no verdict on (see {@link UNVETTED_CODES}:
    *   the name does not resolve, the lookup failed, or a DNS filter answered
-   *   `0.0.0.0`) counts only when the browser got a response from it: the
-   *   browser then reached a host the policy could not vet. When the browser
-   *   failed the hop as well, nothing reached the page, and the page stays
-   *   scannable, as a broken image or frame of an otherwise public page.
+   *   `0.0.0.0`) counts only when the browser reached that host: it got a
+   *   response, or the request failed after the host could have answered
+   *   (CORS, for example). When the browser could not reach the host either
+   *   ({@link NOT_REACHED_FAILURES}), nothing reached it or the page, and the
+   *   page stays scannable, as a broken image or frame of an otherwise
+   *   public page.
    * - WebSockets opened by pages are checked before they connect. This is
    *   Playwright's page-level `WebSocket` shim: it does not reach dedicated
    *   workers, and page script can get past it, so it is defence in depth,
@@ -435,10 +454,13 @@ export class AxeAccessibilityScanner {
    *
    * A host that is (or resolves to) a private or reserved address violates it
    * at once. A host the policy has no verdict on ({@link UNVETTED_CODES})
-   * violates it only once the browser got a response from it; the decision is
-   * then taken again, because a failed lookup is not cached and may succeed
-   * now. A hop the browser failed as well (or that was still open when its
-   * page closed) reached nothing.
+   * violates it once the browser reached it: it got a response, or the
+   * request failed in a way that can come after the host answered (CORS, for
+   * example, fails a request whose response the browser received). The
+   * decision is then taken again, because a failed lookup is not cached and
+   * may succeed now. A hop the browser could not reach either
+   * ({@link NOT_REACHED_FAILURES}), or that was still open when its page
+   * closed, reached nothing.
    *
    * @returns What the hop reached, for the violation message, or `null`.
    */
@@ -451,15 +473,18 @@ export class AxeAccessibilityScanner {
     if (decision.allowed) return null;
 
     if (UNVETTED_CODES.has(decision.code)) {
-      const answered = await request.response().then(
-        (response) => response !== null,
+      const reached = await request.response().then(
+        (response) =>
+          response !== null ||
+          !NOT_REACHED_FAILURES.has(request.failure()?.errorText ?? ''),
+        // The page (or worker) closed first: nothing can reach it any more.
         () => false,
       );
-      if (!answered) return null;
+      if (!reached) return null;
       decision = await guard.decide(url);
       if (decision.allowed) return null;
       if (UNVETTED_CODES.has(decision.code)) {
-        return `${url}, which answered the browser although the target policy could not vet it (${decision.reason ?? 'target not allowed'})`;
+        return `${url}, which the browser reached although the target policy could not vet it (${decision.reason ?? 'target not allowed'})`;
       }
     }
     return `blocked target ${url} (${decision.reason ?? 'target not allowed'})`;

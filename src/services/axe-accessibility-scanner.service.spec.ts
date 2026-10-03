@@ -402,6 +402,34 @@ describe('AxeAccessibilityScanner target-policy guard', () => {
         },
       );
 
+      it.each([
+        ['CORS withheld the response', 'net::ERR_FAILED'],
+        ['ORB withheld the response', 'net::ERR_BLOCKED_BY_ORB'],
+        ['the server closed the connection', 'net::ERR_EMPTY_RESPONSE'],
+        ['the failure is unknown', undefined],
+      ])(
+        'rejects the page when the request reached the host but %s',
+        async (_label, errorText) => {
+          const scanner = build(false);
+          await scanner.createContext(browser as any);
+          const page = context.newPage();
+
+          context.requestListener!(
+            makeRequest(
+              'http://browser-only.invalid/data',
+              page,
+              'https://a/r',
+              () => Promise.resolve(null),
+              errorText,
+            ),
+          );
+
+          await expect(scanner.assertPageAllowed(page)).rejects.toThrow(
+            /browser-only\.invalid.*could not be resolved/,
+          );
+        },
+      );
+
       it('rejects the page when the browser got a response from it', async () => {
         const scanner = build(false);
         await scanner.createContext(browser as any);

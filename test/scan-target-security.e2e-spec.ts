@@ -291,6 +291,17 @@ describe('Scan target security (real browser)', () => {
         // A host no resolver knows (RFC 6761 reserves .invalid), and one only
         // the browser resolves (see browserOnlyResolver).
         '/r/nxdomain': redirectTo(() => 'http://nxdomain.invalid/pixel.png'),
+        '/r/browser-only-data': redirectTo(
+          () => `http://browser-only.invalid:${internal.port}/secret`,
+        ),
+        // Its own script fetches through a redirect to that host; CORS then
+        // withholds the response from the script.
+        '/fetch-to-browser-only': htmlPage(
+          'Fetches from a host only the browser resolves',
+          "<script>window.outcome = fetch('/r/browser-only-data').then(" +
+            "() => 'read', (error) => 'failed: ' + error);</script>" +
+            '<img alt="Logo" src="/logo.png"><script src="/slow.js"></script>',
+        ),
         '/r/browser-only': redirectTo(
           () => `http://browser-only.invalid:${site.port}/logo.png`,
         ),
@@ -635,6 +646,33 @@ describe('Scan target security (real browser)', () => {
             site.requests.some(
               (request) =>
                 request.headers.host === `browser-only.invalid:${site.port}`,
+            ),
+          ).toBe(true);
+        } finally {
+          await context.close();
+        }
+      });
+
+      it('rejects a page whose fetch reached such a host although CORS withheld the response', async () => {
+        const { scanner } = buildProcessor(guarded);
+        const context = await scanner.createContext(browserOnlyResolver);
+        try {
+          const page = await context.newPage();
+
+          const scan = scanner.scanPage(
+            page,
+            siteUrl('/fetch-to-browser-only'),
+          );
+
+          await expect(scan).rejects.toThrow(TargetPolicyViolationError);
+          await expect(scan).rejects.toThrow('browser-only.invalid');
+          // The private server received and answered the request.
+          expect(
+            internal.requests.some(
+              (request) =>
+                request.url === '/secret' &&
+                request.headers.host ===
+                  `browser-only.invalid:${internal.port}`,
             ),
           ).toBe(true);
         } finally {
