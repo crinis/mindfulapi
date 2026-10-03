@@ -9,6 +9,70 @@ import { lookup } from 'dns/promises';
 import { BlockList, isIP } from 'net';
 import { scanConfig } from '../config/configuration';
 
+/**
+ * IPv6 /96 prefixes (as their first six 16-bit groups) whose low 32 bits carry
+ * the IPv4 address traffic is delivered to: IPv4-mapped (`::ffff:0:0/96`), the
+ * deprecated IPv4-compatible form (`::/96`), and the NAT64 well-known prefix
+ * (`64:ff9b::/96`, RFC 6052). Checking the embedded IPv4 address — rather than
+ * blocking the whole prefix — keeps public sites reachable from NAT64/DNS64
+ * networks while blocking e.g. `64:ff9b::a9fe:a9fe` (169.254.169.254).
+ */
+const IPV4_EMBEDDING_PREFIXES: ReadonlyArray<readonly number[]> = [
+  [0, 0, 0, 0, 0, 0xffff],
+  [0, 0, 0, 0, 0, 0],
+  [0x64, 0xff9b, 0, 0, 0, 0],
+];
+
+/**
+ * Expands a valid IPv6 address (compressed and/or with a dotted IPv4 tail)
+ * into its eight 16-bit groups, or returns `null` when it cannot be parsed.
+ */
+function expandIpv6(address: string): number[] | null {
+  let text = address.toLowerCase().replace(/%.*$/, '');
+  const dottedTail = /^(.*:)(\d+\.\d+\.\d+\.\d+)$/.exec(text);
+  if (dottedTail) {
+    if (isIP(dottedTail[2]) !== 4) return null;
+    const [a, b, c, d] = dottedTail[2].split('.').map(Number);
+    text = `${dottedTail[1]}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const parseGroups = (part: string): number[] =>
+    part === '' ? [] : part.split(':').map((group) => parseInt(group, 16));
+  const head = parseGroups(halves[0]);
+  const tail = halves.length === 2 ? parseGroups(halves[1]) : [];
+  const zeros = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  const groups = [...head, ...new Array<number>(zeros).fill(0), ...tail];
+
+  const valid =
+    zeros >= 0 &&
+    groups.length === 8 &&
+    groups.every(
+      (group) => Number.isInteger(group) && group >= 0 && group <= 0xffff,
+    );
+  return valid ? groups : null;
+}
+
+/**
+ * Returns the IPv4 address embedded in an IPv4-mapped, IPv4-compatible or
+ * NAT64 IPv6 address, or `null` for any other address.
+ */
+function embeddedIpv4(address: string): string | null {
+  const groups = expandIpv6(address);
+  if (!groups) return null;
+  const embeds = IPV4_EMBEDDING_PREFIXES.some((prefix) =>
+    prefix.every((group, index) => groups[index] === group),
+  );
+  if (!embeds) return null;
+  return [
+    groups[6] >> 8,
+    groups[6] & 0xff,
+    groups[7] >> 8,
+    groups[7] & 0xff,
+  ].join('.');
+}
+
 /** Outcome of a target policy check. */
 export interface TargetPolicyResult {
   /** Whether the URL may be fetched by the scanner. */
@@ -63,7 +127,9 @@ export class UrlPolicyService {
     this.blockList.addSubnet('224.0.0.0', 4, 'ipv4'); // multicast
     this.blockList.addSubnet('240.0.0.0', 4, 'ipv4'); // reserved + broadcast
 
-    // IPv6 reserved / special-purpose ranges.
+    // IPv6 reserved / special-purpose ranges. IPv4-mapped, IPv4-compatible and
+    // NAT64 addresses are additionally checked via their embedded IPv4
+    // address (see IPV4_EMBEDDING_PREFIXES).
     this.blockList.addSubnet('::', 128, 'ipv6'); // unspecified
     this.blockList.addSubnet('::1', 128, 'ipv6'); // loopback
     this.blockList.addSubnet('fc00::', 7, 'ipv6'); // unique local
@@ -156,18 +222,21 @@ export class UrlPolicyService {
   }
 
   /**
-   * Checks one IP address (v4, v6, or IPv4-mapped v6) against the block list.
+   * Checks one IP address against the block list. IPv6 addresses that embed an
+   * IPv4 address (IPv4-mapped, IPv4-compatible, NAT64) are also checked against
+   * the IPv4 ranges via that embedded address.
    */
   private checkAddress(
     address: string,
     sourceHost?: string,
   ): TargetPolicyResult {
-    // Unwrap IPv4-mapped IPv6 (::ffff:a.b.c.d) so the IPv4 ranges apply.
-    const mappedV4 = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)?.[1];
-    const candidate = mappedV4 ?? address;
-    const family = isIP(candidate) === 6 ? 'ipv6' : 'ipv4';
+    const isV6 = isIP(address) === 6;
+    const embeddedV4 = isV6 ? embeddedIpv4(address) : null;
+    const blocked =
+      this.blockList.check(address, isV6 ? 'ipv6' : 'ipv4') ||
+      (embeddedV4 !== null && this.blockList.check(embeddedV4, 'ipv4'));
 
-    if (this.blockList.check(candidate, family)) {
+    if (blocked) {
       const via = sourceHost ? ` (resolved from ${sourceHost})` : '';
       return {
         allowed: false,

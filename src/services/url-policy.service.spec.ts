@@ -60,6 +60,29 @@ describe('UrlPolicyService', () => {
       );
       expect(result.allowed).toBe(true);
     });
+
+    // IPv6 forms that carry an IPv4 address in their low 32 bits: NAT64
+    // (64:ff9b::/96) is translated to that IPv4 address by a NAT64 gateway,
+    // and the deprecated IPv4-compatible form (::/96) embeds one directly.
+    it.each([
+      ['NAT64 link-local metadata', 'http://[64:ff9b::a9fe:a9fe]/'],
+      ['NAT64 in dotted form', 'http://[64:ff9b::10.0.0.1]/'],
+      ['IPv4-compatible loopback', 'http://[::7f00:1]/'],
+      ['IPv4-compatible RFC 1918', 'http://[::192.168.1.10]/'],
+      ['IPv4-mapped in hex form', 'http://[::ffff:a9fe:a9fe]/'],
+    ])('blocks %s (%s)', async (_label, url) => {
+      const result = await makeService().isAllowedTarget(url);
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('private or reserved');
+    });
+
+    it('allows NAT64 addresses that embed a public IPv4 address', async () => {
+      // 93.184.216.34 — NAT64/DNS64 networks reach IPv4-only sites this way.
+      const result = await makeService().isAllowedTarget(
+        'http://[64:ff9b::5db8:d822]/',
+      );
+      expect(result.allowed).toBe(true);
+    });
   });
 
   describe('hostname targets', () => {
@@ -95,6 +118,17 @@ describe('UrlPolicyService', () => {
         'https://evil.example/',
       );
       expect(result.allowed).toBe(false);
+    });
+
+    it('blocks hostnames resolving to a NAT64 address embedding a private IPv4', async () => {
+      mockLookup.mockResolvedValue([
+        { address: '64:ff9b::a9fe:a9fe', family: 6 },
+      ]);
+      const result = await makeService().isAllowedTarget(
+        'https://evil.example/',
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('64:ff9b::a9fe:a9fe');
     });
 
     it('blocks unresolvable hostnames', async () => {
