@@ -324,8 +324,8 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CLEANUP_ENABLED` | `true` | Scheduled deletion of old scans. `POST /v1/cleanup` works regardless |
-| `CLEANUP_RETENTION_DAYS` | `30` | Days to keep scans (0–36500). `0` deletes every scan on each run |
+| `CLEANUP_ENABLED` | `true` | Scheduled deletion of old finished scans. `POST /v1/cleanup` works regardless |
+| `CLEANUP_RETENTION_DAYS` | `30` | Days to keep finished scans (0–36500). `0` deletes every finished scan (completed, failed or canceled) on each run. Pending, running and analyzing scans are never deleted |
 | `CLEANUP_INTERVAL` | `0 2 * * *` | Cron schedule for cleanup: five fields, or six with seconds first. An invalid expression stops the server at startup |
 
 **AI audit** (see [AI accessibility audit](#ai-accessibility-audit-optional))
