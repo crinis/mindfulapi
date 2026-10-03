@@ -438,7 +438,7 @@ describe('Scan target security (real browser)', () => {
       }
     });
 
-    it('removes SharedWorker, whose requests Playwright cannot route', async () => {
+    it('removes page APIs whose connections Playwright cannot route', async () => {
       const { scanner } = buildProcessor(guarded);
       const context = await scanner.createContext(
         await browserService.getBrowser(),
@@ -448,15 +448,29 @@ describe('Scan target security (real browser)', () => {
         await page.goto(siteUrl('/index.html'));
 
         const available = await page.evaluate(() => {
+          const names = [
+            'SharedWorker',
+            'WebSocketStream',
+            'WebTransport',
+            'RTCPeerConnection',
+            'webkitRTCPeerConnection',
+          ];
           const frame = document.createElement('iframe');
           document.body.append(frame);
-          const frameWindow = frame.contentWindow as unknown as {
-            SharedWorker?: unknown;
+          const scopes = {
+            page: globalThis as unknown as Record<string, unknown>,
+            frame: frame.contentWindow as unknown as Record<string, unknown>,
           };
-          return [typeof SharedWorker, typeof frameWindow.SharedWorker];
+          return Object.fromEntries(
+            Object.entries(scopes).map(([where, scope]) => [
+              where,
+              names.filter((name) => typeof scope[name] !== 'undefined'),
+            ]),
+          );
         });
 
-        expect(available).toEqual(['undefined', 'undefined']);
+        expect(available).toEqual({ page: [], frame: [] });
+        expect(internal.requests).toEqual([]);
       } finally {
         await context.close();
       }

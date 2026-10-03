@@ -121,15 +121,22 @@ describe('AxeAccessibilityScanner target-policy guard', () => {
     );
   });
 
-  it('removes SharedWorker, whose requests Playwright never routes', async () => {
+  it('removes page APIs whose connections Playwright never routes', async () => {
     await build(false).createContext(browser as any);
     expect(context.addInitScript).toHaveBeenCalledTimes(1);
 
+    const names = [
+      'SharedWorker',
+      'WebSocketStream',
+      'WebTransport',
+      'RTCPeerConnection',
+      'webkitRTCPeerConnection',
+    ];
     const [script] = context.addInitScript.mock.calls[0] as [() => void];
-    const scope = globalThis as { SharedWorker?: unknown };
-    scope.SharedWorker = class {};
+    const scope = globalThis as Record<string, unknown>;
+    for (const name of names) scope[name] = class {};
     script();
-    expect(scope.SharedWorker).toBeUndefined();
+    expect(names.filter((name) => name in scope)).toEqual([]);
   });
 
   it('scopes Basic Auth credentials to their origin', async () => {

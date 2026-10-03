@@ -181,10 +181,16 @@ export class AxeAccessibilityScanner {
    *   violating and closes it. {@link assertPageAllowed} then rejects the page,
    *   so nothing it loaded is analysed, stored, or sent to the AI audit. The
    *   hop request itself has already been sent by then.
-   * - WebSockets opened by pages are checked before they connect.
-   * - `SharedWorker` is removed from every document: Playwright neither routes
-   *   nor reports shared-worker requests. Service workers stay enabled because
-   *   their requests are routed (see {@link createContext}).
+   * - WebSockets opened by pages are checked before they connect. This is
+   *   Playwright's page-level `WebSocket` shim: it does not reach dedicated
+   *   workers, and page script can get past it, so it is defence in depth,
+   *   not a boundary (see the README on the Playwright run-server).
+   * - APIs whose connections Playwright neither routes nor reports are removed
+   *   from every document: `SharedWorker`, `WebSocketStream`, `WebTransport`
+   *   and the WebRTC peer connection. Init scripts do not run in dedicated
+   *   workers, which keep `WebSocket`, `WebSocketStream` and `WebTransport`.
+   *   Service workers stay enabled because their requests are routed (see
+   *   {@link createContext}).
    *
    * Decisions are cached per host for the context's lifetime, so each distinct
    * host is resolved at most once. The browser resolves DNS independently of
@@ -203,8 +209,18 @@ export class AxeAccessibilityScanner {
     await context.routeWebSocket(/.*/, (webSocket) =>
       this.guardWebSocket(webSocket, guard),
     );
+    // Serialized into every document, so it must stay self-contained.
     await context.addInitScript(() => {
-      delete (globalThis as { SharedWorker?: unknown }).SharedWorker;
+      const scope = globalThis as Record<string, unknown>;
+      for (const name of [
+        'SharedWorker',
+        'WebSocketStream',
+        'WebTransport',
+        'RTCPeerConnection',
+        'webkitRTCPeerConnection',
+      ]) {
+        delete scope[name];
+      }
     });
   }
 
