@@ -116,6 +116,11 @@ interface PageGuardState {
   markViolated: () => void;
   /** Policy checks still in flight for requests attributed to the page. */
   pending: Set<Promise<void>>;
+  /**
+   * Origins of the documents the page's frames navigated to: the service
+   * workers of these origins may control a frame of the page.
+   */
+  origins: Set<string>;
 }
 
 /** Target-policy guard state shared by all pages of one browser context. */
@@ -127,6 +132,30 @@ interface ContextGuard {
   decide(url: string): Promise<TargetPolicyResult>;
   /** Violation state of a page, created on first use. */
   stateOf(page: Page): PageGuardState;
+  /**
+   * Policy checks still in flight for redirect hops of service-worker
+   * requests, with the worker's origin.
+   */
+  workerChecks: Map<Promise<void>, string>;
+}
+
+/** Who a request is held against when one of its redirect hops is blocked. */
+type RequestOwner =
+  /** The page whose frame issued the request. */
+  | { pages: Page[] }
+  /** A service worker: the pages its origin's documents are loaded in. */
+  | { workerOrigin: string };
+
+/** Origin of an HTTP(S) URL, or null for other URLs. */
+function httpOriginOf(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+      ? parsed.origin
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -243,9 +272,10 @@ export class AxeAccessibilityScanner {
     this.guards.set(context, guard);
 
     await context.route('**/*', (route) => this.guardRequest(route, guard));
-    context.on('request', (request) =>
-      this.guardRedirectHop(request, context, guard),
-    );
+    context.on('request', (request) => {
+      this.recordNavigation(request, guard);
+      this.guardRedirectHop(request, context, guard);
+    });
     await context.routeWebSocket(/.*/, (webSocket) =>
       this.guardWebSocket(webSocket, guard),
     );
@@ -299,6 +329,7 @@ export class AxeAccessibilityScanner {
         decisionByHost.set(host, decision);
         return decision;
       },
+      workerChecks: new Map(),
       stateOf: (page) => {
         let state = stateByPage.get(page);
         if (!state) {
@@ -306,7 +337,12 @@ export class AxeAccessibilityScanner {
           const violated = new Promise<void>((resolve) => {
             markViolated = resolve;
           });
-          state = { pending: new Set(), violated, markViolated };
+          state = {
+            pending: new Set(),
+            origins: new Set(),
+            violated,
+            markViolated,
+          };
           stateByPage.set(page, state);
         }
         return state;
@@ -339,9 +375,28 @@ export class AxeAccessibilityScanner {
   }
 
   /**
+   * Request listener: records the origin of every document a page's frames
+   * navigate to, which service-worker requests are attributed by (see
+   * {@link ownerOf}).
+   */
+  private recordNavigation(request: Request, guard: ContextGuard): void {
+    if (!request.isNavigationRequest()) return;
+    const origin = httpOriginOf(request.url());
+    if (!origin) return;
+    let page: Page | null;
+    try {
+      page = request.frame().page();
+    } catch {
+      return; // e.g. a popup's first navigation, before its frame exists
+    }
+    if (page) guard.stateOf(page).origins.add(origin);
+  }
+
+  /**
    * Request listener: checks redirect hops, which bypass the route handler,
-   * and marks the originating page as violating when a hop is blocked. First
-   * hops are left to the route handler, which already aborted blocked ones.
+   * and marks the pages the request is held against ({@link ownerOf}) as
+   * violating when a hop is blocked. First hops are left to the route
+   * handler, which already aborted blocked ones.
    */
   private guardRedirectHop(
     request: Request,
@@ -354,18 +409,29 @@ export class AxeAccessibilityScanner {
       return;
     }
 
-    const pages = this.pagesOf(request, context);
+    const owner = this.ownerOf(request, context);
     const check = this.checkRedirectHop(request, url, guard).then(
       (violation) => {
         if (!violation) return;
         const reason = `redirect from ${redirectedFrom.url()} reached ${violation}`;
+        // A worker's pages are looked up now: one may have loaded a document
+        // of its origin while the check ran.
+        const pages =
+          'workerOrigin' in owner
+            ? this.pagesOnOrigin(context, guard, owner.workerOrigin)
+            : owner.pages;
         for (const page of pages) {
           this.flagViolation(guard, page, reason);
         }
       },
     );
 
-    for (const page of pages) {
+    if ('workerOrigin' in owner) {
+      guard.workerChecks.set(check, owner.workerOrigin);
+      void check.finally(() => guard.workerChecks.delete(check));
+      return;
+    }
+    for (const page of owner.pages) {
       const { pending } = guard.stateOf(page);
       pending.add(check);
       void check.finally(() => pending.delete(check));
@@ -408,17 +474,51 @@ export class AxeAccessibilityScanner {
   }
 
   /**
-   * Page that issued a request; every open page of the context when the
-   * request cannot be attributed (e.g. a worker without a frame).
+   * Who a request is held against:
+   *
+   * - the page whose frame issued it;
+   * - for a service worker, the pages that loaded a document of the worker's
+   *   origin in any frame. Playwright exposes neither a worker's scope nor
+   *   the clients it controls, but a service worker controls documents of
+   *   its own origin only, so these pages include every page it can hand a
+   *   response to (and, in a crawl of one origin, every page of the crawl);
+   * - every open page of the context when the request cannot be attributed
+   *   (e.g. the first navigation of a popup, issued before its frame exists).
    */
-  private pagesOf(request: Request, context: BrowserContext): Page[] {
+  private ownerOf(request: Request, context: BrowserContext): RequestOwner {
+    const worker = request.serviceWorker();
+    const workerOrigin = worker ? httpOriginOf(worker.url()) : null;
+    if (workerOrigin) return { workerOrigin };
     try {
       const page = request.frame().page();
-      if (page) return [page];
+      if (page) return { pages: [page] };
     } catch {
-      // Requests without a frame (service workers) throw here.
+      // No frame: see above.
     }
-    return context.pages();
+    return { pages: context.pages() };
+  }
+
+  /** Open pages that loaded a document of `origin` in any frame. */
+  private pagesOnOrigin(
+    context: BrowserContext,
+    guard: ContextGuard,
+    origin: string,
+  ): Page[] {
+    return context
+      .pages()
+      .filter((page) => this.hasLoadedOrigin(guard, page, origin));
+  }
+
+  /** Whether a frame of the page navigated to, or shows, `origin`. */
+  private hasLoadedOrigin(
+    guard: ContextGuard,
+    page: Page,
+    origin: string,
+  ): boolean {
+    return (
+      guard.stateOf(page).origins.has(origin) ||
+      page.frames().some((frame) => httpOriginOf(frame.url()) === origin)
+    );
   }
 
   /** Records the first violation of a page and closes it to stop it loading. */
@@ -527,13 +627,22 @@ export class AxeAccessibilityScanner {
     if (!guard) return;
 
     const state = guard.stateOf(page);
-    // A check may wait for the outcome of its request (see checkRedirectHop);
-    // a violation found meanwhile is reported without waiting for the rest.
-    while (!state.violation && state.pending.size > 0) {
-      await Promise.race([
-        Promise.allSettled([...state.pending]),
-        state.violated,
-      ]);
+    // Checks of the page's requests, and of service-worker requests of an
+    // origin the page loaded. A check may wait for the outcome of its request
+    // (see checkRedirectHop); a violation found meanwhile is reported without
+    // waiting for the rest.
+    const inFlight = () => [
+      ...state.pending,
+      ...[...guard.workerChecks]
+        .filter(([, origin]) => this.hasLoadedOrigin(guard, page, origin))
+        .map(([check]) => check),
+    ];
+    for (
+      let checks = inFlight();
+      !state.violation && checks.length > 0;
+      checks = inFlight()
+    ) {
+      await Promise.race([Promise.allSettled(checks), state.violated]);
     }
     if (state.violation) {
       await state.closing;

@@ -81,6 +81,7 @@ function makeContext() {
       const page = {
         context: () => context,
         url: jest.fn().mockReturnValue('https://example.com/'),
+        frames: () => [{ url: () => page.url() as string }],
         goto: jest.fn().mockResolvedValue({ status: () => 200 }),
         close: jest.fn().mockResolvedValue(undefined),
       };
@@ -115,6 +116,28 @@ function makeRequest(
     serviceWorker: () => null,
     isNavigationRequest: () => false,
     response: jest.fn(response),
+  };
+}
+
+/** A navigation request of one of the page's frames. */
+function makeNavigation(url: string, page: unknown) {
+  return { ...makeRequest(url, page), isNavigationRequest: () => true };
+}
+
+/** A request a service worker made: it has no frame. */
+function makeWorkerRequest(
+  url: string,
+  workerUrl: string,
+  redirectedFrom?: string,
+) {
+  return {
+    ...makeRequest(url, null, redirectedFrom),
+    frame: () => {
+      throw new Error(
+        'Service Worker requests do not have an associated frame.',
+      );
+    },
+    serviceWorker: () => ({ url: () => workerUrl }),
   };
 }
 
@@ -468,8 +491,9 @@ describe('AxeAccessibilityScanner target-policy guard', () => {
       const second = context.newPage();
       const orphan = {
         ...makeRequest('http://10.0.0.5/', null, 'https://example.com/r'),
+        // e.g. the first navigation of a popup
         frame: () => {
-          throw new Error('Service Worker requests do not have a frame');
+          throw new Error('Frame for this navigation request is not available');
         },
       };
 
@@ -481,6 +505,88 @@ describe('AxeAccessibilityScanner target-policy guard', () => {
       await expect(scanner.assertPageAllowed(second)).rejects.toThrow(
         TargetPolicyViolationError,
       );
+    });
+
+    describe('made by a service worker', () => {
+      /** Opens a page whose main frame navigated to `url`. */
+      const pageAt = (url: string) => {
+        const page = context.newPage();
+        page.url.mockReturnValue(url);
+        context.requestListener!(makeNavigation(url, page));
+        return page;
+      };
+
+      it("rejects only the pages that loaded a document of the worker's origin", async () => {
+        const scanner = build(false);
+        await scanner.createContext(browser as any);
+        const client = pageAt('https://a.example/');
+        const other = pageAt('https://b.example/');
+        // Only a frame of this page is on the worker's origin.
+        const embedder = pageAt('https://c.example/');
+        context.requestListener!(
+          makeNavigation('https://a.example/widget', embedder),
+        );
+
+        context.requestListener!(
+          makeWorkerRequest(
+            'http://10.0.0.5/',
+            'https://a.example/sw.js',
+            'https://a.example/r',
+          ),
+        );
+
+        await expect(scanner.assertPageAllowed(client)).rejects.toThrow(
+          TargetPolicyViolationError,
+        );
+        await expect(scanner.assertPageAllowed(embedder)).rejects.toThrow(
+          TargetPolicyViolationError,
+        );
+        await expect(scanner.assertPageAllowed(other)).resolves.toBeUndefined();
+        expect(other.close).not.toHaveBeenCalled();
+      });
+
+      it('rejects no page when no open page loaded its origin', async () => {
+        const scanner = build(false);
+        await scanner.createContext(browser as any);
+        const other = pageAt('https://b.example/');
+
+        context.requestListener!(
+          makeWorkerRequest(
+            'http://10.0.0.5/',
+            'https://a.example/sw.js',
+            'https://a.example/r',
+          ),
+        );
+        await flush();
+
+        await expect(scanner.assertPageAllowed(other)).resolves.toBeUndefined();
+        expect(other.close).not.toHaveBeenCalled();
+      });
+
+      it('makes a page that loads the origin during the check wait for it', async () => {
+        const scanner = build(false);
+        await scanner.createContext(browser as any);
+        let answer!: (result: unknown) => void;
+        urlPolicy.isAllowedTarget.mockReturnValueOnce(
+          new Promise((resolve) => {
+            answer = resolve;
+          }),
+        );
+        context.requestListener!(
+          makeWorkerRequest(
+            'http://10.0.0.5/',
+            'https://a.example/sw.js',
+            'https://a.example/r',
+          ),
+        );
+        const late = pageAt('https://a.example/late');
+
+        const check = scanner.assertPageAllowed(late);
+        await flush();
+        answer(policyDecision('http://10.0.0.5/'));
+
+        await expect(check).rejects.toThrow(TargetPolicyViolationError);
+      });
     });
   });
 

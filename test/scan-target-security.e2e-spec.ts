@@ -326,6 +326,15 @@ describe('Scan target security (real browser)', () => {
           res.setHeader('content-type', 'application/javascript');
           res.end('onconnect = () => {};');
         },
+        '/r/sw-to-internal': redirectTo(() => internalUrl('/secret')),
+        '/sw-redirect.js': (_req, res) => {
+          res.setHeader('content-type', 'application/javascript');
+          res.end(
+            "self.addEventListener('install', (event) => {" +
+              " event.waitUntil(fetch('/r/sw-to-internal', { mode: 'no-cors' }).catch(() => {}));" +
+              ' self.skipWaiting(); });',
+          );
+        },
         '/sw.js': (_req, res) => {
           res.setHeader('content-type', 'application/javascript');
           res.end(
@@ -589,6 +598,45 @@ describe('Scan target security (real browser)', () => {
 
         expect(registered).toBe(true);
         expect(internal.requests).toEqual([]);
+      } finally {
+        await context.close();
+      }
+    });
+
+    it("rejects only the pages on a service worker's origin when its redirect hop is blocked", async () => {
+      const { scanner } = buildProcessor(guarded);
+      const context = await scanner.createContext(
+        await browserService.getBrowser(),
+      );
+      try {
+        // A page of another allowed origin: the internal server by address.
+        const bystander = await context.newPage();
+        await bystander.goto(`http://127.0.0.1:${internal.port}/frame`);
+        const client = await context.newPage();
+        await client.goto(siteUrl('/index.html'));
+
+        // The guard may close the page while it registers the worker.
+        await client
+          .evaluate(() =>
+            ServiceWorkerContainer.prototype.register.call(
+              navigator.serviceWorker,
+              '/sw-redirect.js',
+            ),
+          )
+          .catch(() => undefined);
+        for (let waited = 0; !client.isClosed() && waited < 5000; ) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          waited += 50;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        await expect(scanner.assertPageAllowed(client)).rejects.toThrow(
+          internalUrl('/secret'),
+        );
+        expect(bystander.isClosed()).toBe(false);
+        await expect(
+          scanner.assertPageAllowed(bystander),
+        ).resolves.toBeUndefined();
       } finally {
         await context.close();
       }
