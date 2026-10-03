@@ -452,7 +452,13 @@ export class ScanProcessor extends WorkerHost {
     const excludeGlobs = scan.crawlExcludeGlobs || [];
     const concurrency = this.config.crawlConcurrency;
 
-    const seen = new Set(seedUrls);
+    /**
+     * URLs the request queue holds (handled, in progress or pending): the
+     * seeds plus every link the queue accepted. Only links that passed the
+     * strategy and glob filters get here, so a link one seed's scope rejects
+     * can still be followed from another seed's pages.
+     */
+    const queuedUrls = new Set(seedUrls);
     /** Normalized final URLs already analysed, so redirect aliases scan once. */
     const scannedFinalUrls = new Set<string>();
     const crawlConfig = new Configuration({
@@ -575,7 +581,13 @@ export class ScanProcessor extends WorkerHost {
             }
 
             // Link discovery phase — non-fatal; failures do not affect counters.
-            if (discoverLinks && depth < maxDepth && seen.size < maxPages) {
+            // Every queued URL counts towards maxPages, so a full queue has no
+            // room for more links.
+            if (
+              discoverLinks &&
+              depth < maxDepth &&
+              queuedUrls.size < maxPages
+            ) {
               let hrefs: string[] = [];
               try {
                 // The page may have reached a blocked target since its scan
@@ -592,9 +604,19 @@ export class ScanProcessor extends WorkerHost {
                 );
               }
 
-              if (hrefs.length > 0) {
-                await enqueueLinks({
-                  urls: hrefs,
+              // Offer each link once: Crawlee adds already-queued URLs in
+              // batches sized to the remaining page budget and sleeps a second
+              // between batches, so re-offering a site's navigation on every
+              // page would stall a nearly full crawl.
+              const links = normalizeAndDedupeHttpUrls(hrefs).filter(
+                (link) => !queuedUrls.has(link),
+              );
+              if (links.length > 0) {
+                // Crawlee filters by strategy and globs after this transform
+                // and caps the additions at the remaining maxRequestsPerCrawl
+                // budget, so the transform must not spend any budget itself.
+                const { processedRequests } = await enqueueLinks({
+                  urls: links,
                   baseUrl: scopeUrl,
                   userData: { scopeUrl },
                   strategy,
@@ -603,10 +625,6 @@ export class ScanProcessor extends WorkerHost {
                   transformRequestFunction: (nextRequest) => {
                     const normalized = normalizeHttpUrl(nextRequest.url);
                     if (!normalized) return false;
-                    if (seen.has(normalized)) return false;
-                    if (seen.size >= maxPages) return false;
-
-                    seen.add(normalized);
                     nextRequest.url = normalized;
                     nextRequest.uniqueKey = normalized;
                     nextRequest.userData = {
@@ -616,6 +634,9 @@ export class ScanProcessor extends WorkerHost {
                     return nextRequest;
                   },
                 });
+                for (const { uniqueKey } of processedRequests) {
+                  queuedUrls.add(uniqueKey);
+                }
               }
             }
           } finally {

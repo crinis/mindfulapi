@@ -9,10 +9,7 @@ let mockCrawlerRunHandler:
   | null;
 
 jest.mock('crawlee', () => ({
-  EnqueueStrategy: {
-    All: 'all',
-    SameHostname: 'same-hostname',
-  },
+  EnqueueStrategy: jest.requireActual('@crawlee/core').EnqueueStrategy,
   Configuration: class MockConfiguration {
     constructor(readonly opts?: any) {}
   },
@@ -35,6 +32,7 @@ jest.mock('@crawlee/memory-storage', () => ({
   },
 }));
 
+import { enqueueLinks as crawleeEnqueueLinks } from '@crawlee/core';
 import { ScanProcessor } from './scan.processor';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
 import {
@@ -92,63 +90,93 @@ interface SimulatedRequest {
 }
 
 /**
- * Drives the processor's requestHandler like Crawlee's BasicCrawler: a FIFO
- * queue seeded with `seeds` and an enqueueLinks that, like Crawlee, applies
- * `userData`, filters by strategy against `baseUrl` (simplified: hostname for
- * same-hostname) and by globs, then calls transformRequestFunction.
+ * Drives the processor's requestHandler like Crawlee's BasicCrawler, with
+ * Crawlee's real `enqueueLinks` (transformRequestFunction first, then the
+ * strategy/glob/exclude filters) over an in-memory request queue that keeps
+ * Crawlee's `addRequestsBatched` contract: duplicates by `uniqueKey` are
+ * reported as already present and never consume the `maxNewRequests` budget.
+ *
+ * Like BasicCrawler, the crawl stops after `maxRequestsPerCrawl` handled
+ * requests, and each enqueue is capped at the requests still allowed
+ * (`maxRequestsPerCrawl` minus handled and pending requests).
  */
 function simulateCrawl(seeds: string[]) {
   const handled: SimulatedRequest[] = [];
   const enqueueCalls: Array<{ baseUrl?: string; urls: string[] }> = [];
+  const pending: SimulatedRequest[] = [];
+  const known = new Set<string>();
+
+  const requestQueue = {
+    addRequestsBatched: (
+      requests: Array<{
+        url: string;
+        uniqueKey: string;
+        userData?: Record<string, unknown>;
+      }>,
+      options: { maxNewRequests?: number } = {},
+    ) => {
+      let budget = options.maxNewRequests ?? Infinity;
+      const addedRequests: Array<{
+        uniqueKey: string;
+        requestId: string;
+        wasAlreadyPresent: boolean;
+        wasAlreadyHandled: boolean;
+      }> = [];
+      const requestsOverLimit: typeof requests = [];
+      for (const request of requests) {
+        const wasAlreadyPresent = known.has(request.uniqueKey);
+        if (!wasAlreadyPresent && budget <= 0) {
+          requestsOverLimit.push(request);
+          continue;
+        }
+        if (!wasAlreadyPresent) {
+          budget -= 1;
+          known.add(request.uniqueKey);
+          pending.push({
+            url: request.url,
+            uniqueKey: request.uniqueKey,
+            userData: request.userData ?? {},
+          });
+        }
+        addedRequests.push({
+          uniqueKey: request.uniqueKey,
+          requestId: request.uniqueKey,
+          wasAlreadyPresent,
+          wasAlreadyHandled: false,
+        });
+      }
+      return Promise.resolve({
+        addedRequests,
+        waitForAllRequestsToBeAdded: Promise.resolve([]),
+        requestsOverLimit,
+      });
+    },
+  };
 
   const run = async ({
     requestHandler,
+    maxRequestsPerCrawl = Infinity,
   }: {
     requestHandler: (context: any) => Promise<void>;
+    maxRequestsPerCrawl?: number;
   }) => {
-    const pending: SimulatedRequest[] = seeds.map((url) => ({
-      url,
-      uniqueKey: url,
-      userData: { depth: 0 },
-    }));
+    for (const url of seeds) {
+      known.add(url);
+      pending.push({ url, uniqueKey: url, userData: { depth: 0 } });
+    }
 
-    while (pending.length > 0) {
+    while (pending.length > 0 && handled.length < maxRequestsPerCrawl) {
       const request = pending.shift()!;
       handled.push(request);
       const enqueueLinks = (options: any) => {
         enqueueCalls.push({ baseUrl: options.baseUrl, urls: options.urls });
-        for (const href of options.urls || []) {
-          if (
-            options.strategy === 'same-hostname' &&
-            new URL(href).hostname !==
-              new URL(options.baseUrl ?? request.url).hostname
-          ) {
-            continue;
-          }
-          if (
-            options.globs &&
-            !options.globs.some((g: string) =>
-              href.startsWith(g.replace('/**', '')),
-            )
-          ) {
-            continue;
-          }
-          if (
-            options.exclude &&
-            options.exclude.some((g: string) =>
-              href.includes(g.replace('**/', '').replace('/**', '')),
-            )
-          ) {
-            continue;
-          }
-          const transformed = options.transformRequestFunction({
-            url: href,
-            userData: { ...(options.userData ?? {}) },
-          });
-          if (transformed) {
-            pending.push(transformed);
-          }
-        }
+        return crawleeEnqueueLinks({
+          requestQueue,
+          // BasicCrawler.calculateEnqueuedRequestLimit: every request known
+          // to the queue is either handled, in progress or pending.
+          limit: Math.max(0, maxRequestsPerCrawl - known.size),
+          ...options,
+        });
       };
       await requestHandler({ request, enqueueLinks });
     }
@@ -649,6 +677,163 @@ describe('ScanProcessor', () => {
       expect(storedPageUrls()).toEqual([
         'https://example.com/',
         'https://other.example.net/landing',
+      ]);
+    });
+  });
+
+  describe('crawl link budget', () => {
+    /** Serves `links[url]` as the hrefs of each page; every page loads as requested. */
+    const serveLinks = (links: Record<string, string[]>) => {
+      mockContext.newPage.mockImplementation(() => {
+        const page = {
+          currentUrl: 'about:blank',
+          url: jest.fn(() => page.currentUrl),
+          evaluate: jest.fn(() =>
+            Promise.resolve(links[page.currentUrl] ?? []),
+          ),
+          close: jest.fn().mockResolvedValue(undefined),
+        };
+        return Promise.resolve(page);
+      });
+      mockScanner.openPage.mockImplementation(
+        (page: { currentUrl: string }, url: string) => {
+          page.currentUrl = url;
+          return Promise.resolve({ finalUrl: url, status: 200 });
+        },
+      );
+    };
+
+    const range = (count: number, url: (i: number) => string) =>
+      Array.from({ length: count }, (_, i) => url(i));
+
+    it('spends the page budget only on links that pass the strategy filter', async () => {
+      mockScanQb.getOne.mockResolvedValue(
+        makeScan({
+          mode: ScanMode.CRAWL,
+          targets: ['https://example.com'],
+          crawlMaxPages: 10,
+          crawlMaxDepth: 3,
+          crawlStrategy: CrawlStrategy.SameHostname,
+        }),
+      );
+      const internal = range(5, (i) => `https://example.com/page-${i}`);
+      serveLinks({
+        'https://example.com/': [
+          ...range(300, (i) => `https://partner-${i}.example.net/`),
+          ...internal,
+        ],
+      });
+      const crawl = simulateCrawl(['https://example.com/']);
+      mockCrawlerRunHandler = crawl.run;
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(crawl.handled.map((r) => r.url)).toEqual([
+        'https://example.com/',
+        ...internal,
+      ]);
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+        status: ScanStatus.COMPLETED,
+        pagesDiscovered: 6,
+        pagesScanned: 6,
+        pagesFailed: 0,
+      });
+    });
+
+    it('spends the page budget only on links that match the globs', async () => {
+      mockScanQb.getOne.mockResolvedValue(
+        makeScan({
+          mode: ScanMode.CRAWL,
+          targets: ['https://example.com'],
+          crawlMaxPages: 10,
+          crawlMaxDepth: 3,
+          crawlStrategy: CrawlStrategy.SameHostname,
+          crawlGlobs: ['https://example.com/docs/**'],
+        }),
+      );
+      const docs = range(5, (i) => `https://example.com/docs/page-${i}`);
+      serveLinks({
+        'https://example.com/': [
+          ...range(300, (i) => `https://example.com/blog/post-${i}`),
+          ...docs,
+        ],
+      });
+      const crawl = simulateCrawl(['https://example.com/']);
+      mockCrawlerRunHandler = crawl.run;
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(crawl.handled.map((r) => r.url)).toEqual([
+        'https://example.com/',
+        ...docs,
+      ]);
+    });
+
+    it('still follows a link from its own seed after another seed filtered it out', async () => {
+      mockScanQb.getOne.mockResolvedValue(
+        makeScan({
+          mode: ScanMode.CRAWL,
+          targets: ['https://example.com', 'https://other.example.org'],
+          crawlMaxPages: 10,
+          crawlMaxDepth: 3,
+          crawlStrategy: CrawlStrategy.SameHostname,
+        }),
+      );
+      serveLinks({
+        'https://example.com/': ['https://other.example.org/shared'],
+        'https://other.example.org/': ['https://other.example.org/shared'],
+      });
+      const crawl = simulateCrawl([
+        'https://example.com/',
+        'https://other.example.org/',
+      ]);
+      mockCrawlerRunHandler = crawl.run;
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(crawl.handled.map((r) => r.url)).toEqual([
+        'https://example.com/',
+        'https://other.example.org/',
+        'https://other.example.org/shared',
+      ]);
+    });
+
+    it('stops at maxPages and passes each in-scope link to the queue once', async () => {
+      mockScanQb.getOne.mockResolvedValue(
+        makeScan({
+          mode: ScanMode.CRAWL,
+          targets: ['https://example.com'],
+          crawlMaxPages: 6,
+          crawlMaxDepth: 3,
+          crawlStrategy: CrawlStrategy.SameHostname,
+        }),
+      );
+      const nav = range(4, (i) => `https://example.com/section-${i}`);
+      serveLinks({
+        'https://example.com/': nav,
+        [nav[0]]: [
+          ...nav,
+          'https://example.com/section-0/#top',
+          'https://example.com/extra',
+        ],
+        [nav[1]]: [...nav, 'https://example.com/too-late'],
+      });
+      const crawl = simulateCrawl(['https://example.com/']);
+      mockCrawlerRunHandler = crawl.run;
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(crawl.handled.map((r) => r.url)).toEqual([
+        'https://example.com/',
+        ...nav,
+        'https://example.com/extra',
+      ]);
+      // Links already in the queue are not offered again (Crawlee would add
+      // them in budget-sized batches, sleeping a second between batches), and
+      // a full queue is not mined for links at all.
+      expect(crawl.enqueueCalls.map((call) => call.urls)).toEqual([
+        nav,
+        ['https://example.com/extra'],
       ]);
     });
   });
