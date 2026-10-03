@@ -11,8 +11,20 @@ const NAMES = [
 
 type Scope = Record<string, any>;
 
-/** Next macrotask: every stand-in reports its failure by then. */
-const nextTask = () => new Promise((resolve) => setTimeout(resolve, 5));
+/**
+ * Lets the stand-ins' callbacks run. Each reports its failure in a zero-delay
+ * timer, and some (a failing connection's data channels) set another one from
+ * there. Timers of the same delay run in the order they were set, so a few
+ * rounds of zero-delay timers set after them run after every callback, also
+ * on a busy event loop — a single longer timer would not: once it is due
+ * together with the first callback, it runs before the timer that callback
+ * sets.
+ */
+const nextTask = async (): Promise<void> => {
+  for (let round = 0; round < 5; round++) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+};
 
 describe('installInertConnectionApis', () => {
   const scope = globalThis as Scope;
