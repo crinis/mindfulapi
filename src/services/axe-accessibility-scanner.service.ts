@@ -260,9 +260,11 @@ export class AxeAccessibilityScanner {
    *   in every document by inert stand-ins that never connect and fail like a
    *   refused connection ({@link installInertConnectionApis}):
    *   `SharedWorker`, `WebSocketStream`, `WebTransport` and the WebRTC peer
-   *   connection. Init scripts do not run in dedicated workers, which keep
-   *   `WebSocket`, `WebSocketStream` and `WebTransport`. Service workers stay
-   *   enabled because their requests are routed (see {@link createContext}).
+   *   connection. Neither the init script nor the WebSocket shim runs in
+   *   workers, so dedicated and service workers keep the native `WebSocket`,
+   *   `WebSocketStream` and `WebTransport`, unchecked (Playwright 1.60 has no
+   *   init script for workers). Service workers stay enabled because their
+   *   HTTP requests are routed (see {@link createContext}).
    *
    * Decisions are cached per host for the context's lifetime, so each distinct
    * host is resolved at most once; a failed lookup is not kept, so the next
