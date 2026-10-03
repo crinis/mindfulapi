@@ -838,7 +838,7 @@ describe('ScanProcessor', () => {
     });
   });
 
-  it('tracks failed crawl pages via failedRequestHandler', async () => {
+  it('counts a page Crawlee failed (handler error or timeout) as discovered and failed', async () => {
     mockScanQb.getOne.mockResolvedValue(
       makeScan({
         mode: ScanMode.CRAWL,
@@ -848,9 +848,16 @@ describe('ScanProcessor', () => {
 
     mockCrawlerRunHandler = async ({ failedRequestHandler }) => {
       if (failedRequestHandler) {
-        await failedRequestHandler({
-          request: { url: 'https://example.com/failed' },
-        });
+        await (failedRequestHandler as any)(
+          {
+            request: {
+              url: 'https://example.com/failed',
+              uniqueKey: 'https://example.com/failed',
+              userData: { depth: 1 },
+            },
+          },
+          new Error('browser has been closed'),
+        );
       }
     };
 
@@ -858,9 +865,109 @@ describe('ScanProcessor', () => {
 
     expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
       status: ScanStatus.COMPLETED,
-      pagesDiscovered: 0,
+      pagesDiscovered: 1,
       pagesScanned: 0,
       pagesFailed: 1,
+    });
+  });
+
+  describe('crawl request lifecycle', () => {
+    const seed = {
+      url: 'https://example.com/',
+      uniqueKey: 'https://example.com/',
+      userData: { depth: 0 },
+    };
+    const issue = {
+      ruleId: 'image-alt',
+      description: 'Images must have alternative text',
+      impact: IssueImpact.CRITICAL,
+      pageUrl: 'https://example.com/',
+    };
+
+    beforeEach(() => {
+      mockScanQb.getOne.mockResolvedValue(
+        makeScan({ mode: ScanMode.CRAWL, targets: ['https://example.com'] }),
+      );
+    });
+
+    it('never retries a page and lets the page deadline fire before the handler timeout', async () => {
+      let crawlerOptions: any;
+      mockCrawlerRunHandler = (options) => {
+        crawlerOptions = options;
+        return Promise.resolve();
+      };
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      // Crawlee's timeout rejects but never stops the handler, and every
+      // retry would run alongside it: retries would scan a slow page in
+      // parallel, up to four times.
+      expect(crawlerOptions.maxRequestRetries).toBe(0);
+      expect(crawlerOptions.requestHandlerTimeoutSecs * 1000).toBeGreaterThan(
+        PAGE_DEADLINE_MS,
+      );
+    });
+
+    it('discards a page Crawlee gave up on while its handler was still running', async () => {
+      let finishAnalysis!: () => void;
+      mockScanner.analyzeLoadedPage.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finishAnalysis = () =>
+              resolve({ finalUrl: 'https://example.com/', issues: [issue] });
+          }),
+      );
+      mockCrawlerRunHandler = async ({
+        requestHandler,
+        failedRequestHandler,
+      }) => {
+        const handling = requestHandler({
+          request: seed,
+          enqueueLinks: jest.fn(),
+        });
+        while (!finishAnalysis) {
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+        // Crawlee's requestHandlerTimeoutSecs fired: the request is failed
+        // while the handler keeps running.
+        await (failedRequestHandler as any)(
+          { request: seed },
+          new Error('requestHandler timed out'),
+        );
+        finishAnalysis();
+        await handling;
+      };
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(mockIssueRepo.save).not.toHaveBeenCalled();
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+        status: ScanStatus.COMPLETED,
+        pagesDiscovered: 1,
+        pagesScanned: 0,
+        pagesFailed: 1,
+      });
+    });
+
+    it('stores and counts a request handled twice only once', async () => {
+      mockScanner.analyzeLoadedPage.mockResolvedValue({
+        finalUrl: 'https://example.com/',
+        issues: [issue],
+      });
+      mockCrawlerRunHandler = async ({ requestHandler }) => {
+        await requestHandler({ request: seed, enqueueLinks: jest.fn() });
+        await requestHandler({ request: seed, enqueueLinks: jest.fn() });
+      };
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(mockIssueRepo.save).toHaveBeenCalledTimes(1);
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+        status: ScanStatus.COMPLETED,
+        pagesDiscovered: 1,
+        pagesScanned: 1,
+        pagesFailed: 0,
+      });
     });
   });
 

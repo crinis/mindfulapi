@@ -68,6 +68,14 @@ const MAX_CONTEXT_LENGTH = 4000;
  */
 export const PAGE_DEADLINE_MS = 120_000;
 
+/**
+ * Crawlee's request-handler timeout. Crawlee's timeout rejects but never stops
+ * the handler, so it must not fire while the page work is still within its
+ * deadline; the extra minute covers the policy check, database writes and
+ * enqueueing around the page work.
+ */
+const CRAWL_HANDLER_TIMEOUT_SECS = PAGE_DEADLINE_MS / 1000 + 60;
+
 /** A page's browser work outlived the page deadline; the page was closed. */
 export class PageDeadlineError extends Error {
   constructor(message: string) {
@@ -544,10 +552,11 @@ export class ScanProcessor extends WorkerHost {
 
   /**
    * Executes crawl-mode scans: uses Crawlee's {@link BasicCrawler} for URL
-   * queuing, deduplication, concurrency, and retry logic while managing the
-   * browser entirely through {@link BrowserService}. Links are extracted from
-   * each loaded page and passed to Crawlee's native `enqueueLinks` utility,
-   * which applies the strategy and glob filters before adding them to the queue.
+   * queuing, deduplication and concurrency while managing the browser entirely
+   * through {@link BrowserService}. Pages are never retried: a failed page
+   * counts as failed, once. Links are extracted from each loaded page and
+   * passed to Crawlee's native `enqueueLinks` utility, which applies the
+   * strategy and glob filters before adding them to the queue.
    *
    * The strategy is applied against each seed's scope (the seed URL, or its
    * landing URL when it redirects within its own site), not against the URL a
@@ -593,6 +602,32 @@ export class ScanProcessor extends WorkerHost {
     const progressWriter = this.createProgressWriter(scan.id);
     await progressWriter.flush(progress);
     const isCanceled = this.createCancellationChecker(scan.id);
+
+    // Counters are kept per request (Crawlee's uniqueKey, the normalized URL):
+    // a request is discovered once and settled once, as scanned, failed or
+    // skipped — even when Crawlee fails a request whose handler is still
+    // running (after requestHandlerTimeoutSecs), and that handler finishes
+    // later.
+    const discoveredRequests = new Set<string>();
+    const settledRequests = new Set<string>();
+    const discover = (key: string): void => {
+      if (discoveredRequests.has(key)) return;
+      discoveredRequests.add(key);
+      progress.pagesDiscovered += 1;
+    };
+    /** Counts the outcome of a request; false when it was already settled. */
+    const settle = (
+      key: string,
+      outcome: 'scanned' | 'failed' | 'skipped',
+    ): boolean => {
+      if (settledRequests.has(key)) return false;
+      settledRequests.add(key);
+      if (outcome === 'scanned') progress.pagesScanned += 1;
+      else if (outcome === 'failed') progress.pagesFailed += 1;
+      // Like a link the strategy filters out: not a page of this crawl.
+      else progress.pagesDiscovered -= 1;
+      return true;
+    };
 
     await requestQueue.addRequests(
       seedUrls.map((url) => ({ url, uniqueKey: url, userData: { depth: 0 } })),
@@ -718,20 +753,26 @@ export class ScanProcessor extends WorkerHost {
         requestQueue,
         maxConcurrency: Math.max(1, concurrency),
         maxRequestsPerCrawl: maxPages,
+        // Scan errors are handled inside the handler; anything escaping it
+        // (e.g. a lost browser) would fail the same way again. A retry would
+        // also run alongside a timed-out handler, which Crawlee cannot stop.
+        maxRequestRetries: 0,
+        requestHandlerTimeoutSecs: CRAWL_HANDLER_TIMEOUT_SECS,
         requestHandler: async ({ request, enqueueLinks }) => {
           // Stop processing further pages once cancelled; drains quietly.
           if (await isCanceled()) {
             return;
           }
+          const key = request.uniqueKey;
           const depth = Number(request.userData.depth || 0);
-          progress.pagesDiscovered += 1;
+          discover(key);
           // Discovered links are unvetted input — enforce the target policy
           // for every crawled page, not just the seeds.
           const policy = await this.urlPolicyService.isAllowedTarget(
             request.url,
           );
           if (!policy.allowed) {
-            progress.pagesFailed += 1;
+            settle(key, 'failed');
             this.logger.warn(
               `Blocked page ${request.url} in scan ${scan.id}: ${policy.reason}`,
             );
@@ -755,8 +796,16 @@ export class ScanProcessor extends WorkerHost {
               }),
             );
 
+            if (settledRequests.has(key)) {
+              // Crawlee already failed this request (handler timeout), or a
+              // second run of it got here: its result is not used.
+              this.logger.debug(
+                `Discarded a late result for ${request.url} in scan ${scan.id}`,
+              );
+              return;
+            }
             if (outcome.kind === 'skipped') {
-              progress.pagesDiscovered -= 1;
+              settle(key, 'skipped');
               this.logger.debug(
                 `Skipped ${request.url} in scan ${scan.id}: ${outcome.reason}`,
               );
@@ -770,15 +819,15 @@ export class ScanProcessor extends WorkerHost {
                   outcome.issues,
                   outcome.units,
                 );
-                progress.pagesScanned += 1;
+                settle(key, 'scanned');
               } catch (error) {
-                progress.pagesFailed += 1;
+                settle(key, 'failed');
                 this.logger.warn(
                   `Failed page ${request.url} in scan ${scan.id}: ${String(error)}`,
                 );
               }
             } else {
-              progress.pagesFailed += 1;
+              settle(key, 'failed');
               this.logger.warn(
                 `Failed page ${request.url} in scan ${scan.id}: ${outcome.reason}`,
               );
@@ -795,10 +844,12 @@ export class ScanProcessor extends WorkerHost {
             await progressWriter.maybePersist(progress);
           }
         },
-        failedRequestHandler: async ({ request }) => {
-          progress.pagesFailed += 1;
+        // The handler threw or exceeded requestHandlerTimeoutSecs.
+        failedRequestHandler: async ({ request }, error) => {
+          discover(request.uniqueKey);
+          if (!settle(request.uniqueKey, 'failed')) return;
           this.logger.warn(
-            `Failed page ${request.url} in scan ${scan.id} after retries`,
+            `Failed page ${request.url} in scan ${scan.id}: ${String(error)}`,
           );
           await progressWriter.maybePersist(progress);
         },
