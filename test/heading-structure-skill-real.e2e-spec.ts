@@ -149,6 +149,65 @@ describe('HeadingStructureSkill.collect (real browser)', () => {
         }
       });</script>`;
 
+    it('locates findings inside components by their host in the document', async () => {
+      const longText = 'Parcels leave our warehouse every weekday. '.repeat(20);
+      const html = doc(`
+        ${component('x-inner', '<h3>Deep</h3><p>Nested component text.</p>')}
+        ${component(
+          'x-card',
+          '<h2>Shipping</h2><p>We ship worldwide.</p>' +
+            '<h2>Returns</h2><p>Free returns within thirty days.</p>' +
+            '<p style="font-size: 26px">Payment</p>' +
+            '<p>We accept all major cards and bank transfers.</p>' +
+            `<section><p>${longText}</p></section>` +
+            '<x-inner></x-inner>',
+        )}
+        <main>
+          <h2>Intro</h2>
+          <p>Intro text.</p>
+          <x-card></x-card>
+        </main>`);
+      const page = await context.newPage();
+      try {
+        await page.setContent(html);
+        const [evidence] = await skill.collect(page, ctx());
+        const located = [
+          ...evidence.headings,
+          ...evidence.fakeHeadingCandidates,
+          ...evidence.unheadedSections,
+        ];
+        // What each stored locator points at in the live page.
+        const resolved = await page.evaluate(
+          (items) =>
+            items.map(({ selector, shadowPath }) => {
+              const matches = document.querySelectorAll(selector);
+              let el: Element | null = matches.length === 1 ? matches[0] : null;
+              const host = el?.tagName.toLowerCase() ?? null;
+              for (const path of shadowPath ?? []) {
+                el = el?.shadowRoot?.querySelector(path) ?? null;
+              }
+              return {
+                host,
+                text: el?.firstChild?.textContent?.slice(0, 20) ?? null,
+              };
+            }),
+          located.map(({ selector, shadowPath }) => ({ selector, shadowPath })),
+        );
+
+        expect(resolved).toEqual([
+          { host: 'h2', text: 'Intro' },
+          { host: 'x-card', text: 'Shipping' },
+          { host: 'x-card', text: 'Returns' },
+          { host: 'x-card', text: 'Deep' },
+          { host: 'x-card', text: 'Payment' },
+          { host: 'x-card', text: 'Parcels leave our wa' },
+        ]);
+        expect(evidence.headings[0].shadowPath).toBeUndefined();
+      } finally {
+        await page.close();
+      }
+    });
+
     it('lists headings inside components in reading order', async () => {
       const evidence = await collectFrom(
         doc(`

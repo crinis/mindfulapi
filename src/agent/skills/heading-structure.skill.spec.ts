@@ -250,6 +250,35 @@ describe('HeadingStructureSkill.evaluate', () => {
     expect(draft.details).toMatchObject({ verdict: 'mis_nested' });
   });
 
+  it('locates a heading inside a component by its host and inner path', async () => {
+    const evidence = baseEvidence();
+    evidence.headings[1] = {
+      ...evidence.headings[1],
+      selector: 'main > x-card',
+      shadowPath: ['h2:nth-of-type(2)'],
+    };
+    const [inComponent, inDocument] = await skill.evaluate(
+      evidence,
+      harnessReturning({
+        findings: ['H2', 'H1'].map((id) => ({
+          id,
+          verdict: 'vague_or_generic',
+          confidence: 0.9,
+          rationale: 'vague',
+          suggestedText: null,
+          suggestedLevel: null,
+        })),
+      }),
+    );
+
+    expect(inComponent.selector).toBe('main > x-card');
+    expect(inComponent.details).toMatchObject({
+      shadowPath: ['h2:nth-of-type(2)'],
+    });
+    expect(inDocument.selector).toBe('main > h1');
+    expect(inDocument.details).not.toHaveProperty('shadowPath');
+  });
+
   it('drops a selector the model invented, falling back to page-level', async () => {
     const [draft] = await skill.evaluate(
       baseEvidence(),

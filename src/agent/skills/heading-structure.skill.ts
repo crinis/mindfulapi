@@ -110,6 +110,12 @@ export interface HeadingDescriptor {
   id: string;
   /** Real CSS selector emitted to the client (the finding's only locator). */
   selector: string;
+  /**
+   * Set when the element is inside a shadow tree: `selector` then locates the
+   * outermost shadow host in the document, and these are the paths inside
+   * each shadow root from that host down to the element.
+   */
+  shadowPath?: string[];
   level: number;
   tag: string;
   text: string;
@@ -122,6 +128,12 @@ export interface FakeHeadingCandidate {
   /** Short id the model references (e.g. `F1`). */
   id: string;
   selector: string;
+  /**
+   * Set when the element is inside a shadow tree: `selector` then locates the
+   * outermost shadow host in the document, and these are the paths inside
+   * each shadow root from that host down to the element.
+   */
+  shadowPath?: string[];
   text: string;
   fontSizePx: number;
   fontWeight: number;
@@ -132,6 +144,12 @@ export interface UnheadedSection {
   /** Short id the model references (e.g. `S1`). */
   id: string;
   selector: string;
+  /**
+   * Set when the element is inside a shadow tree: `selector` then locates the
+   * outermost shadow host in the document, and these are the paths inside
+   * each shadow root from that host down to the element.
+   */
+  shadowPath?: string[];
   snippet: string;
   textLength: number;
 }
@@ -209,11 +227,16 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
       return [appropriateDraft(evidence, usage, model)];
     }
 
-    const selectorById = new Map<string, string>([
-      ...evidence.headings.map((h) => [h.id, h.selector] as const),
-      ...evidence.fakeHeadingCandidates.map((c) => [c.id, c.selector] as const),
-      ...evidence.unheadedSections.map((s) => [s.id, s.selector] as const),
-    ]);
+    const locationById = new Map<
+      string,
+      { selector: string; shadowPath?: string[] }
+    >(
+      [
+        ...evidence.headings,
+        ...evidence.fakeHeadingCandidates,
+        ...evidence.unheadedSections,
+      ].map((item) => [item.id, item]),
+    );
 
     return problems.map((finding, index) => {
       const lowConfidence = finding.confidence < MIN_CONFIDENCE;
@@ -222,11 +245,13 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
           ? 'insufficient_evidence'
           : finding.verdict;
 
+      // Map the model's id back to the real location; drop unknown ids.
+      const location = locationById.get(finding.id);
+
       return {
         skill: this.id,
         pageUrl: evidence.pageUrl,
-        // Map the model's id back to the real selector; drop unknown ids.
-        selector: selectorById.get(finding.id),
+        selector: location?.selector,
         category,
         // Report the criterion of the originally judged verdict, so a
         // downgrade to insufficient_evidence still records what was assessed.
@@ -239,6 +264,8 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
         details: {
           verdict: finding.verdict,
           suggestedLevel: finding.suggestedLevel,
+          // Inside a web component: `selector` locates its host.
+          ...(location?.shadowPath ? { shadowPath: location.shadowPath } : {}),
         },
         // Attribute the single request's tokens to the first draft only so the
         // runner sums usage across the array without double-counting.
@@ -288,7 +315,8 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
 
         // A short, unique-ish CSS path so clients can locate the element. The
         // page-level skill takes no screenshot, so this string is the finding's
-        // only locator.
+        // only locator. It is relative to the element's own tree: the document,
+        // or the shadow root the element lives in.
         const cssPath = (el: Element): string => {
           const parts: string[] = [];
           let node: Element | null = el;
@@ -298,7 +326,11 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
               break;
             }
             let sel = node.tagName.toLowerCase();
-            const parent: Element | null = node.parentElement;
+            // A shadow root's top-level elements have no parent element, but
+            // their siblings still count.
+            const parent: ParentNode | null =
+              node.parentElement ??
+              (node.parentNode instanceof ShadowRoot ? node.parentNode : null);
             if (parent) {
               const sameTag = Array.from(parent.children).filter(
                 (c) => c.tagName === node!.tagName,
@@ -311,6 +343,27 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
             node = node.parentElement;
           }
           return parts.join(' > ');
+        };
+
+        // Where a finding is. A path inside a shadow root means nothing in
+        // the document (it may even match another element there), so for an
+        // element in a shadow tree the selector locates the outermost shadow
+        // host, and `shadowPath` holds the path inside each shadow root from
+        // that host down to the element.
+        const locate = (
+          el: Element,
+        ): { selector: string; shadowPath?: string[] } => {
+          const shadowPath: string[] = [];
+          let node = el;
+          let tree = node.getRootNode();
+          while (tree instanceof ShadowRoot) {
+            shadowPath.unshift(cssPath(node));
+            node = tree.host;
+            tree = node.getRootNode();
+          }
+          return shadowPath.length > 0
+            ? { selector: cssPath(node), shadowPath }
+            : { selector: cssPath(el) };
         };
 
         const HEADING_SELECTOR = 'h1,h2,h3,h4,h5,h6,[role="heading"]';
@@ -477,7 +530,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
 
           return {
             id: `H${i + 1}`,
-            selector: cssPath(el),
+            ...locate(el),
             level,
             tag,
             text: collapse(el.textContent).slice(0, headingTextMax),
@@ -492,6 +545,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
           candidate: {
             id: string;
             selector: string;
+            shadowPath?: string[];
             text: string;
             fontSizePx: number;
             fontWeight: number;
@@ -551,7 +605,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
             el,
             candidate: {
               id: '',
-              selector: cssPath(el),
+              ...locate(el),
               text,
               fontSizePx: Math.round(fontSizePx),
               fontWeight,
@@ -582,6 +636,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
         const unheadedSections: Array<{
           id: string;
           selector: string;
+          shadowPath?: string[];
           snippet: string;
           textLength: number;
         }> = [];
@@ -595,7 +650,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
           if (text.length < sectionMinText) continue;
           unheadedSections.push({
             id: `S${unheadedSections.length + 1}`,
-            selector: cssPath(el),
+            ...locate(el),
             snippet: text.slice(0, sectionSnippet),
             textLength: text.length,
           });
