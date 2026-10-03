@@ -144,6 +144,8 @@ type CrawlPageOutcome =
 interface AgentRun {
   skills: AuditSkill[];
   buffer: CollectedUnit[];
+  /** The scan's root element: evidence is collected inside it only, like axe. */
+  rootElement?: string;
 }
 
 /**
@@ -275,7 +277,11 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
       // feature is enabled and the scan requested whitelisted skills.
       const agentSkills = this.agentAudit.resolveSkills(scan);
       const agent: AgentRun | undefined = agentSkills.length
-        ? { skills: agentSkills, buffer: [] }
+        ? {
+            skills: agentSkills,
+            buffer: [],
+            rootElement: scanOptions.rootElement,
+          }
         : undefined;
 
       const progress =
@@ -426,6 +432,7 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
         normalizeHttpUrl(pageUrl) ?? pageUrl,
         issues,
         agent.buffer.length,
+        { rootElement: agent.rootElement },
       );
     } catch (error) {
       this.logger.warn(

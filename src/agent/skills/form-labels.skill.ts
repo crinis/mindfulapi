@@ -145,7 +145,7 @@ export class FormLabelsSkill implements AuditSkill<FormEvidence> {
 
     let fields: FieldDescriptor[];
     try {
-      fields = await this.extract(page);
+      fields = await this.extract(page, ctx.rootElement);
     } catch (error) {
       this.logger.debug(
         `Form extraction failed on ${ctx.pageUrl}: ${String(error)}`,
@@ -217,10 +217,36 @@ export class FormLabelsSkill implements AuditSkill<FormEvidence> {
     });
   }
 
-  /** Extracts the labellable form-control inventory entirely in the browser. */
-  private extract(page: Page): Promise<FieldDescriptor[]> {
+  /**
+   * Extracts the labellable form-control inventory inside the scan's root
+   * element, entirely in the browser.
+   */
+  private extract(
+    page: Page,
+    rootElement: string | undefined,
+  ): Promise<FieldDescriptor[]> {
     return page.evaluate(
-      ({ maxFields, nameMax, descMax }) => {
+      ({ maxFields, nameMax, descMax, rootElement }) => {
+        // The scan's root element, scoped like axe's include: every match,
+        // nested matches once, the matches themselves included. Without a
+        // root element, the whole document.
+        const roots: ParentNode[] = rootElement
+          ? (() => {
+              const found = Array.from(document.querySelectorAll(rootElement));
+              return found.filter(
+                (el) =>
+                  !found.some((other) => other !== el && other.contains(el)),
+              );
+            })()
+          : [document];
+        const queryAll = <E extends Element>(selector: string): E[] =>
+          roots.flatMap((root) => [
+            ...(root instanceof Element && root.matches(selector)
+              ? [root as E]
+              : []),
+            ...Array.from(root.querySelectorAll<E>(selector)),
+          ]);
+
         const collapse = (value: string | null | undefined): string =>
           (value ?? '').replace(/\s+/g, ' ').trim();
 
@@ -344,10 +370,8 @@ export class FormLabelsSkill implements AuditSkill<FormEvidence> {
           'image',
         ]);
 
-        const controls = Array.from(
-          document.querySelectorAll<HTMLElement>(
-            'input, select, textarea, [role="textbox"], [role="combobox"], [role="spinbutton"], [role="searchbox"], [role="listbox"]',
-          ),
+        const controls = queryAll<HTMLElement>(
+          'input, select, textarea, [role="textbox"], [role="combobox"], [role="spinbutton"], [role="searchbox"], [role="listbox"]',
         ).filter((el) => {
           if (el.closest('[aria-hidden="true"]')) return false;
           if ((el as HTMLInputElement).disabled) return false;
@@ -386,7 +410,12 @@ export class FormLabelsSkill implements AuditSkill<FormEvidence> {
 
         return fields;
       },
-      { maxFields: MAX_FIELDS, nameMax: NAME_MAX, descMax: DESC_MAX },
+      {
+        maxFields: MAX_FIELDS,
+        nameMax: NAME_MAX,
+        descMax: DESC_MAX,
+        rootElement: rootElement ?? null,
+      },
     );
   }
 }

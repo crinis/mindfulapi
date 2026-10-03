@@ -135,7 +135,7 @@ export class LinkPurposeSkill implements AuditSkill<LinkEvidence> {
 
     let links: LinkDescriptor[];
     try {
-      links = await this.extract(page);
+      links = await this.extract(page, ctx.rootElement);
     } catch (error) {
       this.logger.debug(
         `Link extraction failed on ${ctx.pageUrl}: ${String(error)}`,
@@ -207,10 +207,36 @@ export class LinkPurposeSkill implements AuditSkill<LinkEvidence> {
     });
   }
 
-  /** Extracts the deduplicated link inventory entirely in the browser. */
-  private extract(page: Page): Promise<LinkDescriptor[]> {
+  /**
+   * Extracts the deduplicated link inventory inside the scan's root element,
+   * entirely in the browser.
+   */
+  private extract(
+    page: Page,
+    rootElement: string | undefined,
+  ): Promise<LinkDescriptor[]> {
     return page.evaluate(
-      ({ maxLinks, textMax, contextSnippet, destMax }) => {
+      ({ maxLinks, textMax, contextSnippet, destMax, rootElement }) => {
+        // The scan's root element, scoped like axe's include: every match,
+        // nested matches once, the matches themselves included. Without a
+        // root element, the whole document.
+        const roots: ParentNode[] = rootElement
+          ? (() => {
+              const found = Array.from(document.querySelectorAll(rootElement));
+              return found.filter(
+                (el) =>
+                  !found.some((other) => other !== el && other.contains(el)),
+              );
+            })()
+          : [document];
+        const queryAll = <E extends Element>(selector: string): E[] =>
+          roots.flatMap((root) => [
+            ...(root instanceof Element && root.matches(selector)
+              ? [root as E]
+              : []),
+            ...Array.from(root.querySelectorAll<E>(selector)),
+          ]);
+
         const collapse = (value: string | null | undefined): string =>
           (value ?? '').replace(/\s+/g, ' ').trim();
 
@@ -338,9 +364,7 @@ export class LinkPurposeSkill implements AuditSkill<LinkEvidence> {
           return text.slice(0, contextSnippet);
         };
 
-        const candidates = Array.from(
-          document.querySelectorAll<HTMLElement>('a[href], [role="link"]'),
-        );
+        const candidates = queryAll<HTMLElement>('a[href], [role="link"]');
 
         const out: LinkDescriptor[] = [];
         const byKey = new Map<string, LinkDescriptor>();
@@ -385,6 +409,7 @@ export class LinkPurposeSkill implements AuditSkill<LinkEvidence> {
         textMax: LINK_TEXT_MAX,
         contextSnippet: CONTEXT_SNIPPET,
         destMax: DEST_MAX,
+        rootElement: rootElement ?? null,
       },
     );
   }

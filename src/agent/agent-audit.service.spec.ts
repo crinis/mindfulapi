@@ -174,6 +174,21 @@ describe('AgentAuditService.collectForPage', () => {
     expect(units[0].skill.id).toBe(AgentSkill.HEADING_STRUCTURE);
   });
 
+  it('passes the scan root element to every skill', async () => {
+    const { service } = makeService({ maxUnitsPerPage: 30 });
+    const image = elementSkill();
+    const imageCollect = jest.spyOn(image, 'collect');
+
+    await service.collectForPage([image], page, pageUrl, [], 0, {
+      rootElement: 'main',
+    });
+
+    expect(imageCollect).toHaveBeenCalledWith(
+      page,
+      expect.objectContaining({ rootElement: 'main' }),
+    );
+  });
+
   it('gives page skills the scan-wide remainder first', async () => {
     const { service } = makeService({
       maxUnitsPerPage: 30,

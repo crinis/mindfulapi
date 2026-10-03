@@ -1206,6 +1206,26 @@ describe('ScanProcessor', () => {
     });
   });
 
+  it.each([ScanMode.SINGLE_URL, ScanMode.CRAWL])(
+    'scopes AI evidence of a %s scan to its root element',
+    async (mode) => {
+      mockScanQb.getOne.mockResolvedValue(
+        makeScan({ mode, rootElement: 'main', crawlMaxDepth: 0 }),
+      );
+      mockAgentAudit.resolveSkills.mockReturnValue([{ id: 'page_title' }]);
+      if (mode === ScanMode.CRAWL) {
+        mockCrawlerRunHandler = simulateCrawl(['https://example.com/']).run;
+      }
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(mockAgentAudit.collectForPage).toHaveBeenCalledTimes(1);
+      expect(mockAgentAudit.collectForPage.mock.calls[0][5]).toEqual({
+        rootElement: 'main',
+      });
+    },
+  );
+
   it('re-checks the target policy after evidence collection and discards a violating page', async () => {
     mockScanQb.getOne.mockResolvedValue(
       makeScan({ targets: ['https://example.com'] }),

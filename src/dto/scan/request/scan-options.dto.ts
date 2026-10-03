@@ -50,7 +50,7 @@ export class ScanOptionsDto {
   @ApiPropertyOptional({
     example: 'main',
     description:
-      'CSS selector to restrict the scan to a specific page region. Scans the entire page when omitted.',
+      'CSS selector to restrict the scan to a specific page region (every matching element). Scans the entire page when omitted. An AI audit is restricted to the same region, except the page_title skill, which judges the page title.',
     minLength: 1,
   })
   @IsOptional()

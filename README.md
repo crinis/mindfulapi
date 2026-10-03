@@ -418,6 +418,7 @@ POST /v1/scans
 ```
 
 - Omit `skills` to run every skill enabled by `AGENT_SKILLS`, or pass an explicit list for a subset.
+- `scanOptions.rootElement` limits the AI audit to the same region as axe: the skills collect only images, headings, links and form controls inside the matching elements. `page_title` still judges the page's `<title>`.
 - The request returns a `400` problem if the audit is disabled server-side, the mode is excluded by `AGENT_ALLOWED_SCAN_MODES`, or a skill is not whitelisted.
 - It also returns a `400` problem if a requested skill cannot reach a model: no provider, an unsupported provider, no model, no API key for `openai` or `anthropic`, or no base URL for `openai-compatible`. The problem's `detail` names the settings to fix. An invalid key or an unreachable endpoint is only detected when the requests run, and then counts in `tasksFailed`.
 - Scan responses gain an `aiAudit` summary and an `agentFindings` array; list summaries gain `agentFindingCount`.

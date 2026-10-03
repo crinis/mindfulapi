@@ -21,6 +21,12 @@ const MAX_MESSAGE_LENGTH = 2000;
 const MAX_SUGGESTION_LENGTH = 1000;
 const MAX_SELECTOR_LENGTH = 1000;
 
+/** Page-scoped options of an evidence collection. */
+export interface CollectOptions {
+  /** CSS selector the scan is limited to (`scanOptions.rootElement`). */
+  rootElement?: string;
+}
+
 /** A collected work unit paired with the skill that produced it. */
 export interface CollectedUnit {
   skill: AuditSkill;
@@ -117,6 +123,7 @@ export class AgentAuditService {
     pageUrl: string,
     axeIssues: ScannedIssue[],
     collectedSoFar: number,
+    options: CollectOptions = {},
   ): Promise<CollectedUnit[]> {
     const remaining = this.remainingScanUnits(collectedSoFar);
     // The tightest cap that applies to this page: whichever of the scan-wide
@@ -142,6 +149,7 @@ export class AgentAuditService {
           remainingUnits: budgetLeft,
           maxUnitsPerPage: budgetLeft,
           maxImageBytes: this.config.maxImageBytes,
+          rootElement: options.rootElement,
         });
         for (const item of evidence) {
           units.push({ skill, evidence: item });

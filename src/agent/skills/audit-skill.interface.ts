@@ -33,6 +33,12 @@ export interface CollectContext {
   maxUnitsPerPage: number;
   /** Screenshots larger than this many bytes are dropped. */
   maxImageBytes: number;
+  /**
+   * CSS selector the scan is limited to (`scanOptions.rootElement`). Skills
+   * judge only content inside its matches, like axe; `page_title` stays
+   * page-wide. Absent: the whole page.
+   */
+  rootElement?: string;
 }
 
 /**

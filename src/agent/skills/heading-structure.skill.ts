@@ -168,7 +168,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
 
     let extracted: Omit<HeadingEvidence, keyof Evidence>;
     try {
-      extracted = await this.extract(page);
+      extracted = await this.extract(page, ctx.rootElement);
     } catch (error) {
       this.logger.debug(
         `Heading extraction failed on ${ctx.pageUrl}: ${String(error)}`,
@@ -248,10 +248,17 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
     });
   }
 
-  /** Extracts the outline + structural candidates entirely in the browser. */
-  private extract(page: Page): Promise<Omit<HeadingEvidence, keyof Evidence>> {
+  /**
+   * Extracts the outline + structural candidates inside the scan's root
+   * element, entirely in the browser. The page title stays page-wide.
+   */
+  private extract(
+    page: Page,
+    rootElement: string | undefined,
+  ): Promise<Omit<HeadingEvidence, keyof Evidence>> {
     return page.evaluate(
       ({
+        rootElement,
         maxHeadings,
         headingTextMax,
         titleMax,
@@ -356,7 +363,17 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
           }
           return Array.from(node.childNodes);
         };
-        const root: Node = document.body ?? document.documentElement;
+        // The scan's root element, scoped like axe's include: every match,
+        // nested matches once. Without a root element, the whole body.
+        const roots: Element[] = rootElement
+          ? (() => {
+              const found = Array.from(document.querySelectorAll(rootElement));
+              return found.filter(
+                (el) =>
+                  !found.some((other) => other !== el && other.contains(el)),
+              );
+            })()
+          : [document.body ?? document.documentElement];
         const flatElements: Element[] = [];
         const listElements = (node: Node): void => {
           for (const child of flatChildren(node)) {
@@ -365,7 +382,11 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
             listElements(child);
           }
         };
-        listElements(root);
+        for (const root of roots) {
+          // A matched root is page content itself (e.g. an <article>).
+          if (rootElement) flatElements.push(root);
+          listElements(root);
+        }
 
         /** The flat-tree parent: the slot, the parent, or the shadow host. */
         const flatParent = (el: Element): Element | null => {
@@ -442,7 +463,10 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
             }
           }
         };
-        gatherText(root, false);
+        for (const root of roots) {
+          current = -1;
+          gatherText(root, false);
+        }
 
         const headings = headingEls.slice(0, maxHeadings).map((el, i) => {
           const tag = el.tagName.toLowerCase();
@@ -586,6 +610,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
         };
       },
       {
+        rootElement: rootElement ?? null,
         maxHeadings: MAX_HEADINGS,
         headingTextMax: HEADING_TEXT_MAX,
         titleMax: TITLE_MAX,

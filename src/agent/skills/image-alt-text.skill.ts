@@ -157,7 +157,11 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
       return [];
     }
 
-    const descriptors = await this.collectDescriptors(page, limit);
+    const descriptors = await this.collectDescriptors(
+      page,
+      limit,
+      ctx.rootElement,
+    );
 
     const evidence: ImageEvidence[] = [];
     for (const descriptor of descriptors) {
@@ -250,20 +254,39 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
   }
 
   /**
-   * Runs entirely in the browser: finds candidate images, applies the
-   * visibility/size/trigger filter, tags survivors with a stable id, and
-   * returns their descriptors. No screenshot is taken for filtered-out images.
+   * Runs entirely in the browser: finds candidate images inside the scan's
+   * root element, applies the visibility/size/trigger filter, tags survivors
+   * with a stable id, and returns their descriptors. No screenshot is taken
+   * for filtered-out images.
    */
   private collectDescriptors(
     page: Page,
     limit: number,
+    rootElement: string | undefined,
   ): Promise<ImageDescriptor[]> {
     return page.evaluate(
-      ({ limit, minPx, nameMax, srcMax }) => {
-        const candidates = Array.from(
-          document.querySelectorAll<HTMLElement>(
-            'img, [role="img"], svg[role="img"]',
-          ),
+      ({ limit, minPx, nameMax, srcMax, rootElement }) => {
+        // The scan's root element, scoped like axe's include: every match,
+        // nested matches once, the matches themselves included. Without a
+        // root element, the whole document.
+        const roots: ParentNode[] = rootElement
+          ? (() => {
+              const found = Array.from(document.querySelectorAll(rootElement));
+              return found.filter(
+                (el) =>
+                  !found.some((other) => other !== el && other.contains(el)),
+              );
+            })()
+          : [document];
+        const queryAll = <E extends Element>(selector: string): E[] =>
+          roots.flatMap((root) => [
+            ...(root instanceof Element && root.matches(selector)
+              ? [root as E]
+              : []),
+            ...Array.from(root.querySelectorAll<E>(selector)),
+          ]);
+        const candidates = queryAll<HTMLElement>(
+          'img, [role="img"], svg[role="img"]',
         );
         const out: ImageDescriptor[] = [];
         let counter = 0;
@@ -393,7 +416,13 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
 
         return out;
       },
-      { limit, minPx: MIN_RENDERED_PX, nameMax: NAME_MAX, srcMax: SRC_MAX },
+      {
+        limit,
+        minPx: MIN_RENDERED_PX,
+        nameMax: NAME_MAX,
+        srcMax: SRC_MAX,
+        rootElement: rootElement ?? null,
+      },
     );
   }
 }
