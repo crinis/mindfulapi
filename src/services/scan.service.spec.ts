@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -930,6 +931,33 @@ describe('ScanService', () => {
         { status: ScanStatus.CANCELED },
       );
       expect(result.status).toBe(ScanStatus.CANCELED);
+    });
+
+    it('still answers with the canceled scan when its queued job cannot be removed', async () => {
+      mockRepo.findOne.mockResolvedValueOnce(
+        makeScan({ status: ScanStatus.PENDING }),
+      );
+      mockRepo.findOne.mockResolvedValueOnce(
+        makeScan({ status: ScanStatus.CANCELED }),
+      );
+      mockRepo.update = jest.fn().mockResolvedValue({ affected: 1 });
+      mockQueue.cancelScanJob.mockRejectedValue(
+        new Error('Connection is closed.'),
+      );
+      const logError = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+
+      // The scan is canceled either way; a worker picking up the job stops
+      // at its first cancellation check. A 500 here would make a retrying
+      // client get 409 for a cancel that worked.
+      const result = await service.cancel(1);
+
+      expect(result.status).toBe(ScanStatus.CANCELED);
+      expect(logError).toHaveBeenCalledWith(
+        expect.stringContaining('Connection is closed.'),
+      );
+      logError.mockRestore();
     });
 
     it('throws ConflictException when the scan finished while being canceled', async () => {

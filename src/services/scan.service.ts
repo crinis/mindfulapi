@@ -282,7 +282,15 @@ export class ScanService {
         `Scan ${id} is already ${current.status} and cannot be canceled.`,
       );
     }
-    await this.scanQueueService.cancelScanJob(id);
+    // Best-effort, like remove(): the scan is canceled already, and a worker
+    // that picks up a leftover job stops at its first cancellation check.
+    // Failing here would answer 500 for a cancel that worked, and a client
+    // retrying it would get 409.
+    await this.scanQueueService.cancelScanJob(id).catch((error: unknown) => {
+      this.logger.error(
+        `Scan ${id} was canceled, but its queued job could not be removed: ${String(error)}`,
+      );
+    });
 
     return this.findOne(id);
   }
