@@ -18,6 +18,13 @@ const RUNNING_STALE_MS = 15 * 60_000;
  * that crashes its worker every time does not run forever.
  */
 const MAX_RECONCILE_ATTEMPTS = 3;
+/**
+ * Age (since the scan row last changed) after which a scan without a live job
+ * is failed instead of re-enqueued. Re-running it would start it from scratch,
+ * paid AI audit included, for a client that stopped waiting long ago — e.g. a
+ * scan stuck for months that the first start after an upgrade finds.
+ */
+const MAX_RECONCILE_AGE_MS = 24 * 60 * 60_000;
 /** How often the periodic reconciliation sweep runs. */
 const SWEEP_INTERVAL_MS = 5 * 60_000;
 
@@ -29,7 +36,8 @@ const SWEEP_INTERVAL_MS = 5 * 60_000;
  * process died between the two, or RUNNING/ANALYZING if a worker was killed
  * mid-scan. This sweeper re-enqueues such scans; processing is idempotent
  * because {@link ScanProcessor} resets results at the start of every attempt.
- * After {@link MAX_RECONCILE_ATTEMPTS} re-enqueues a scan is marked FAILED.
+ * After {@link MAX_RECONCILE_ATTEMPTS} re-enqueues, or once the scan has not
+ * changed for {@link MAX_RECONCILE_AGE_MS}, a scan is marked FAILED instead.
  */
 @Injectable()
 export class ScanReconciliationService implements OnApplicationBootstrap {
@@ -58,12 +66,14 @@ export class ScanReconciliationService implements OnApplicationBootstrap {
 
   /**
    * Re-enqueues stale PENDING/RUNNING/ANALYZING scans that have no live queue
-   * job, or fails them once they used up their re-enqueues.
+   * job, or fails them once they used up their re-enqueues or are older than
+   * {@link MAX_RECONCILE_AGE_MS}.
    */
   async reconcile(): Promise<void> {
     const now = Date.now();
     const pendingCutoff = new Date(now - PENDING_STALE_MS);
     const runningCutoff = new Date(now - RUNNING_STALE_MS);
+    const expiredCutoff = new Date(now - MAX_RECONCILE_AGE_MS);
 
     const candidates = await this.scanRepository.find({
       where: [
@@ -71,7 +81,12 @@ export class ScanReconciliationService implements OnApplicationBootstrap {
         { status: ScanStatus.RUNNING, updatedAt: LessThan(runningCutoff) },
         { status: ScanStatus.ANALYZING, updatedAt: LessThan(runningCutoff) },
       ],
-      select: { id: true, status: true, reconcileAttempts: true },
+      select: {
+        id: true,
+        status: true,
+        reconcileAttempts: true,
+        updatedAt: true,
+      },
     });
 
     for (const scan of candidates) {
@@ -81,9 +96,22 @@ export class ScanReconciliationService implements OnApplicationBootstrap {
         continue;
       }
 
+      if (scan.updatedAt && scan.updatedAt < expiredCutoff) {
+        await this.failScan(
+          scan,
+          `it has not changed since ${scan.updatedAt.toISOString()}, more than 24 h ago`,
+          state,
+        );
+        continue;
+      }
+
       const attempts = scan.reconcileAttempts ?? 0;
       if (attempts >= MAX_RECONCILE_ATTEMPTS) {
-        await this.failScan(scan, attempts, state);
+        await this.failScan(
+          scan,
+          `its job was lost again after ${attempts} re-enqueues`,
+          state,
+        );
         continue;
       }
 
@@ -116,13 +144,15 @@ export class ScanReconciliationService implements OnApplicationBootstrap {
   }
 
   /**
-   * Marks an orphaned scan FAILED after its last re-enqueue was lost too, and
-   * clears its lingering job. Guarded like a re-enqueue: a scan whose status
-   * changed since it was read is left alone.
+   * Marks an orphaned scan FAILED instead of re-enqueueing it, and clears its
+   * lingering job. Guarded like a re-enqueue: a scan whose status changed
+   * since it was read is left alone.
+   *
+   * @param why Why it is not re-enqueued, for the log.
    */
   private async failScan(
     scan: Pick<Scan, 'id' | 'status'>,
-    attempts: number,
+    why: string,
     state: string | null,
   ): Promise<void> {
     try {
@@ -134,7 +164,7 @@ export class ScanReconciliationService implements OnApplicationBootstrap {
         return;
       }
       this.logger.error(
-        `Failing orphaned ${scan.status} scan ${scan.id}: its job was lost again after ${attempts} re-enqueues (job state: ${state ?? 'none'})`,
+        `Failing orphaned ${scan.status} scan ${scan.id}: ${why} (job state: ${state ?? 'none'})`,
       );
       await this.scanQueueService.cancelScanJob(scan.id);
     } catch (error) {

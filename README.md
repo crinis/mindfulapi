@@ -280,6 +280,7 @@ Change `.env` **before** running any `docker compose` command (`pull` and `down`
 - **Configuration is validated strictly.** Numbers must be plain decimals within the ranges in [Configuration](#configuration); values 0.7.1 clamps (for example `THROTTLE_TTL` above `86400`) stop the API at startup, and `CLEANUP_INTERVAL` must be a valid cron expression. An empty value counts as unset instead of failing validation.
 - **Requests with a wrong token count against the rate limit.** Behind a reverse proxy, set `TRUST_PROXY=1` when you upgrade. Without it, every client has the proxy's address and shares one limit per endpoint, and now unauthenticated requests drain it too: anyone who can reach the proxy can send wrong tokens until your real clients (e.g. the TYPO3 extension) get `429`.
 - **Per-skill AI overrides** that set another provider or their own base URL no longer inherit `AGENT_API_KEY` (see [Per-skill model selection](#per-skill-model-selection)).
+- **Stuck scans older than a day are marked `failed`.** At startup and every five minutes the API looks for pending, running or analyzing scans whose queue job is gone (for example after a crash, or after Redis lost its data). One that changed within the last 24 hours is queued again (at most three times); an older one is marked `failed` instead of being run again from the start, AI audit included. On the first start after the upgrade this fails scans that 0.7.1 left stuck, for example analyzing scans whose job died during the AI audit.
 
 #### Upgrading from an image that ran as root
 

@@ -126,6 +126,74 @@ describe('ScanReconciliationService', () => {
     expect(mockQueue.cancelScanJob).toHaveBeenCalledWith(9);
   });
 
+  describe('scans stuck for more than 24 hours', () => {
+    const hoursAgo = (hours: number) =>
+      new Date(Date.now() - hours * 60 * 60_000);
+
+    it('reads when each candidate last changed', async () => {
+      await service.reconcile();
+
+      expect(mockScanRepo.find.mock.calls[0][0].select).toMatchObject({
+        updatedAt: true,
+      });
+    });
+
+    it.each([ScanStatus.PENDING, ScanStatus.RUNNING, ScanStatus.ANALYZING])(
+      'fails a %s scan that last changed more than 24 h ago instead of re-running it',
+      async (status) => {
+        mockScanRepo.find.mockResolvedValue([
+          { id: 4, status, reconcileAttempts: 0, updatedAt: hoursAgo(25) },
+        ]);
+
+        await service.reconcile();
+
+        expect(mockScanRepo.update).toHaveBeenCalledWith(
+          { id: 4, status },
+          { status: ScanStatus.FAILED },
+        );
+        expect(mockScanRepo.update).toHaveBeenCalledTimes(1);
+        expect(mockQueue.addScanJob).not.toHaveBeenCalled();
+        expect(mockQueue.cancelScanJob).toHaveBeenCalledWith(4);
+      },
+    );
+
+    it('still re-enqueues a stuck scan that changed less than 24 h ago', async () => {
+      mockScanRepo.find.mockResolvedValue([
+        {
+          id: 6,
+          status: ScanStatus.ANALYZING,
+          reconcileAttempts: 0,
+          updatedAt: hoursAgo(23),
+        },
+      ]);
+
+      await service.reconcile();
+
+      expect(mockScanRepo.update).toHaveBeenCalledWith(
+        { id: 6, status: ScanStatus.ANALYZING },
+        { status: ScanStatus.PENDING, reconcileAttempts: 1 },
+      );
+      expect(mockQueue.addScanJob).toHaveBeenCalledWith(6);
+    });
+
+    it('leaves an old scan with a live job alone', async () => {
+      mockScanRepo.find.mockResolvedValue([
+        {
+          id: 8,
+          status: ScanStatus.RUNNING,
+          reconcileAttempts: 0,
+          updatedAt: hoursAgo(48),
+        },
+      ]);
+      mockQueue.getScanJobState.mockResolvedValue('active');
+
+      await service.reconcile();
+
+      expect(mockScanRepo.update).not.toHaveBeenCalled();
+      expect(mockQueue.cancelScanJob).not.toHaveBeenCalled();
+    });
+  });
+
   it('re-enqueues a stale RUNNING scan whose job has failed', async () => {
     mockScanRepo.find.mockResolvedValue([
       { id: 9, status: ScanStatus.RUNNING },
