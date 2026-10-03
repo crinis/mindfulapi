@@ -105,6 +105,11 @@ export class AgentAuditService {
    * Collects trigger-filtered work units from a live page across all active
    * skills. Both the per-scan unit budget and the per-page cap are shared
    * across every skill on the page, so the skills together never exceed either.
+   *
+   * Page skills (one unit each) are collected first and their units lead the
+   * result; element skills share what is left. Otherwise a page with more
+   * images than the cap would leave no room for the page skills, and the
+   * scan-wide clamp, which drops trailing units, would always drop them.
    */
   async collectForPage(
     skills: AuditSkill[],
@@ -121,8 +126,13 @@ export class AgentAuditService {
       return [];
     }
 
+    const pageSkills = skills.filter((skill) => skill.granularity === 'page');
+    const elementSkills = skills.filter(
+      (skill) => skill.granularity !== 'page',
+    );
+
     const units: CollectedUnit[] = [];
-    for (const skill of skills) {
+    for (const skill of [...pageSkills, ...elementSkills]) {
       const budgetLeft = cap - units.length;
       if (budgetLeft <= 0) break;
       try {

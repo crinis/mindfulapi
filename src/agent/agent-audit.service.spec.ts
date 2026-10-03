@@ -19,9 +19,11 @@ import {
   PageTitleSkill,
   type PageTitleEvidence,
 } from './skills/page-title.skill';
+import type { Page } from 'playwright';
 import type {
   AgentFindingDraft,
   AuditSkill,
+  CollectContext,
 } from './skills/audit-skill.interface';
 import { ScanMode } from '../enums/scan-mode.enum';
 
@@ -110,6 +112,88 @@ describe('AgentAuditService.resolveSkills', () => {
       ['image_alt_text'],
     );
     expect(result).toEqual(['skill']);
+  });
+});
+
+describe('AgentAuditService.collectForPage', () => {
+  const page = {} as Page;
+  const pageUrl = 'https://example.com';
+
+  /** An element skill that fills whatever budget it is given. */
+  const elementSkill = (): AuditSkill =>
+    ({
+      id: AgentSkill.IMAGE_ALT_TEXT,
+      granularity: 'element',
+      order: 10,
+      collect: jest.fn((_page: Page, ctx: CollectContext) =>
+        Promise.resolve(
+          Array.from({ length: ctx.maxUnitsPerPage }, (_, i) => ({
+            pageUrl,
+            selector: `img:nth-of-type(${i + 1})`,
+          })),
+        ),
+      ),
+    }) as unknown as AuditSkill;
+  /** A page skill that yields its single unit. */
+  const pageSkill = (id: AgentSkill, order: number): AuditSkill =>
+    ({
+      id,
+      granularity: 'page',
+      order,
+      collect: jest.fn(() => Promise.resolve([{ pageUrl }])),
+    }) as unknown as AuditSkill;
+
+  it('keeps a unit for each page skill on a page with more images than the cap', async () => {
+    const { service } = makeService({ maxUnitsPerPage: 30 });
+    const skills = [
+      elementSkill(),
+      pageSkill(AgentSkill.HEADING_STRUCTURE, 20),
+      pageSkill(AgentSkill.PAGE_TITLE, 50),
+    ];
+
+    const units = await service.collectForPage(skills, page, pageUrl, [], 0);
+
+    const ids = units.map((unit) => unit.skill.id);
+    expect(ids).toContain(AgentSkill.HEADING_STRUCTURE);
+    expect(ids).toContain(AgentSkill.PAGE_TITLE);
+    expect(units).toHaveLength(30);
+    expect(ids.filter((id) => id === AgentSkill.IMAGE_ALT_TEXT)).toHaveLength(
+      28,
+    );
+  });
+
+  it('puts page units first, so the scan-wide clamp drops images first', async () => {
+    const { service } = makeService({ maxUnitsPerPage: 30 });
+    const skills = [
+      elementSkill(),
+      pageSkill(AgentSkill.HEADING_STRUCTURE, 20),
+    ];
+
+    const units = await service.collectForPage(skills, page, pageUrl, [], 0);
+
+    expect(units[0].skill.id).toBe(AgentSkill.HEADING_STRUCTURE);
+  });
+
+  it('gives page skills the scan-wide remainder first', async () => {
+    const { service } = makeService({
+      maxUnitsPerPage: 30,
+      maxUnitsPerScan: 10,
+    });
+    const image = elementSkill();
+    const imageCollect = jest.spyOn(image, 'collect');
+    const skills = [
+      image,
+      pageSkill(AgentSkill.HEADING_STRUCTURE, 20),
+      pageSkill(AgentSkill.LINK_PURPOSE, 30),
+    ];
+
+    // 9 units already buffered: room for one more in this scan.
+    const units = await service.collectForPage(skills, page, pageUrl, [], 9);
+
+    expect(units.map((unit) => unit.skill.id)).toEqual([
+      AgentSkill.HEADING_STRUCTURE,
+    ]);
+    expect(imageCollect).not.toHaveBeenCalled();
   });
 });
 

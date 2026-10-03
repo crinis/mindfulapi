@@ -402,6 +402,8 @@ Axe-core is deterministic: it can tell that an image _has_ an `alt` attribute, b
 | `form_labels` | one per page (text-only) | Form controls: accessible name and its source, control type, placeholder, existing described-by instructions, constraint hints |
 | `page_title` | one per page (text-only) | The `<title>` plus top headings and meta description as topic context |
 
+On each page, the one-per-page skills get their request first; `image_alt_text` uses the rest of `AGENT_MAX_UNITS_PER_PAGE`. When `AGENT_MAX_UNITS_PER_SCAN` runs out, images are dropped before page-level requests.
+
 > **Privacy.** When the AI audit runs, the evidence above is sent to the configured LLM provider. Only enable it with a provider you trust, and consider a self-hosted/local model for sensitive sites.
 
 ### Requesting an audit
