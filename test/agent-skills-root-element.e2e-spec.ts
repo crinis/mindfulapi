@@ -72,6 +72,14 @@ describe('AI skills and scanOptions.rootElement (real browser)', () => {
     ]);
   });
 
+  it('collects an element once when root matches are nested', async () => {
+    const evidence = await new ImageAltTextSkill().collect(
+      page,
+      ctx('main, main img'),
+    );
+    expect(evidence.map((item) => item.alt)).toEqual(['main logo']);
+  });
+
   it('outlines headings only inside the root element', async () => {
     const [evidence] = await new HeadingStructureSkill().collect(
       page,
@@ -96,6 +104,32 @@ describe('AI skills and scanOptions.rootElement (real browser)', () => {
   it('keeps judging the page title page-wide', async () => {
     const [evidence] = await new PageTitleSkill().collect(page, ctx('main'));
     expect(evidence.title).toBe('Store');
+  });
+
+  it('scopes to a root selector with many matches in linear time', async () => {
+    // e.g. rootElement 'div' on a large page: every match is a root.
+    const many = await context.newPage();
+    try {
+      await many.setContent(
+        `<!doctype html><html><head><title>Big</title></head><body>${'<div><p>x</p></div>'.repeat(20_000)}</body></html>`,
+      );
+      for (const skill of [
+        new ImageAltTextSkill(),
+        new HeadingStructureSkill(),
+        new LinkPurposeSkill(),
+        new FormLabelsSkill(),
+      ]) {
+        const started = Date.now();
+        await skill.collect(many, ctx('div'));
+        // The quadratic nested-match filter took about 8 s per skill.
+        expect({ skill: skill.id, slow: Date.now() - started > 2000 }).toEqual({
+          skill: skill.id,
+          slow: false,
+        });
+      }
+    } finally {
+      await many.close();
+    }
   });
 
   it('collects the whole page without a root element', async () => {

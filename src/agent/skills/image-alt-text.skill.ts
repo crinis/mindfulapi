@@ -295,10 +295,9 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
         // root element, the whole document.
         const roots: ParentNode[] = rootElement
           ? (() => {
-              const found = Array.from(document.querySelectorAll(rootElement));
-              return found.filter(
-                (el) =>
-                  !found.some((other) => other !== el && other.contains(el)),
+              // A match inside another match is covered by the outer one.
+              return Array.from(document.querySelectorAll(rootElement)).filter(
+                (el) => !el.parentElement?.closest(rootElement),
               );
             })()
           : [document];

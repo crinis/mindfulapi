@@ -420,10 +420,9 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
         // nested matches once. Without a root element, the whole body.
         const roots: Element[] = rootElement
           ? (() => {
-              const found = Array.from(document.querySelectorAll(rootElement));
-              return found.filter(
-                (el) =>
-                  !found.some((other) => other !== el && other.contains(el)),
+              // A match inside another match is covered by the outer one.
+              return Array.from(document.querySelectorAll(rootElement)).filter(
+                (el) => !el.parentElement?.closest(rootElement),
               );
             })()
           : [document.body ?? document.documentElement];
