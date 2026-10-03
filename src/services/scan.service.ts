@@ -214,7 +214,7 @@ export class ScanService {
       );
     }
     const skills = Array.from(new Set(requested));
-    this.assertModelsConfigured(skills);
+    this.assertModelsConfigured(skills, aiAudit.skills === undefined);
     return skills;
   }
 
@@ -224,10 +224,17 @@ export class ScanService {
    * supported. Such a scan would otherwise run and report every AI task as
    * failed. Invalid keys and unreachable endpoints still surface per task.
    *
-   * @throws BadRequestException Naming the settings to fix, never their values.
+   * @param allEnabled Whether the request named no skills, so `skills` are
+   * every skill `AGENT_SKILLS` enables.
+   * @throws BadRequestException Naming the settings to fix, never their
+   * values, and how to audit without the unconfigured skills instead.
    */
-  private assertModelsConfigured(skills: AgentSkill[]): void {
+  private assertModelsConfigured(
+    skills: AgentSkill[],
+    allEnabled: boolean,
+  ): void {
     const problems: string[] = [];
+    const unconfigured: AgentSkill[] = [];
     for (const skill of skills) {
       try {
         this.modelProviderFactory.resolveUsableModelConfig(skill);
@@ -236,11 +243,22 @@ export class ScanService {
           throw error;
         }
         problems.push(error.message);
+        unconfigured.push(skill);
       }
     }
     if (problems.length > 0) {
+      const names = unconfigured.join(', ');
+      // A request without `skills` gets every enabled skill, so one skill
+      // the operator never configured rejects it until AGENT_SKILLS drops it.
+      const without = allEnabled
+        ? `To run the AI audit without ${names}, remove ${names} from ` +
+          `AGENT_SKILLS (when unset, it enables every skill), or name the ` +
+          `skills to run in aiAudit.skills.`
+        : `To run the AI audit without ${names}, leave ${names} out of ` +
+          `aiAudit.skills.`;
       throw new BadRequestException(
-        `AI audit is not configured correctly on this server. ${problems.join(' ')}`,
+        `AI audit is not configured correctly on this server. ` +
+          `${problems.join(' ')} ${without}`,
       );
     }
   }

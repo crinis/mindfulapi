@@ -433,6 +433,65 @@ describe('ScanService', () => {
           expect(error.message).toMatch(/AGENT_BASE_URL/);
           expect(error.message).not.toContain('sk-very-secret-value');
         });
+
+        it('says an unconfigured skill can be removed from AGENT_SKILLS when the request names none', async () => {
+          // Every enabled skill runs; only heading_structure lacks a key.
+          const service = buildService({
+            enabled: true,
+            allowedSkills: ['page_title', 'heading_structure'],
+            ...usableProvider,
+            skillModels: {
+              heading_structure: {
+                provider: 'anthropic',
+                model: 'claude',
+                apiKey: null,
+                baseUrl: 'https://gateway.example/secret-path',
+                reasoningEffort: null,
+              },
+            },
+          });
+
+          const error = await rejectionOf(
+            service.create({
+              mode: ScanMode.SINGLE_URL,
+              url: 'https://example.com',
+              aiAudit: {},
+            }),
+          );
+
+          expect(error.message).toMatch(
+            /AGENT_SKILL_HEADING_STRUCTURE_API_KEY/,
+          );
+          expect(error.message).toMatch(
+            /remove heading_structure from AGENT_SKILLS/,
+          );
+          expect(error.message).toMatch(/aiAudit\.skills/);
+          expect(error.message).not.toMatch(/page_title/);
+          expect(error.message).not.toContain('sk-test');
+          expect(error.message).not.toContain('secret-path');
+        });
+
+        it('says an unconfigured skill can be left out of the requested skills', async () => {
+          const service = buildService({
+            enabled: true,
+            allowedSkills: ['image_alt_text', 'page_title'],
+            ...usableProvider,
+            apiKey: null,
+          });
+
+          const error = await rejectionOf(
+            service.create(
+              singleUrlAudit([
+                AgentSkill.IMAGE_ALT_TEXT,
+                AgentSkill.PAGE_TITLE,
+              ]),
+            ),
+          );
+
+          expect(error.message).toMatch(
+            /leave image_alt_text, page_title out of aiAudit\.skills/,
+          );
+        });
       });
 
       it('checks only the skills the scan requests', async () => {
