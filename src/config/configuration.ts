@@ -2,6 +2,7 @@ import { registerAs } from '@nestjs/config';
 import { CronExpression } from '@nestjs/schedule';
 import { AgentSkill } from '../enums/agent-skill.enum';
 import { ScanMode } from '../enums/scan-mode.enum';
+import { parseTrustProxy } from './trust-proxy';
 
 /** Provider/model/credentials for a single agent skill (or the global default). */
 export interface AgentModelConfig {
@@ -165,6 +166,8 @@ export const appConfig = registerAs('app', () => ({
   nodeEnv: process.env.NODE_ENV || 'development',
   /** Allowed CORS origins; empty list means CORS stays disabled. */
   corsOrigins: splitList(process.env.CORS_ORIGINS),
+  /** Express `trust proxy`; null keeps the default (no proxy trusted). */
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
 }));
 
 /** Authentication and rate-limit settings. */

@@ -194,7 +194,7 @@ your-domain.example.com {
 }
 ```
 
-If the proxy runs in a container instead, attach it to the Compose network and proxy to `mindfulapi:3000`.
+If the proxy runs in a container instead, attach it to the Compose network and proxy to `mindfulapi:3000`. Behind a proxy, also set `TRUST_PROXY=1` so rate limiting counts each client separately (see [Security](#security)).
 
 **5. Open only the ports you need.**
 
@@ -296,6 +296,7 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 | `CORS_ORIGINS` | _(unset)_ | Comma-separated allowed CORS origins; unset disables CORS |
 | `THROTTLE_TTL` | `60` | Rate-limit window in seconds |
 | `THROTTLE_LIMIT` | `100` | Allowed requests per window per client |
+| `TRUST_PROXY` | _(unset)_ | Proxies whose `X-Forwarded-For` the API trusts for the client address that rate limiting counts by: `true`, `false`, a hop count (1–32), or a comma-separated list of IP addresses, CIDR subnets, `loopback`, `linklocal`, `uniquelocal`. Unset trusts none. See [Security](#security) |
 
 **Storage and services**
 
@@ -364,6 +365,9 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
   - Network isolation cannot separate a page from the run-server: they share the container's network. Give the run-server an unguessable endpoint path instead: in `docker-compose.yml`, append `--path /<random secret>` to the `playwright` command and the same path to the API's `PLAYWRIGHT_WS_URL` (e.g. `ws://playwright:3000/<random secret>`). Connections to any other path are refused; the healthcheck keeps working. Never add `--unsafe`. Complete protection needs an egress proxy or scanning only trusted sites; keep the API access-controlled.
 - **Basic Auth credentials** (`scanOptions.basicAuth`) are sent only to the origin (scheme, host and port) of the first target URL, in answer to its 401 challenge. Subresources, redirect targets and crawled pages on other origins never receive them. If the target redirects to another origin (http → https, `example.com` → `www.example.com`), use the final URL as the target. Split scans whose targets span several protected origins.
 - **Rate limiting** applies to every request per client address (`THROTTLE_TTL` / `THROTTLE_LIMIT`) before authentication, so requests with a wrong token count too and tokens cannot be guessed at full speed. `/health` is exempt.
+  - Behind a reverse proxy every request comes from the proxy's address, so all clients share one limit until `TRUST_PROXY` names the proxy. For one proxy in front, set `TRUST_PROXY=1`: the client address is then the last `X-Forwarded-For` entry, the one the proxy adds (Caddy does this by default; Nginx needs `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`).
+  - With Docker Compose, a proxy on the host reaches the container from the Docker network's gateway address, not from loopback, so `TRUST_PROXY=loopback` does not match; use the hop count.
+  - Set `TRUST_PROXY` only when every request passes the proxy (the default `BIND_ADDRESS=127.0.0.1` with the proxy on the same host). A client that reaches the API directly could otherwise pick its own address with `X-Forwarded-For` and escape the limit.
 - **Request limits.** JSON and form bodies: 1 MB. `url_list`: up to 500 URLs. `crawl`: up to 50 seed URLs, `maxPages` up to 5000 (default 250), `maxDepth` up to 20 (default 4).
 - **Non-root container.** The process runs as the unprivileged `node` user (uid 1000), so `/data` must be writable by it. Fresh installs handle this; upgrades from an old root image need a one-time `chown` (see [Updating](#updating)).
 - **Single replica.** SQLite and the in-process cleanup schedule assume exactly one API instance. Scale throughput with `SCAN_CONCURRENCY`, not with replicas.

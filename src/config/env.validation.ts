@@ -8,8 +8,35 @@ import {
   Matches,
   Max,
   Min,
+  Validate,
+  ValidationArguments,
   validateSync,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
 } from 'class-validator';
+import { parseTrustProxy } from './trust-proxy';
+
+/** Parse error for a TRUST_PROXY value, or null when the app accepts it. */
+function trustProxyError(value: unknown): string | null {
+  try {
+    parseTrustProxy(String(value));
+    return null;
+  } catch (error) {
+    return (error as Error).message;
+  }
+}
+
+/** Accepts exactly the TRUST_PROXY values the app config parses. */
+@ValidatorConstraint({ name: 'trustProxy' })
+class TrustProxyConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    return trustProxyError(value) === null;
+  }
+
+  defaultMessage(args: ValidationArguments): string {
+    return trustProxyError(args.value) ?? 'TRUST_PROXY is invalid';
+  }
+}
 
 /**
  * Declarative schema for every environment variable the application reads.
@@ -121,6 +148,11 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(1)
   THROTTLE_LIMIT?: number;
+
+  /** Express `trust proxy` for client addresses behind a reverse proxy. */
+  @IsOptional()
+  @Validate(TrustProxyConstraint)
+  TRUST_PROXY?: string;
 
   /** Master switch for the optional LLM-agent audit. */
   @IsOptional()

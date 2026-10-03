@@ -1,6 +1,7 @@
 import { NestFactory, HttpAdapterHost } from '@nestjs/core';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { SwaggerModule } from '@nestjs/swagger';
 import { ValidationError } from 'class-validator';
 import helmet from 'helmet';
@@ -10,6 +11,7 @@ import {
   createOpenApiConfig,
   patchOpenApiDocument,
 } from './config/openapi.config';
+import { applyTrustProxy, TrustProxySetting } from './config/trust-proxy';
 import { ProblemDetailsFilter } from './filters/problem-details.filter';
 import {
   flattenValidationErrors,
@@ -22,7 +24,9 @@ import {
  * Initializes security middleware, validation, OpenAPI documentation, and HTTP server startup.
  */
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false,
+  });
 
   // Required so BrowserService and the BullMQ worker shut down cleanly on SIGTERM/SIGINT.
   app.enableShutdownHooks();
@@ -41,6 +45,13 @@ async function bootstrap() {
   app.use(helmet());
 
   const configService = app.get(ConfigService);
+
+  // Behind a reverse proxy, client addresses (which the rate limiter counts
+  // by) come from X-Forwarded-For only for the proxies TRUST_PROXY names.
+  applyTrustProxy(
+    app,
+    configService.get<TrustProxySetting | null>('app.trustProxy') ?? null,
+  );
   const corsOrigins = configService.get<string[]>('app.corsOrigins') ?? [];
   if (corsOrigins.length > 0) {
     app.enableCors({

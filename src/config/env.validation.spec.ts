@@ -120,6 +120,24 @@ describe('env validation', () => {
     expect(() => validate({ SOME_OTHER_TOOL_VAR: 'anything' })).not.toThrow();
   });
 
+  describe('TRUST_PROXY', () => {
+    it.each(['true', 'false', '1', 'loopback, 172.18.0.0/16', '10.0.0.1'])(
+      'accepts %p',
+      (value) => {
+        expect(() => validate({ TRUST_PROXY: value })).not.toThrow();
+      },
+    );
+
+    it.each(['yes', '0', 'proxy.example.com', '10.0.0.0/33', '*'])(
+      'rejects %p at startup',
+      (value) => {
+        expect(() => validate({ TRUST_PROXY: value })).toThrow(
+          /Invalid environment configuration: TRUST_PROXY must be true, false, a hop count/,
+        );
+      },
+    );
+  });
+
   describe('empty values', () => {
     it('accepts the environment docker compose renders from .env.example', () => {
       expect(() => validate(COMPOSE_ENV_FROM_ENV_EXAMPLE)).not.toThrow();
