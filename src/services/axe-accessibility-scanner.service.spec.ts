@@ -28,12 +28,34 @@ function makeRoute(url: string) {
   };
 }
 
-/** Policy stub: IP-literal private hosts and *.internal are blocked. */
+/**
+ * Policy stub: IP-literal private hosts and *.internal are blocked as private
+ * addresses, *.invalid names do not resolve, and lookups of *.flaky fail.
+ */
 function policyDecision(url: string) {
   const host = new URL(url).hostname;
-  return /^(10\.|127\.|169\.254\.)/.test(host) || host.endsWith('.internal')
-    ? { allowed: false, reason: `${host} is in a private or reserved range` }
-    : { allowed: true };
+  if (/^(10\.|127\.|169\.254\.)/.test(host) || host.endsWith('.internal')) {
+    return {
+      allowed: false,
+      code: 'private_address',
+      reason: `${host} is in a private or reserved range`,
+    };
+  }
+  if (host.endsWith('.invalid')) {
+    return {
+      allowed: false,
+      code: 'unresolvable',
+      reason: `hostname ${host} could not be resolved`,
+    };
+  }
+  if (host.endsWith('.flaky')) {
+    return {
+      allowed: false,
+      code: 'lookup_failed',
+      reason: `hostname ${host} could not be resolved (EAI_AGAIN)`,
+    };
+  }
+  return { allowed: true };
 }
 
 /** Browser-context stub recording the guard's route, WS route and listener. */
@@ -73,13 +95,25 @@ function makeContext() {
   return context;
 }
 
-/** Request stub as emitted by context.on('request'). */
-function makeRequest(url: string, page: unknown, redirectedFrom?: string) {
+/**
+ * Request stub as emitted by context.on('request'). `response` is what
+ * request.response() resolves with: by default the browser got an answer.
+ */
+function makeRequest(
+  url: string,
+  page: unknown,
+  redirectedFrom?: string,
+  response: () => Promise<unknown> = () =>
+    Promise.resolve({ status: () => 200 }),
+) {
   return {
     url: () => url,
     redirectedFrom: () =>
       redirectedFrom ? { url: () => redirectedFrom } : null,
     frame: () => ({ page: () => page }),
+    serviceWorker: () => null,
+    isNavigationRequest: () => false,
+    response: jest.fn(response),
   };
 }
 
@@ -221,6 +255,50 @@ describe('AxeAccessibilityScanner target-policy guard', () => {
     expect(urlPolicy.isAllowedTarget).toHaveBeenCalledTimes(1);
   });
 
+  it('caches a name that does not exist like any definitive answer', async () => {
+    await build(false).createContext(browser as any);
+
+    await context.routeHandler!(makeRoute('http://gone.invalid/a.png'));
+    await context.routeHandler!(makeRoute('http://gone.invalid/b.png'));
+
+    expect(urlPolicy.isAllowedTarget).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not keep a failed lookup for the rest of the scan', async () => {
+    await build(false).createContext(browser as any);
+    urlPolicy.isAllowedTarget
+      .mockResolvedValueOnce(policyDecision('http://cdn.flaky/'))
+      .mockResolvedValueOnce({ allowed: true });
+
+    const first = makeRoute('http://cdn.flaky/a.js');
+    await context.routeHandler!(first);
+    const second = makeRoute('http://cdn.flaky/b.js');
+    await context.routeHandler!(second);
+
+    // The first request could not be vetted, so it was not sent; the next
+    // one looked the host up again.
+    expect(first.abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(second.continue).toHaveBeenCalled();
+    expect(urlPolicy.isAllowedTarget).toHaveBeenCalledTimes(2);
+  });
+
+  it('shares one lookup between requests made while it is in flight', async () => {
+    await build(false).createContext(browser as any);
+    let answer!: (result: unknown) => void;
+    urlPolicy.isAllowedTarget.mockReturnValueOnce(
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    );
+
+    const first = context.routeHandler!(makeRoute('http://cdn.flaky/a.js'));
+    const second = context.routeHandler!(makeRoute('http://cdn.flaky/b.js'));
+    answer(policyDecision('http://cdn.flaky/'));
+    await Promise.all([first, second]);
+
+    expect(urlPolicy.isAllowedTarget).toHaveBeenCalledTimes(1);
+  });
+
   describe('redirect hops (never routed by Playwright)', () => {
     it('rejects and closes a page whose request was redirected to a blocked target', async () => {
       const scanner = build(false);
@@ -255,6 +333,126 @@ describe('AxeAccessibilityScanner target-policy guard', () => {
 
       await expect(scanner.assertPageAllowed(page)).resolves.toBeUndefined();
       expect(page.close).not.toHaveBeenCalled();
+    });
+
+    it('flags a hop to a private address without waiting for its response', async () => {
+      const scanner = build(false);
+      await scanner.createContext(browser as any);
+      const page = context.newPage();
+      const request = makeRequest(
+        'http://10.0.0.5/',
+        page,
+        'https://example.com/r',
+        () => new Promise(() => undefined),
+      );
+
+      context.requestListener!(request);
+
+      await expect(scanner.assertPageAllowed(page)).rejects.toThrow(
+        TargetPolicyViolationError,
+      );
+      expect(request.response).not.toHaveBeenCalled();
+    });
+
+    describe('to a host the policy could not resolve', () => {
+      it.each([
+        ['does not exist', 'http://gone.invalid/p.png'],
+        ['failed to look up', 'http://tracker.flaky/p.png'],
+      ])(
+        'keeps the page when the browser failed the hop too (name %s)',
+        async (_label, url) => {
+          const scanner = build(false);
+          await scanner.createContext(browser as any);
+          const page = context.newPage();
+          const request = makeRequest(
+            url,
+            page,
+            'https://cdn.example/r',
+            // net::ERR_NAME_NOT_RESOLVED: the request got no response.
+            () => Promise.resolve(null),
+          );
+
+          context.requestListener!(request);
+
+          await expect(
+            scanner.assertPageAllowed(page),
+          ).resolves.toBeUndefined();
+          expect(request.response).toHaveBeenCalled();
+          expect(page.close).not.toHaveBeenCalled();
+        },
+      );
+
+      it('rejects the page when the browser got a response from it', async () => {
+        const scanner = build(false);
+        await scanner.createContext(browser as any);
+        const page = context.newPage();
+
+        context.requestListener!(
+          makeRequest('http://browser-only.invalid/p.png', page, 'https://a/r'),
+        );
+
+        await expect(scanner.assertPageAllowed(page)).rejects.toThrow(
+          /browser-only\.invalid.*could not be resolved/,
+        );
+        expect(page.close).toHaveBeenCalled();
+      });
+
+      it('waits for the outcome before the page passes', async () => {
+        const scanner = build(false);
+        await scanner.createContext(browser as any);
+        const page = context.newPage();
+        let respond!: (response: unknown) => void;
+        context.requestListener!(
+          makeRequest(
+            'http://late.invalid/p.png',
+            page,
+            'https://a/r',
+            () =>
+              new Promise((resolve) => {
+                respond = resolve;
+              }),
+          ),
+        );
+
+        const check = scanner.assertPageAllowed(page);
+        await flush();
+        respond({ status: () => 200 });
+
+        await expect(check).rejects.toThrow(TargetPolicyViolationError);
+      });
+
+      it('treats a response that ended with the page closing as no response', async () => {
+        const scanner = build(false);
+        await scanner.createContext(browser as any);
+        const page = context.newPage();
+        context.requestListener!(
+          makeRequest('http://slow.invalid/p.png', page, 'https://a/r', () =>
+            Promise.reject(new Error('Target page has been closed')),
+          ),
+        );
+
+        await expect(scanner.assertPageAllowed(page)).resolves.toBeUndefined();
+      });
+
+      it('re-checks a failed lookup once the response arrived', async () => {
+        const scanner = build(false);
+        await scanner.createContext(browser as any);
+        const page = context.newPage();
+        // The first lookup failed transiently; the retry resolves publicly.
+        urlPolicy.isAllowedTarget
+          .mockResolvedValueOnce(policyDecision('http://cdn.flaky/'))
+          .mockResolvedValueOnce({ allowed: true });
+
+        context.requestListener!(
+          makeRequest('http://cdn.flaky/p.png', page, 'https://a/r'),
+        );
+
+        await expect(scanner.assertPageAllowed(page)).resolves.toBeUndefined();
+        const hopLookups = urlPolicy.isAllowedTarget.mock.calls.filter(
+          ([url]) => (url as string).includes('cdn.flaky'),
+        );
+        expect(hopLookups).toHaveLength(2);
+      });
     });
 
     it('leaves first-hop requests to the route handler, which already aborted them', async () => {

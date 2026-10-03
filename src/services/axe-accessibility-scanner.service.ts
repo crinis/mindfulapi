@@ -13,7 +13,11 @@ import AxeBuilder from '@axe-core/playwright';
 import type { AxeResults } from 'axe-core';
 import { IssueImpact } from '../enums/issue-impact.enum';
 import { scanConfig } from '../config/configuration';
-import { TargetPolicyResult, UrlPolicyService } from './url-policy.service';
+import {
+  TargetPolicyBlockCode,
+  TargetPolicyResult,
+  UrlPolicyService,
+} from './url-policy.service';
 
 export interface BasicAuth {
   /** Username used for HTTP Basic Authentication. */
@@ -85,19 +89,40 @@ export class TargetPolicyViolationError extends PageRejectedError {}
 /** WebSocket close code for "policy violation" (RFC 6455 §7.4.1). */
 const WS_POLICY_VIOLATION = 1008;
 
+/**
+ * Block codes that carry no verdict about the address the browser connects
+ * to: the policy could not resolve the name, or got the answer DNS filters
+ * give for blocked names. The browser resolves names on its own and normally
+ * fails such a request too (`net::ERR_NAME_NOT_RESOLVED`, or nothing listening
+ * at the unspecified address), so a redirect hop to such a host is held against
+ * its page only when the browser got a response.
+ */
+const UNVETTED_CODES: ReadonlySet<TargetPolicyBlockCode | undefined> = new Set([
+  'unresolvable',
+  'lookup_failed',
+  'null_route',
+]);
+
 /** Target-policy violations the guard observed for one page. */
 interface PageGuardState {
   /** First violation observed for the page, if any. */
   violation?: string;
   /** Closing of the page, started when the violation was recorded. */
   closing?: Promise<void>;
+  /** Settles when the first violation is recorded. */
+  violated: Promise<void>;
+  /** Settles {@link violated}. */
+  markViolated: () => void;
   /** Policy checks still in flight for requests attributed to the page. */
   pending: Set<Promise<void>>;
 }
 
 /** Target-policy guard state shared by all pages of one browser context. */
 interface ContextGuard {
-  /** Policy decision for a URL, resolved at most once per host. */
+  /**
+   * Policy decision for a URL, resolved at most once per host — except a
+   * failed lookup, which the next request for the host repeats.
+   */
   decide(url: string): Promise<TargetPolicyResult>;
   /** Violation state of a page, created on first use. */
   stateOf(page: Page): PageGuardState;
@@ -177,15 +202,22 @@ export class AxeAccessibilityScanner {
    *   before it is sent when its host is blocked.
    * - Redirect hops are never passed to route handlers — Playwright continues
    *   them itself — so they cannot be stopped in flight. A request listener
-   *   checks every hop instead; a hop to a blocked host marks its page as
-   *   violating and closes it. {@link assertPageAllowed} then rejects the page,
-   *   so the scanner never analyses, stores or sends to the AI audit anything
-   *   it loaded. The hop's request has already been sent and its response
-   *   reaches the browser, though: a malicious page's own script can read a
-   *   CORS-readable response from the blocked host and exfiltrate it before
-   *   the close completes. The host is generally not yet in the decision cache
-   *   when the hop fires (the hop is the first contact with it), so the close
-   *   cannot be made synchronous; fully closing this needs an egress proxy.
+   *   checks every hop instead; a hop to a host that is or resolves to a
+   *   private or reserved address marks its page as violating and closes it.
+   *   {@link assertPageAllowed} then rejects the page, so the scanner never
+   *   analyses, stores or sends to the AI audit anything it loaded. The hop's
+   *   request has already been sent and its response reaches the browser,
+   *   though: a malicious page's own script can read a CORS-readable response
+   *   from the blocked host and exfiltrate it before the close completes. The
+   *   host is generally not yet in the decision cache when the hop fires (the
+   *   hop is the first contact with it), so the close cannot be made
+   *   synchronous; fully closing this needs an egress proxy.
+   * - A hop to a host the policy has no verdict on (see {@link UNVETTED_CODES}:
+   *   the name does not resolve, the lookup failed, or a DNS filter answered
+   *   `0.0.0.0`) counts only when the browser got a response from it: the
+   *   browser then reached a host the policy could not vet. When the browser
+   *   failed the hop as well, nothing reached the page, and the page stays
+   *   scannable, as a broken image or frame of an otherwise public page.
    * - WebSockets opened by pages are checked before they connect. This is
    *   Playwright's page-level `WebSocket` shim: it does not reach dedicated
    *   workers, and page script can get past it, so it is defence in depth,
@@ -198,8 +230,9 @@ export class AxeAccessibilityScanner {
    *   {@link createContext}).
    *
    * Decisions are cached per host for the context's lifetime, so each distinct
-   * host is resolved at most once. The browser resolves DNS independently of
-   * the policy check, so DNS rebinding remains the documented limitation.
+   * host is resolved at most once; a failed lookup is not kept, so the next
+   * request for the host asks again. The browser resolves DNS independently
+   * of the policy check, so DNS rebinding remains the documented limitation.
    */
   private async installTargetPolicyGuard(
     context: BrowserContext,
@@ -240,32 +273,50 @@ export class AxeAccessibilityScanner {
         try {
           host = new URL(url).hostname.replace(/^\[|\]$/g, '').toLowerCase();
         } catch {
-          return Promise.resolve({ allowed: false, reason: 'invalid URL' });
+          return Promise.resolve({
+            allowed: false,
+            code: 'invalid_url',
+            reason: 'invalid URL',
+          });
         }
-        let decision = decisionByHost.get(host);
-        if (!decision) {
-          decision = this.urlPolicy
-            .isAllowedTarget(url)
-            .catch((error: unknown) => ({
+        const cached = decisionByHost.get(host);
+        if (cached) return cached;
+
+        const decision: Promise<TargetPolicyResult> = this.urlPolicy
+          .isAllowedTarget(url)
+          .catch(
+            (error: unknown): TargetPolicyResult => ({
               allowed: false,
+              code: 'lookup_failed',
               reason: `policy check failed: ${String(error)}`,
-            }))
-            .then((result) => {
-              if (!result.allowed) {
-                this.logger.warn(
-                  `Blocked browser access to ${url}: ${result.reason ?? 'target not allowed'}`,
-                );
+            }),
+          )
+          .then((result) => {
+            if (result.code === 'lookup_failed') {
+              // Requests made while the lookup ran share it; later ones ask
+              // again instead of failing for the rest of the scan.
+              if (decisionByHost.get(host) === decision) {
+                decisionByHost.delete(host);
               }
-              return result;
-            });
-          decisionByHost.set(host, decision);
-        }
+            }
+            if (!result.allowed) {
+              const message = `Blocked browser access to ${url}: ${result.reason ?? 'target not allowed'}`;
+              if (UNVETTED_CODES.has(result.code)) this.logger.debug(message);
+              else this.logger.warn(message);
+            }
+            return result;
+          });
+        decisionByHost.set(host, decision);
         return decision;
       },
       stateOf: (page) => {
         let state = stateByPage.get(page);
         if (!state) {
-          state = { pending: new Set() };
+          let markViolated!: () => void;
+          const violated = new Promise<void>((resolve) => {
+            markViolated = resolve;
+          });
+          state = { pending: new Set(), violated, markViolated };
           stateByPage.set(page, state);
         }
         return state;
@@ -314,21 +365,56 @@ export class AxeAccessibilityScanner {
     }
 
     const pages = this.pagesOf(request, context);
-    const check = guard.decide(url).then((decision) => {
-      if (decision.allowed) return;
-      const reason =
-        `redirect from ${redirectedFrom.url()} reached blocked target ${url}` +
-        ` (${decision.reason ?? 'target not allowed'})`;
-      for (const page of pages) {
-        this.flagViolation(guard, page, reason);
-      }
-    });
+    const check = this.checkRedirectHop(request, url, guard).then(
+      (violation) => {
+        if (!violation) return;
+        const reason = `redirect from ${redirectedFrom.url()} reached ${violation}`;
+        for (const page of pages) {
+          this.flagViolation(guard, page, reason);
+        }
+      },
+    );
 
     for (const page of pages) {
       const { pending } = guard.stateOf(page);
       pending.add(check);
       void check.finally(() => pending.delete(check));
     }
+  }
+
+  /**
+   * Decides whether a redirect hop violates the target policy.
+   *
+   * A host that is (or resolves to) a private or reserved address violates it
+   * at once. A host the policy has no verdict on ({@link UNVETTED_CODES})
+   * violates it only once the browser got a response from it; the decision is
+   * then taken again, because a failed lookup is not cached and may succeed
+   * now. A hop the browser failed as well (or that was still open when its
+   * page closed) reached nothing.
+   *
+   * @returns What the hop reached, for the violation message, or `null`.
+   */
+  private async checkRedirectHop(
+    request: Request,
+    url: string,
+    guard: ContextGuard,
+  ): Promise<string | null> {
+    let decision = await guard.decide(url);
+    if (decision.allowed) return null;
+
+    if (UNVETTED_CODES.has(decision.code)) {
+      const answered = await request.response().then(
+        (response) => response !== null,
+        () => false,
+      );
+      if (!answered) return null;
+      decision = await guard.decide(url);
+      if (decision.allowed) return null;
+      if (UNVETTED_CODES.has(decision.code)) {
+        return `${url}, which answered the browser although the target policy could not vet it (${decision.reason ?? 'target not allowed'})`;
+      }
+    }
+    return `blocked target ${url} (${decision.reason ?? 'target not allowed'})`;
   }
 
   /**
@@ -354,6 +440,7 @@ export class AxeAccessibilityScanner {
       `Rejecting page after a target-policy violation: ${reason}`,
     );
     state.closing = page.close().catch(() => undefined);
+    state.markViolated();
   }
 
   /** WebSocket route: connects only sockets whose host is allowed. */
@@ -450,8 +537,13 @@ export class AxeAccessibilityScanner {
     if (!guard) return;
 
     const state = guard.stateOf(page);
-    while (state.pending.size > 0) {
-      await Promise.all([...state.pending]);
+    // A check may wait for the outcome of its request (see checkRedirectHop);
+    // a violation found meanwhile is reported without waiting for the rest.
+    while (!state.violation && state.pending.size > 0) {
+      await Promise.race([
+        Promise.allSettled([...state.pending]),
+        state.violated,
+      ]);
     }
     if (state.violation) {
       await state.closing;

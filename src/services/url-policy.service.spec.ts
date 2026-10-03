@@ -141,6 +141,87 @@ describe('UrlPolicyService', () => {
     });
   });
 
+  describe('block codes', () => {
+    const dnsError = (code: string) =>
+      Object.assign(new Error(`getaddrinfo ${code} host`), { code });
+
+    it.each([
+      ['an IP literal', 'http://10.0.0.5/', null],
+      ['a private answer', 'https://evil.example/', '10.0.0.8'],
+      [
+        'a mixed unspecified and private answer',
+        'https://evil.example/',
+        '0.0.0.0,10.0.0.8',
+      ],
+      ['the unspecified IP literal', 'http://0.0.0.0/', null],
+    ])('marks %s as a private address', async (_label, url, answer) => {
+      if (answer) {
+        mockLookup.mockResolvedValue(
+          answer.split(',').map((address) => ({ address, family: 4 })),
+        );
+      }
+      const result = await makeService().isAllowedTarget(url);
+      expect(result).toEqual(
+        expect.objectContaining({ allowed: false, code: 'private_address' }),
+      );
+    });
+
+    it('marks a name that does not exist as unresolvable', async () => {
+      mockLookup.mockRejectedValue(dnsError('ENOTFOUND'));
+      const result = await makeService().isAllowedTarget(
+        'https://nxdomain.invalid/',
+      );
+      expect(result).toEqual(
+        expect.objectContaining({ allowed: false, code: 'unresolvable' }),
+      );
+      expect(result.reason).toContain('could not be resolved');
+    });
+
+    it.each(['EAI_AGAIN', 'EAI_FAIL', 'ETIMEOUT'])(
+      'marks a lookup that failed with %s as failed, not as unresolvable',
+      async (code) => {
+        mockLookup.mockRejectedValue(dnsError(code));
+        const result = await makeService().isAllowedTarget(
+          'https://flaky.example/',
+        );
+        expect(result).toEqual(
+          expect.objectContaining({ allowed: false, code: 'lookup_failed' }),
+        );
+        expect(result.reason).toContain(code);
+      },
+    );
+
+    it.each([
+      ['0.0.0.0', 4],
+      ['::', 6],
+    ])(
+      'marks a name answered only with %s (a DNS filter) as a null route',
+      async (address, family) => {
+        mockLookup.mockResolvedValue([{ address, family }]);
+        const result = await makeService().isAllowedTarget(
+          'https://tracker.example/',
+        );
+        expect(result).toEqual(
+          expect.objectContaining({ allowed: false, code: 'null_route' }),
+        );
+      },
+    );
+
+    it('marks an unparsable URL as invalid', async () => {
+      const result = await makeService().isAllowedTarget('not a url');
+      expect(result).toEqual(
+        expect.objectContaining({ allowed: false, code: 'invalid_url' }),
+      );
+    });
+
+    it('gives allowed results no code', async () => {
+      const result = await makeService().isAllowedTarget(
+        'http://93.184.216.34/',
+      );
+      expect(result).toEqual({ allowed: true });
+    });
+  });
+
   describe('configuration overrides', () => {
     it('allows everything when allowPrivateTargets is true', async () => {
       const service = makeService({ allowPrivateTargets: true });

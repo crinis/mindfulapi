@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { ServerResponse } from 'node:http';
 import { DataSource, Repository } from 'typeorm';
 import { Job } from 'bullmq';
+import { Browser, chromium } from 'playwright';
 import { Scan } from '../src/entities/scan.entity';
 import { Issue } from '../src/entities/issue.entity';
 import { AgentFinding } from '../src/entities/agent-finding.entity';
@@ -46,6 +47,10 @@ function violatingPage(
       `<body><h1>${title}</h1><img src="/pixel.png"></body></html>`,
   );
 }
+
+/** A 1x1 PNG. */
+const PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 /** Credentials the protected fixture page expects. */
 const BASIC_AUTH = { username: 'scanner', password: 's3cret' };
@@ -217,6 +222,32 @@ describe('Scan target security (real browser)', () => {
             ' <a href="/alias-b">About us</a></nav>',
         ),
         '/r/frame': redirectTo(() => internalUrl('/frame')),
+        // A host no resolver knows (RFC 6761 reserves .invalid), and one only
+        // the browser resolves (see browserOnlyResolver).
+        '/r/nxdomain': redirectTo(() => 'http://nxdomain.invalid/pixel.png'),
+        '/r/browser-only': redirectTo(
+          () => `http://browser-only.invalid:${site.port}/logo.png`,
+        ),
+        '/logo.png': (_req, res) => {
+          res.setHeader('content-type', 'image/png');
+          res.end(Buffer.from(PNG_BASE64, 'base64'));
+        },
+        '/image-to-nxdomain': htmlPage(
+          'Has an image that redirects to a missing host',
+          '<img src="/r/nxdomain"><img src="/pixel.png">',
+        ),
+        '/frame-to-nxdomain': htmlPage(
+          'Has a frame that redirects to a missing host',
+          '<iframe title="Ad" src="/r/nxdomain"></iframe><img src="/pixel.png">',
+        ),
+        '/crawl-nxdomain': htmlPage(
+          'Crawl start with a missing-host image',
+          '<img src="/r/nxdomain" alt=""><a href="/about.html">About</a>',
+        ),
+        '/image-to-browser-only': htmlPage(
+          'Has an image that redirects to a host only the browser resolves',
+          '<img alt="Logo" src="/r/browser-only"><script src="/slow.js"></script>',
+        ),
         '/r/script': redirectTo(() => internalUrl('/evil.js')),
         // Holds back DOMContentLoaded so an iframe's redirect resolves first.
         '/slow.js': (_req, res) => {
@@ -382,6 +413,83 @@ describe('Scan target security (real browser)', () => {
       expect(scan.pagesScanned).toBe(1);
       expect(scan.pagesFailed).toBe(0);
       expect(internal.requests).toEqual([]);
+    });
+
+    describe('redirect hops to hosts the policy cannot resolve', () => {
+      /**
+       * A browser whose resolver knows `browser-only.invalid` (as the site's
+       * address), which the API's resolver does not: DNS that differs between
+       * the API and the browser.
+       */
+      let browserOnlyResolver: Browser;
+
+      beforeAll(async () => {
+        browserOnlyResolver = await chromium.launch({
+          args: ['--host-resolver-rules=MAP browser-only.invalid 127.0.0.1'],
+        });
+      });
+
+      afterAll(async () => {
+        await browserOnlyResolver.close();
+      });
+
+      it.each(['/image-to-nxdomain', '/frame-to-nxdomain'])(
+        'scans %s, whose redirect hop the browser fails too',
+        async (path) => {
+          const { processor } = buildProcessor(guarded);
+
+          const scan = await runScan(processor, {
+            mode: ScanMode.SINGLE_URL,
+            targets: [siteUrl(path)],
+          });
+
+          expect(scan.pagesScanned).toBe(1);
+          expect(scan.pagesFailed).toBe(0);
+          expect(scan.issues.map((issue) => issue.ruleId)).toContain(
+            'image-alt',
+          );
+          expect(agentAudit.collectForPage).toHaveBeenCalledTimes(1);
+        },
+      );
+
+      it('keeps crawling from a seed whose template has such a hop', async () => {
+        const { processor } = buildProcessor(guarded);
+
+        const scan = await runScan(processor, {
+          mode: ScanMode.CRAWL,
+          targets: [siteUrl('/crawl-nxdomain')],
+          crawlMaxPages: 5,
+          crawlMaxDepth: 1,
+          crawlStrategy: CrawlStrategy.SameHostname,
+        });
+
+        expect(scan.pagesScanned).toBe(2);
+        expect(scan.pagesFailed).toBe(0);
+      });
+
+      it('rejects a page when the browser got a response from such a host', async () => {
+        const { scanner } = buildProcessor(guarded);
+        const context = await scanner.createContext(browserOnlyResolver);
+        try {
+          const page = await context.newPage();
+
+          const scan = scanner.scanPage(
+            page,
+            siteUrl('/image-to-browser-only'),
+          );
+
+          await expect(scan).rejects.toThrow(TargetPolicyViolationError);
+          await expect(scan).rejects.toThrow('browser-only.invalid');
+          expect(
+            site.requests.some(
+              (request) =>
+                request.headers.host === `browser-only.invalid:${site.port}`,
+            ),
+          ).toBe(true);
+        } finally {
+          await context.close();
+        }
+      });
     });
 
     it('refuses a WebSocket to a blocked address before it connects', async () => {

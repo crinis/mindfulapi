@@ -73,13 +73,42 @@ function embeddedIpv4(address: string): string | null {
   ].join('.');
 }
 
+/**
+ * Why a URL is blocked. Callers that only need a yes or no use `allowed`; the
+ * browser guard tells a verdict about the address from a missing one:
+ *
+ * - `private_address`: the host is, or resolves to, a private or reserved
+ *   address.
+ * - `null_route`: the name resolves only to the unspecified address (`0.0.0.0`
+ *   or `::`), the answer DNS filters such as Pi-hole give for blocked names.
+ *   The browser reaches its own host at that address.
+ * - `unresolvable`: the name does not exist or has no address (NXDOMAIN).
+ * - `lookup_failed`: the lookup itself failed (timeout, SERVFAIL, `EAI_AGAIN`);
+ *   asking again may succeed.
+ * - `invalid_url`: the URL cannot be parsed.
+ */
+export type TargetPolicyBlockCode =
+  | 'private_address'
+  | 'null_route'
+  | 'unresolvable'
+  | 'lookup_failed'
+  | 'invalid_url';
+
 /** Outcome of a target policy check. */
 export interface TargetPolicyResult {
   /** Whether the URL may be fetched by the scanner. */
   allowed: boolean;
+  /** Why the URL is blocked; absent when it is allowed. */
+  code?: TargetPolicyBlockCode;
   /** Human-readable reason when the URL is blocked. */
   reason?: string;
 }
+
+/** `getaddrinfo` error code (as Node reports it) for a name with no address. */
+const NAME_NOT_FOUND = 'ENOTFOUND';
+
+/** The unspecified addresses, which DNS filters answer for blocked names. */
+const UNSPECIFIED_ADDRESSES = new Set(['0.0.0.0', '::']);
 
 /**
  * Guards the scanner against server-side request forgery (SSRF).
@@ -154,7 +183,7 @@ export class UrlPolicyService {
     try {
       hostname = new URL(url).hostname;
     } catch {
-      return { allowed: false, reason: 'invalid URL' };
+      return { allowed: false, code: 'invalid_url', reason: 'invalid URL' };
     }
 
     // URL wraps IPv6 literals in brackets.
@@ -175,10 +204,34 @@ export class UrlPolicyService {
     let addresses: { address: string; family: number }[];
     try {
       addresses = await lookup(host, { all: true, verbatim: true });
-    } catch {
+    } catch (error) {
+      const errorCode = (error as NodeJS.ErrnoException | undefined)?.code;
+      return errorCode && errorCode !== NAME_NOT_FOUND
+        ? {
+            allowed: false,
+            code: 'lookup_failed',
+            reason: `hostname ${host} could not be resolved (${errorCode})`,
+          }
+        : {
+            allowed: false,
+            code: 'unresolvable',
+            reason: `hostname ${host} could not be resolved`,
+          };
+    }
+    if (addresses.length === 0) {
       return {
         allowed: false,
+        code: 'unresolvable',
         reason: `hostname ${host} could not be resolved`,
+      };
+    }
+
+    if (addresses.every(({ address }) => UNSPECIFIED_ADDRESSES.has(address))) {
+      const answer = addresses.map(({ address }) => address).join(', ');
+      return {
+        allowed: false,
+        code: 'null_route',
+        reason: `hostname ${host} resolves only to ${answer}, the answer of a DNS filter for a blocked name`,
       };
     }
 
@@ -240,6 +293,7 @@ export class UrlPolicyService {
       const via = sourceHost ? ` (resolved from ${sourceHost})` : '';
       return {
         allowed: false,
+        code: 'private_address',
         reason: `address ${address}${via} is in a private or reserved range`,
       };
     }
