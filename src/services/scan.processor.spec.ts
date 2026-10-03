@@ -51,6 +51,7 @@ import { ScanMode } from '../enums/scan-mode.enum';
 import { ScanStatus } from '../enums/scan-status.enum';
 import { IssueImpact } from '../enums/issue-impact.enum';
 import { CrawlStrategy } from '../enums/crawl-strategy.enum';
+import { normalizeHttpUrl } from '../utils/url-normalization.util';
 
 type MockRepo = {
   findOne: jest.Mock;
@@ -742,11 +743,63 @@ describe('ScanProcessor', () => {
       ]);
     });
 
-    it('fails a seed that redirects to another site', async () => {
+    it.each([
+      ['another site', 'https://example.com/', 'https://elsewhere.org/'],
+      [
+        'a single-label host → its FQDN',
+        'http://intranet/',
+        'http://intranet.corp.local/',
+      ],
+      [
+        'localhost → its IP address',
+        'http://localhost:8080/',
+        'http://127.0.0.1:8080/',
+      ],
+      [
+        'a brand → its group site',
+        'https://brand.com/',
+        'https://brand-group.com/brand/',
+      ],
+    ])(
+      'scopes a seed by its landing URL on %s',
+      async (_label, seed, landing) => {
+        mockScanQb.getOne.mockResolvedValue(crawlScan({ targets: [seed] }));
+        const next = new URL('next', landing).href;
+        serveSite({ [seed]: landing }, { [landing]: [next, seed] });
+        const crawl = simulateCrawl([seed]);
+        mockCrawlerRunHandler = crawl.run;
+
+        await processor.process({ data: { scanId: 1 } } as any);
+
+        expect(mockUrlPolicy.isAllowedTarget).toHaveBeenCalledWith(landing);
+        expect(crawl.enqueueCalls[0].baseUrl).toBe(landing);
+        expect(crawl.handled.map((request) => request.url)).toEqual([
+          seed,
+          next,
+        ]);
+        // Issues are stored under the normalized page URL.
+        expect(storedPageUrls()).toEqual([normalizeHttpUrl(landing), next]);
+        expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
+          status: ScanStatus.COMPLETED,
+          pagesDiscovered: 2,
+          pagesScanned: 2,
+          pagesFailed: 0,
+        });
+      },
+    );
+
+    it('fails a seed whose landing URL the target policy blocks', async () => {
       mockScanQb.getOne.mockResolvedValue(crawlScan());
       serveSite(
-        { 'https://example.com/': 'https://elsewhere.org/' },
-        { 'https://elsewhere.org/': ['https://elsewhere.org/more'] },
+        { 'https://example.com/': 'https://internal.example/' },
+        { 'https://internal.example/': ['https://internal.example/more'] },
+      );
+      mockUrlPolicy.isAllowedTarget.mockImplementation((url: string) =>
+        Promise.resolve(
+          url.startsWith('https://internal.example/')
+            ? { allowed: false, reason: 'private address' }
+            : { allowed: true },
+        ),
       );
       const crawl = simulateCrawl(['https://example.com/']);
       mockCrawlerRunHandler = crawl.run;

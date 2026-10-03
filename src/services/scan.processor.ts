@@ -33,10 +33,7 @@ import {
   normalizeHttpUrl,
 } from '../utils/url-normalization.util';
 import { DEFAULT_CRAWL_OPTIONS } from '../constants/crawl-options.constants';
-import {
-  isWithinCrawlScope,
-  resolveSeedScope,
-} from '../utils/crawl-scope.util';
+import { isWithinCrawlScope } from '../utils/crawl-scope.util';
 import { scanConfig } from '../config/configuration';
 import { CrawlStrategy } from '../enums/crawl-strategy.enum';
 import { truncate } from '../utils/truncate.util';
@@ -673,10 +670,10 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
    * passed to Crawlee's native `enqueueLinks` utility, which applies the
    * strategy and glob filters before adding them to the queue.
    *
-   * The strategy is applied against each seed's scope (the seed URL, or its
-   * landing URL when it redirects within its own site), not against the URL a
-   * page redirected to. A page whose final URL leaves that scope, or that was
-   * already scanned under another URL, is skipped.
+   * The strategy is applied against each seed's scope — the seed's landing
+   * URL after redirects, once that passed the target policy — not against
+   * the URL a later page redirected to. A page whose final URL leaves that
+   * scope, or that was already scanned under another URL, is skipped.
    */
   private async performCrawl(
     scan: Scan,
@@ -764,8 +761,9 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
      * the crawl-scope checks, axe analysis, AI evidence collection and link
      * extraction. Stores and enqueues nothing.
      *
-     * Links are scoped by the crawl's seed, never by wherever a page
-     * redirected to; children inherit the scope through userData.
+     * Links are scoped by the landing URL of the crawl's seed, never by
+     * wherever a later page redirected to; children inherit the scope through
+     * userData.
      */
     const inspectCrawlPage = async (
       page: Page,
@@ -778,17 +776,30 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
       try {
         const { finalUrl } = await this.scanner.openPage(page, url);
         if (depth === 0) {
-          // apex → www or http → https keeps the crawl on the seed's site; a
-          // redirect to another site does not move it there.
-          scopeUrl = resolveSeedScope(url, finalUrl);
-        }
-        if (!isWithinCrawlScope(finalUrl, scopeUrl, crawlStrategy)) {
-          const reason = `redirected outside the crawl scope to ${finalUrl}`;
-          // A seed doing so is most likely a wrong seed URL — surface it as a
-          // failure. Any other page is like a link the strategy filters out.
-          return depth === 0
-            ? { kind: 'failed', reason, links: [], scopeUrl }
-            : { kind: 'skipped', reason };
+          // The seed's landing URL sets the scope of everything found from
+          // it (apex → www, http → https, intranet → intranet.corp.local,
+          // localhost → 127.0.0.1, brand.com → brand-group.com). The scope is
+          // no security boundary — the target policy is, and the landing URL
+          // has to pass it before it may define the scope.
+          if (finalUrl !== url) {
+            const policy =
+              await this.urlPolicyService.isAllowedTarget(finalUrl);
+            if (!policy.allowed) {
+              return {
+                kind: 'failed',
+                reason: `redirected to the blocked target ${finalUrl} (${policy.reason ?? 'target not allowed'})`,
+                links: [],
+                scopeUrl,
+              };
+            }
+          }
+          scopeUrl = finalUrl;
+        } else if (!isWithinCrawlScope(finalUrl, scopeUrl, crawlStrategy)) {
+          // Like a link the strategy filters out: not a page of this crawl.
+          return {
+            kind: 'skipped',
+            reason: `redirected outside the crawl scope to ${finalUrl}`,
+          };
         }
         const finalKey = normalizeHttpUrl(finalUrl) ?? finalUrl;
         if (scannedFinalUrls.has(finalKey)) {

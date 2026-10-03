@@ -588,10 +588,11 @@ All endpoints are under `/v1` (for example `POST /v1/scans`). Errors follow [RFC
 
 - its navigation ends with HTTP 400 or higher, also after redirects, or without a response;
 - it, or a redirect it follows, reaches an address the [SSRF protection](#security) blocks;
-- it is a crawl seed that redirects out of the crawl's scope;
 - it does not finish within two minutes.
 
-_Unreleased; 0.7.1 analyses and stores HTTP error pages and pages that redirect to blocked or out-of-scope addresses like any other page, and has no time limit per page._
+A crawl follows the links it finds within the scope of the URL each seed lands on after redirects (`http://example.com/` → `https://www.example.com/`, `http://intranet/` → `http://intranet.corp.local/`). A later page that redirects outside that scope is skipped: it counts neither as discovered nor as failed, and its links are not followed. A page reached through several redirecting URLs is scanned once.
+
+_Unreleased; 0.7.1 analyses and stores HTTP error pages and pages that redirect to blocked addresses like any other page, has no time limit per page, scopes the links of every page by the URL that page landed on, so a redirect to another host moves the crawl there, and scans a page once for every URL that redirects to it._
 
 The unauthenticated health probe is `GET /health`:
 

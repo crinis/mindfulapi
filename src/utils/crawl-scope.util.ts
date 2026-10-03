@@ -12,27 +12,6 @@ function siteOf(hostname: string): string {
 }
 
 /**
- * Picks the crawl scope of a seed after navigating to it: its landing URL when
- * the seed redirected within its own site (apex → www, http → https, another
- * subdomain), otherwise the seed URL itself — a redirect to another site must
- * not move the whole crawl there.
- *
- * @param seedUrl URL the seed was requested with.
- * @param finalUrl URL the seed's navigation ended on.
- */
-export function resolveSeedScope(seedUrl: string, finalUrl: string): string {
-  try {
-    const seed = new URL(seedUrl);
-    const final = new URL(finalUrl);
-    return siteOf(seed.hostname) === siteOf(final.hostname)
-      ? finalUrl
-      : seedUrl;
-  } catch {
-    return seedUrl;
-  }
-}
-
-/**
  * Whether a URL belongs to a crawl scope under an enqueue strategy, mirroring
  * how Crawlee's `enqueueLinks` filters links against its `baseUrl`:
  * `same_hostname` compares host and port (any HTTP scheme), `same_origin` also
@@ -40,7 +19,7 @@ export function resolveSeedScope(seedUrl: string, finalUrl: string): string {
  * everything.
  *
  * @param url URL to test, e.g. the final URL of a crawled page.
- * @param scopeUrl Scope of the crawl (see {@link resolveSeedScope}).
+ * @param scopeUrl Scope of the crawl: the landing URL of the page's seed.
  * @param strategy Crawl strategy of the scan.
  */
 export function isWithinCrawlScope(

@@ -1,49 +1,5 @@
 import { CrawlStrategy } from '../enums/crawl-strategy.enum';
-import { isWithinCrawlScope, resolveSeedScope } from './crawl-scope.util';
-
-describe('resolveSeedScope', () => {
-  it.each([
-    ['apex → www', 'https://example.com/', 'https://www.example.com/'],
-    ['www → apex', 'https://www.example.com/', 'https://example.com/'],
-    ['http → https', 'http://example.com/', 'https://example.com/start'],
-    [
-      'subdomain of the same site',
-      'https://example.com/',
-      'https://shop.example.com/',
-    ],
-    [
-      'public-suffix aware',
-      'https://example.co.uk/',
-      'https://www.example.co.uk/',
-    ],
-    [
-      'same IP host, other port',
-      'http://127.0.0.1:8080/',
-      'http://127.0.0.1:9090/',
-    ],
-  ])(
-    'moves the scope to a same-site landing URL (%s)',
-    (_label, seed, final) => {
-      expect(resolveSeedScope(seed, final)).toBe(final);
-    },
-  );
-
-  it.each([
-    ['another site', 'https://example.com/', 'https://elsewhere.org/'],
-    [
-      'a sibling under a public suffix',
-      'https://example.co.uk/',
-      'https://other.co.uk/',
-    ],
-    [
-      'another loopback name',
-      'http://127.0.0.1:8080/',
-      'http://localhost:8080/',
-    ],
-  ])('keeps the seed as scope when it lands on %s', (_label, seed, final) => {
-    expect(resolveSeedScope(seed, final)).toBe(seed);
-  });
-});
+import { isWithinCrawlScope } from './crawl-scope.util';
 
 describe('isWithinCrawlScope', () => {
   const scope = 'https://www.example.com/';

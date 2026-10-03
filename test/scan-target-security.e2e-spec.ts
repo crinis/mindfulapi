@@ -105,6 +105,9 @@ describe('Scan target security (real browser)', () => {
   const siteUrl = (path: string): string => `${site.baseUrl}${path}`;
   const internalUrl = (path: string): string =>
     `http://localhost:${internal.port}${path}`;
+  /** The site under its loopback name instead of its address. */
+  const loopbackNameUrl = (path: string): string =>
+    `http://localhost:${site.port}${path}`;
   /** Policy of a deployment that only allowlists the site's host. */
   const guarded = {
     allowPrivateTargets: false,
@@ -216,6 +219,14 @@ describe('Scan target security (real browser)', () => {
         '/to-other-login': redirectTo(() => internalUrl('/auth-page')),
         '/alias-a': redirectTo(() => siteUrl('/about.html')),
         '/alias-b': redirectTo(() => siteUrl('/about.html')),
+        // Seeds given under another name of the site's host.
+        '/to-loopback-home': redirectTo(() => siteUrl('/crawl-home')),
+        '/crawl-home': (req, res) =>
+          htmlPage(
+            'Crawl home',
+            '<img src="/pixel.png"><nav><a href="/about.html">About</a>' +
+              ` <a href="${loopbackNameUrl('/index.html')}">Home by name</a></nav>`,
+          )(req, res),
         '/crawl-start': htmlPage(
           'Crawl start',
           '<nav><a href="/to-internal">Partner</a> <a href="/alias-a">About</a>' +
@@ -609,6 +620,48 @@ describe('Scan target security (real browser)', () => {
       expect(scan.pagesDiscovered).toBe(2);
       expect(scan.pagesScanned).toBe(2);
       expect(scan.pagesFailed).toBe(0);
+    });
+
+    it('crawls from the landing URL of a seed that redirects to another host name', async () => {
+      // localhost → 127.0.0.1: no registrable domain on either side.
+      const { processor } = buildProcessor({ allowPrivateTargets: true });
+
+      const scan = await runScan(processor, {
+        mode: ScanMode.CRAWL,
+        targets: [loopbackNameUrl('/to-loopback-home')],
+        crawlMaxPages: 10,
+        crawlMaxDepth: 1,
+        crawlStrategy: CrawlStrategy.SameHostname,
+      });
+
+      expect(scan.status).toBe(ScanStatus.COMPLETED);
+      // Landing page + about; the link back to the seed's host name is out
+      // of the landing URL's scope.
+      expect(scan.pagesDiscovered).toBe(2);
+      expect(scan.pagesScanned).toBe(2);
+      expect(scan.pagesFailed).toBe(0);
+      const issuePages = new Set(scan.issues.map((issue) => issue.pageUrl));
+      expect(issuePages).toEqual(
+        new Set([siteUrl('/crawl-home'), siteUrl('/about.html')]),
+      );
+    });
+
+    it('fails a seed whose landing URL is blocked and follows nothing from it', async () => {
+      const { processor } = buildProcessor(guarded);
+
+      const scan = await runScan(processor, {
+        mode: ScanMode.CRAWL,
+        targets: [siteUrl('/to-internal')],
+        crawlMaxPages: 10,
+        crawlMaxDepth: 1,
+        crawlStrategy: CrawlStrategy.SameHostname,
+      });
+
+      expect(scan.pagesDiscovered).toBe(1);
+      expect(scan.pagesScanned).toBe(0);
+      expect(scan.pagesFailed).toBe(1);
+      expect(scan.issues).toEqual([]);
+      expect(agentAudit.collectForPage).not.toHaveBeenCalled();
     });
   });
 

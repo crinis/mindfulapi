@@ -1,7 +1,7 @@
 /**
  * URL-matching strategy passed to Crawlee's `enqueueLinks` during crawl discovery.
- * It is applied against the crawl scope of the page's seed (see
- * `resolveSeedScope`), not against the URL a page redirected to.
+ * It is applied against the crawl scope of the page's seed — the seed's landing
+ * URL after redirects — not against the URL a later page redirected to.
  *
  * Wire values are snake_case for consistency with the rest of the API (e.g.
  * {@link ScanMode}). They are mapped to Crawlee's kebab-case
