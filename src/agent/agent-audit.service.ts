@@ -21,6 +21,15 @@ const MAX_MESSAGE_LENGTH = 2000;
 const MAX_SUGGESTION_LENGTH = 1000;
 const MAX_SELECTOR_LENGTH = 1000;
 
+/**
+ * How much earlier than the collection deadline the skills are told to be
+ * done. Collection stops waiting at its deadline and discards a skill still
+ * running then; a skill that budgets against its own deadline (the image
+ * skill's screenshots) and overruns it slightly still returns in time with
+ * what it captured.
+ */
+export const SKILL_DEADLINE_LEAD_MS = 1000;
+
 /** Page-scoped options of an evidence collection. */
 export interface CollectOptions {
   /** CSS selector the scan is limited to (`scanOptions.rootElement`). */
@@ -192,7 +201,10 @@ export class AgentAuditService {
             maxUnitsPerPage: budgetLeft,
             maxImageBytes: this.config.maxImageBytes,
             rootElement: options.rootElement,
-            deadline: options.deadline,
+            deadline:
+              options.deadline === undefined
+                ? undefined
+                : options.deadline - SKILL_DEADLINE_LEAD_MS,
           }),
           timeLeft(),
         );

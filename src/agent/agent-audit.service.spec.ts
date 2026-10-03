@@ -1,5 +1,8 @@
 import { MockLanguageModelV4 } from 'ai/test';
-import { AgentAuditService } from './agent-audit.service';
+import {
+  AgentAuditService,
+  SKILL_DEADLINE_LEAD_MS,
+} from './agent-audit.service';
 import { agentConfig } from '../config/configuration';
 import { AgentSkill } from '../enums/agent-skill.enum';
 import { IssueImpact } from '../enums/issue-impact.enum';
@@ -217,7 +220,7 @@ describe('AgentAuditService.collectForPage', () => {
     expect(Date.now() - started).toBeLessThan(1000);
   });
 
-  it('passes the evidence deadline to the skills', async () => {
+  it('gives the skills a deadline ahead of the one it waits for', async () => {
     const { service } = makeService({ maxUnitsPerPage: 30 });
     const image = elementSkill();
     const imageCollect = jest.spyOn(image, 'collect');
@@ -227,8 +230,28 @@ describe('AgentAuditService.collectForPage', () => {
 
     expect(imageCollect).toHaveBeenCalledWith(
       page,
-      expect.objectContaining({ deadline }),
+      expect.objectContaining({ deadline: deadline - SKILL_DEADLINE_LEAD_MS }),
     );
+  });
+
+  it('keeps what a skill collected when it stops a little after its deadline', async () => {
+    const { service } = makeService({ maxUnitsPerPage: 30 });
+    // Like the image skill: budgets its work against ctx.deadline, but its
+    // last step ends slightly after it.
+    const image = {
+      ...elementSkill(),
+      collect: jest.fn(async (_page: Page, ctx: CollectContext) => {
+        const overrun = ctx.deadline! + 50 - Date.now();
+        await new Promise((resolve) => setTimeout(resolve, overrun));
+        return [{ pageUrl, selector: 'img' }];
+      }),
+    } as unknown as AuditSkill;
+
+    const units = await service.collectForPage([image], page, pageUrl, [], 0, {
+      deadline: Date.now() + SKILL_DEADLINE_LEAD_MS + 200,
+    });
+
+    expect(units).toHaveLength(1);
   });
 
   it('gives page skills the scan-wide remainder first', async () => {
