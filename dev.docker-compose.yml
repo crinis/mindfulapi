@@ -2,7 +2,8 @@ services:
   redis:
     image: docker.io/redis:7-alpine
     ports:
-      - "6379:6379"
+      # Loopback only: this Redis has no password.
+      - "127.0.0.1:6379:6379"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]

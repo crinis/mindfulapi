@@ -36,7 +36,11 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "${PORT:-3000}:3000"
+      # Published on the loopback interface only, for a reverse proxy on the
+      # same host. Docker's published ports bypass host firewalls such as ufw,
+      # so BIND_ADDRESS=0.0.0.0 (all interfaces) exposes the API publicly over
+      # plain HTTP; set it only when that is what you want.
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-3000}:3000"
     # Every variable in .env reaches the container (SCAN_CONCURRENCY, CORS_ORIGINS,
     # THROTTLE_*, AGENT_*, ...). The `environment:` entries below take precedence
     # over env_file, so the service wiring (NODE_ENV, DATABASE_PATH,

@@ -49,7 +49,7 @@ The stack consists of three containers:
 
 | Container | Purpose |
 |---|---|
-| `mindfulapi` | The NestJS API server (exposed on port 3000) |
+| `mindfulapi` | The NestJS API server (published on `127.0.0.1:3000`, this host only) |
 | `redis` | Queue backend for asynchronous scan processing |
 | `playwright` | Headless Chromium browser server used for page scanning |
 
@@ -126,7 +126,7 @@ npm install
 # Install Playwright's Chromium browser
 npx playwright install chromium
 
-# Start Redis only (no API or Playwright containers)
+# Start Redis only (no API or Playwright containers), on 127.0.0.1:6379
 docker compose -f dev.docker-compose.yml up -d
 
 # Copy the env file, then set AUTH_TOKEN and NODE_ENV=development
@@ -186,23 +186,27 @@ docker compose up -d
 
 **4. (Optional, strongly recommended) Put a reverse proxy in front.**
 
-Do not expose port 3000 directly to the internet. Use a reverse proxy such as [Caddy](https://caddyserver.com/) or Nginx for TLS termination. With Caddy, which provisions a Let's Encrypt certificate automatically:
+The API speaks plain HTTP. Use a reverse proxy such as [Caddy](https://caddyserver.com/) or Nginx on the same host for TLS termination. `docker-compose.yml` publishes the API on `127.0.0.1:3000` only (`BIND_ADDRESS`), so the proxy reaches it there while other hosts cannot. With Caddy, which provisions a Let's Encrypt certificate automatically:
 
 ```
 your-domain.example.com {
-    reverse_proxy localhost:3000
+    reverse_proxy 127.0.0.1:3000
 }
 ```
 
+If the proxy runs in a container instead, attach it to the Compose network and proxy to `mindfulapi:3000`.
+
 **5. Open only the ports you need.**
 
-Behind a reverse proxy, open ports 80 and 443 — not 3000. On Ubuntu with `ufw`:
+Behind a reverse proxy, open ports 80 and 443. On Ubuntu with `ufw`:
 
 ```bash
 ufw allow 80/tcp
 ufw allow 443/tcp
 ufw enable
 ```
+
+**ufw does not filter ports that Docker publishes:** Docker's own firewall rules handle container traffic before ufw sees it ([Docker docs](https://docs.docker.com/engine/network/packet-filtering-firewalls/#docker-and-ufw)). Port 3000 stays private only because it is published on `127.0.0.1`. Publishing on every interface (`BIND_ADDRESS=0.0.0.0`) is an explicit choice for setups without a reverse proxy on the same host; the API is then reachable over plain HTTP from anywhere the network allows, whatever ufw says, so restrict it with a firewall in front of the server or Docker's `DOCKER-USER` chain.
 
 ### Keeping the API running across reboots
 
@@ -278,14 +282,15 @@ New: `DELETE /v1/scans/:id`, `POST /v1/scans/:id/cancel`, `GET /health`, respons
 
 All configuration uses environment variables; [`.env.example`](.env.example) lists them all. An empty value (`VAR=`) means the same as leaving the variable unset, so the default applies. Values are validated at startup: an out-of-range or malformed value (e.g. `SCAN_CONCURRENCY=12`) stops the server with an error instead of being clamped.
 
-**With Docker Compose,** every variable in `.env` reaches the API container, except the service wiring: `NODE_ENV`, `DATABASE_PATH`, `PLAYWRIGHT_WS_URL`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` and `PORT` are pinned by `docker-compose.yml` to the bundled containers. `PORT` in `.env` only changes the published host port.
+**With Docker Compose,** every variable in `.env` reaches the API container, except the service wiring: `NODE_ENV`, `DATABASE_PATH`, `PLAYWRIGHT_WS_URL`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` and `PORT` are pinned by `docker-compose.yml` to the bundled containers. `PORT` and `BIND_ADDRESS` in `.env` only change where the API is published on the host.
 
 **Server and authentication**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NODE_ENV` | `development` | Any value other than `production` enables SQL query logging |
-| `PORT` | `3000` | HTTP server port |
+| `PORT` | `3000` | HTTP server port (1–65535). With Docker Compose: the published host port |
+| `BIND_ADDRESS` | `127.0.0.1` | Compose only: host address the API port is published on. The default allows only this host (e.g. a reverse proxy). `0.0.0.0` publishes on every interface, past host firewalls such as ufw — see [Deploying](#deploying-to-a-linux-server) |
 | `AUTH_TOKEN` | _(unset)_ | Bearer token for API auth. **The server refuses to start when unset** unless `AUTH_DISABLED=true`, and always refuses the old `.env.example` placeholder `your-secure-api-token-here` |
 | `AUTH_DISABLED` | `false` | `true` runs without authentication (only when `AUTH_TOKEN` is unset). **Not recommended** |
 | `CORS_ORIGINS` | _(unset)_ | Comma-separated allowed CORS origins; unset disables CORS |
