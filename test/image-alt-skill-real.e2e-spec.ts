@@ -134,6 +134,34 @@ describe('ImageAltTextSkill.collect (real browser)', () => {
     expect(altAt).toEqual(['Sales chart', 'Company logo', 'Team photo']);
   });
 
+  it('caps the page-controlled text sent to the model and stored', async () => {
+    const long = 'x'.repeat(5000);
+    const { evidence } = await collectFrom(`
+      <span id="label">${long}</span>
+      <figure>
+        <img alt="${long}" aria-label="${long}" aria-labelledby="label"
+          title="${long}" width="80" height="80"
+          src="data:image/png;base64,${'A'.repeat(5000)}">
+        <figcaption>${long}</figcaption>
+      </figure>`);
+
+    expect(evidence).toHaveLength(1);
+    const [image] = evidence;
+    const fields = [
+      image.alt,
+      image.ariaLabel,
+      image.ariaLabelledbyText,
+      image.title,
+      image.figcaption,
+    ];
+    // Cut to 300 characters, the last one an ellipsis marking the cut.
+    expect(fields.map((value) => value?.length)).toEqual([
+      300, 300, 300, 300, 300,
+    ]);
+    expect(fields.every((value) => value?.endsWith('x…'))).toBe(true);
+    expect(image.src?.length).toBe(500);
+  });
+
   it('drops an image already flagged by an axe alt rule', async () => {
     // First discover the good image's src, then feed a matching axe violation.
     const [first] = await collect();

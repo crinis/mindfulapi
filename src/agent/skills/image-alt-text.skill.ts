@@ -15,6 +15,16 @@ import type {
 /** Minimum rendered dimension (px) for an image to be worth reviewing. */
 const MIN_RENDERED_PX = 24;
 
+/**
+ * Longest page-controlled text kept per field (alt, aria-label, labelledby
+ * text, title, figcaption). Real names are far shorter; the cap guards the
+ * prompt and the stored `currentAlt` against runaway text. A cut value ends in
+ * an ellipsis, so the model can still tell the name is overlong.
+ */
+const NAME_MAX = 300;
+/** Longest image source kept (a data: URI can be megabytes long). */
+const SRC_MAX = 500;
+
 /** Confidence below which a problem verdict is downgraded to human review. */
 const MIN_CONFIDENCE = 0.5;
 
@@ -249,7 +259,7 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
     limit: number,
   ): Promise<ImageDescriptor[]> {
     return page.evaluate(
-      ({ limit, minPx }) => {
+      ({ limit, minPx, nameMax, srcMax }) => {
         const candidates = Array.from(
           document.querySelectorAll<HTMLElement>(
             'img, [role="img"], svg[role="img"]',
@@ -284,6 +294,14 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
           return parts.join(' > ');
         };
 
+        // Caps page-controlled text; a cut value ends in an ellipsis.
+        const clip = (value: string, max: number): string =>
+          value.length > max ? `${value.slice(0, max - 1)}…` : value;
+        const clipOrUndefined = (
+          value: string | null | undefined,
+          max: number,
+        ): string | undefined => (value == null ? undefined : clip(value, max));
+
         for (const el of candidates) {
           if (out.length >= limit) break;
 
@@ -299,19 +317,26 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
             style.display !== 'none';
           if (!visible) continue;
 
-          const alt = el.hasAttribute('alt') ? el.getAttribute('alt') : null;
-          const ariaLabel = el.getAttribute('aria-label') ?? undefined;
+          const altAttr = el.getAttribute('alt');
+          const alt = altAttr === null ? null : clip(altAttr, nameMax);
+          const ariaLabel = clipOrUndefined(
+            el.getAttribute('aria-label'),
+            nameMax,
+          );
           const labelledby = el.getAttribute('aria-labelledby');
           let ariaLabelledbyText: string | undefined;
           if (labelledby) {
-            ariaLabelledbyText = labelledby
-              .split(/\s+/)
-              .map((id) => document.getElementById(id)?.textContent?.trim())
-              .filter(Boolean)
-              .join(' ');
+            ariaLabelledbyText = clip(
+              labelledby
+                .split(/\s+/)
+                .map((id) => document.getElementById(id)?.textContent?.trim())
+                .filter(Boolean)
+                .join(' '),
+              nameMax,
+            );
           }
-          const title = el.getAttribute('title') ?? undefined;
-          const role = el.getAttribute('role') ?? undefined;
+          const title = clipOrUndefined(el.getAttribute('title'), nameMax);
+          const role = clipOrUndefined(el.getAttribute('role'), 40);
 
           const descriptor = {
             role,
@@ -336,15 +361,19 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
           el.setAttribute('data-mfa-audit-id', auditId);
 
           const figure = el.closest('figure');
-          const figcaption =
+          const figcaption = clipOrUndefined(
             figure?.querySelector('figcaption')?.textContent?.trim() ||
-            undefined;
+              undefined,
+            nameMax,
+          );
           const surroundingText = el.parentElement?.textContent
             ?.replace(/\s+/g, ' ')
             .trim()
             .slice(0, 200);
-          const src =
-            el.getAttribute('src') || el.getAttribute('data-src') || undefined;
+          const src = clipOrUndefined(
+            el.getAttribute('src') || el.getAttribute('data-src') || undefined,
+            srcMax,
+          );
 
           out.push({
             auditId,
@@ -364,7 +393,7 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
 
         return out;
       },
-      { limit, minPx: MIN_RENDERED_PX },
+      { limit, minPx: MIN_RENDERED_PX, nameMax: NAME_MAX, srcMax: SRC_MAX },
     );
   }
 }

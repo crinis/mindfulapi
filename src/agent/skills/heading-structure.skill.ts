@@ -16,6 +16,10 @@ const MIN_CONFIDENCE = 0.5;
 
 /** Max headings included in the outline (token bound). */
 const MAX_HEADINGS = 40;
+/** Longest heading text kept (headings are short; guards runaway text). */
+const HEADING_TEXT_MAX = 120;
+/** Longest page title kept. */
+const TITLE_MAX = 200;
 /** Chars of following content captured per heading (descriptiveness signal). */
 const HEADING_SNIPPET = 120;
 /** A sectioning element needs at least this much text to warrant a heading. */
@@ -249,6 +253,8 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
     return page.evaluate(
       ({
         maxHeadings,
+        headingTextMax,
+        titleMax,
         headingSnippet,
         sectionMinText,
         sectionSnippet,
@@ -305,7 +311,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
             'header,nav,main,aside,footer,section,article,[role="banner"],[role="navigation"],[role="main"],[role="complementary"],[role="contentinfo"],[role="region"]',
           );
           if (!landmark) return undefined;
-          const role = landmark.getAttribute('role');
+          const role = landmark.getAttribute('role')?.slice(0, 40);
           return role || landmark.tagName.toLowerCase();
         };
 
@@ -340,7 +346,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
             selector: cssPath(el),
             level,
             tag,
-            text: collapse(el.textContent),
+            text: collapse(el.textContent).slice(0, headingTextMax),
             landmark: nearestLandmark(el),
             snippet: snippet || undefined,
           };
@@ -446,7 +452,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
         }
 
         return {
-          pageTitle: document.title,
+          pageTitle: collapse(document.title).slice(0, titleMax),
           headings,
           fakeHeadingCandidates,
           unheadedSections,
@@ -454,6 +460,8 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
       },
       {
         maxHeadings: MAX_HEADINGS,
+        headingTextMax: HEADING_TEXT_MAX,
+        titleMax: TITLE_MAX,
         headingSnippet: HEADING_SNIPPET,
         sectionMinText: SECTION_MIN_TEXT,
         sectionSnippet: SECTION_SNIPPET,
