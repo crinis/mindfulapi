@@ -134,6 +134,27 @@ describe('ImageAltTextSkill.collect (real browser)', () => {
     expect(altAt).toEqual(['Sales chart', 'Company logo', 'Team photo']);
   });
 
+  it('stores a selector that matches only its image in a card grid', async () => {
+    // Every image ends in the same five steps (div > div > a > picture > img).
+    const card = (alt: string): string => `
+      <li><div><div><a href="#"><picture>
+        <img alt="${alt}" width="80" height="80" src="${PNG}">
+      </picture></a></div></div></li>`;
+    const { evidence, altAt } = await collectFrom(`
+      <main><ul>${card('Red shoe')}${card('Blue shoe')}${card('Green shoe')}</ul></main>`);
+
+    expect(altAt).toEqual(['Red shoe', 'Blue shoe', 'Green shoe']);
+    expect(new Set(evidence.map((item) => item.selector)).size).toBe(3);
+  });
+
+  it('stores a positional selector when duplicate ids leave no unique path', async () => {
+    const { altAt } = await collectFrom(`
+      <div id="card"><img alt="First" width="80" height="80" src="${PNG}"></div>
+      <div id="card"><img alt="Second" width="80" height="80" src="${PNG}"></div>`);
+
+    expect(altAt).toEqual(['First', 'Second']);
+  });
+
   it('caps the page-controlled text sent to the model and stored', async () => {
     const long = 'x'.repeat(5000);
     const { evidence } = await collectFrom(`

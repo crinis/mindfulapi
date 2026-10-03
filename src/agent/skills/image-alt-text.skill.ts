@@ -314,12 +314,13 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
         const out: ImageDescriptor[] = [];
         let counter = 0;
 
-        // A short, unique-ish CSS path so clients can locate the element; the
-        // audit id below exists only in this (closed after the scan) page.
-        const cssPath = (target: Element): string => {
+        // A CSS path of at most `maxSteps` steps, ending at an id, so clients
+        // can locate the element; the audit id below exists only in this
+        // (closed after the scan) page.
+        const cssPath = (target: Element, maxSteps: number): string => {
           const parts: string[] = [];
           let node: Element | null = target;
-          while (node && node.nodeType === 1 && parts.length < 5) {
+          while (node && node.nodeType === 1 && parts.length < maxSteps) {
             if (node.id) {
               parts.unshift(`#${CSS.escape(node.id)}`);
               break;
@@ -339,6 +340,36 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
           }
           return parts.join(' > ');
         };
+        // A path that fixes every step to its position, from the root
+        // element down: unique by construction. `:not(* *)` anchors the first
+        // step, as in the heading skill's positionalPath (page.evaluate
+        // cannot share code between skills).
+        const positionalPath = (target: Element): string => {
+          const parts: string[] = [];
+          for (let n: Element | null = target; n; n = n.parentElement) {
+            const parent = n.parentElement ?? (n.parentNode as ParentNode);
+            const position = Array.from(parent.children).indexOf(n) + 1;
+            parts.unshift(`${CSS.escape(n.localName)}:nth-child(${position})`);
+          }
+          parts[0] += ':not(* *)';
+          return parts.join(' > ');
+        };
+        // The stored selector must find this image and nothing else: the
+        // short path, else the path up to the root (or an id), else the
+        // positional path (a duplicate id defeats the other two).
+        const findsOnly = (path: string, target: Element): boolean => {
+          try {
+            const matches = document.querySelectorAll(path);
+            return matches.length === 1 && matches[0] === target;
+          } catch {
+            // An unescaped tag name can make the path invalid (e.g. "a:b").
+            return false;
+          }
+        };
+        const uniquePath = (target: Element): string =>
+          [cssPath(target, 5), cssPath(target, Infinity)].find((path) =>
+            findsOnly(path, target),
+          ) ?? positionalPath(target);
 
         // Caps page-controlled text; a cut value ends in an ellipsis.
         const clip = (value: string, max: number): string =>
@@ -426,7 +457,7 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
 
           out.push({
             auditId,
-            selector: cssPath(el),
+            selector: uniquePath(el),
             src: src ?? undefined,
             role,
             alt,
