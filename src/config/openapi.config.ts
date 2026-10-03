@@ -26,8 +26,8 @@ export const createOpenApiConfig = () =>
     .addBearerAuth({
       description:
         'The AUTH_TOKEN configured on the server. Required on every endpoint ' +
-        'except /health, unless the server runs with AUTH_DISABLED=true, ' +
-        'which ignores the token.',
+        'except /health, unless the server runs without AUTH_TOKEN and with ' +
+        'AUTH_DISABLED=true, which accepts any request.',
       type: 'http',
       scheme: 'bearer',
       // The token is an opaque shared secret, not the JWT Nest assumes.
@@ -42,9 +42,10 @@ export const createOpenApiConfig = () =>
  *
  * Operations of `@ApiBearerAuth()` controllers require the bearer token and
  * the rest (`/health`) declare no requirement, which is what the server
- * enforces by default. `AUTH_DISABLED=true` is a deployment opt-out the
- * scheme description mentions; the contract does not advertise anonymous
- * access as an alternative.
+ * enforces by default. Running without `AUTH_TOKEN` and with
+ * `AUTH_DISABLED=true` is a deployment opt-out the scheme description
+ * mentions; the contract does not advertise anonymous access as an
+ * alternative.
  */
 export function createOpenApiDocument(app: INestApplication): OpenAPIObject {
   return SwaggerModule.createDocument(app, createOpenApiConfig());

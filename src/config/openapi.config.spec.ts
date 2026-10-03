@@ -53,12 +53,12 @@ describe('OpenAPI security', () => {
     expect(document.security).toBeUndefined();
   });
 
-  it('describes the token as required unless AUTH_DISABLED=true', () => {
+  it('describes the token as required unless the server runs without one and with AUTH_DISABLED=true', () => {
     const scheme = createOpenApiDocument(app).components?.securitySchemes
       ?.bearer as { description?: string; bearerFormat?: string };
 
     expect(scheme.description).toMatch(
-      /required.*unless the server runs with AUTH_DISABLED=true/i,
+      /required.*unless the server runs without AUTH_TOKEN and with AUTH_DISABLED=true/i,
     );
     expect(scheme.description).not.toMatch(/to enable authentication/);
     // The token is an opaque shared secret, not a JWT.

@@ -1012,7 +1012,7 @@
     "securitySchemes": {
       "bearer": {
         "scheme": "bearer",
-        "description": "The AUTH_TOKEN configured on the server. Required on every endpoint except /health, unless the server runs with AUTH_DISABLED=true, which ignores the token.",
+        "description": "The AUTH_TOKEN configured on the server. Required on every endpoint except /health, unless the server runs without AUTH_TOKEN and with AUTH_DISABLED=true, which accepts any request.",
         "type": "http"
       }
     },

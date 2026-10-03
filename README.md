@@ -571,7 +571,7 @@ The OpenAPI 3 specification is generated from the code, so it never drifts from 
 - **Interactive Swagger UI:** `http://localhost:3000/api` (while the server is running)
 - **OpenAPI document:** `http://localhost:3000/api-json` (or `api-yaml`), and a committed copy at [`openapi.json`](openapi.json)
 
-Every endpoint except `/health` requires the bearer token unless the server runs with `AUTH_DISABLED=true`. The documentation pages themselves are public (see [Security](#security)).
+Every endpoint except `/health` requires the bearer token, unless the server runs without `AUTH_TOKEN` and with `AUTH_DISABLED=true`. The documentation pages themselves are public (see [Security](#security)).
 
 All endpoints are under `/v1` (for example `POST /v1/scans`). Errors follow [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json`.
 
