@@ -20,10 +20,10 @@ import { ScanJobData, SCAN_QUEUE_NAME } from './scan-queue.service';
 import { BrowserService } from './browser.service';
 import {
   AxeAccessibilityScanner,
-  BasicAuth,
   PageRejectedError,
   ScanOptions,
   ScannedIssue,
+  ScopedBasicAuth,
 } from './axe-accessibility-scanner.service';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
 import { UrlPolicyService } from './url-policy.service';
@@ -657,9 +657,12 @@ export class ScanProcessor extends WorkerHost {
   }
 
   /**
-   * Decrypts persisted basic-auth credentials for runtime use when configured.
+   * Decrypts persisted basic-auth credentials for runtime use when configured,
+   * scoped to the origin of the scan's first target: the browser answers Basic
+   * challenges from that origin only, never from other hosts the scanned pages
+   * load from or redirect to.
    */
-  private resolveBasicAuth(scan: Scan): BasicAuth | undefined {
+  private resolveBasicAuth(scan: Scan): ScopedBasicAuth | undefined {
     const { basicAuthUsernameEncrypted, basicAuthPasswordEncrypted } = scan;
     if (!basicAuthUsernameEncrypted && !basicAuthPasswordEncrypted) {
       return undefined;
@@ -670,10 +673,30 @@ export class ScanProcessor extends WorkerHost {
       );
     }
 
-    return this.basicAuthCryptoService.decryptCredentials(
-      basicAuthUsernameEncrypted,
-      basicAuthPasswordEncrypted,
+    const targets = this.resolveScanTargets(scan);
+    if (targets.length === 0) {
+      return undefined;
+    }
+    const origin = new URL(targets[0]).origin;
+    const otherOrigins = new Set(
+      targets
+        .map((target) => new URL(target).origin)
+        .filter((targetOrigin) => targetOrigin !== origin),
     );
+    if (otherOrigins.size > 0) {
+      this.logger.warn(
+        `Scan ${scan.id}: Basic Auth credentials are only sent to ${origin}; ` +
+          `targets on ${[...otherOrigins].join(', ')} are loaded without them`,
+      );
+    }
+
+    return {
+      ...this.basicAuthCryptoService.decryptCredentials(
+        basicAuthUsernameEncrypted,
+        basicAuthPasswordEncrypted,
+      ),
+      origin,
+    };
   }
 
   /**

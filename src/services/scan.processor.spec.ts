@@ -1007,8 +1007,45 @@ describe('ScanProcessor', () => {
         basicAuth: {
           username: 'scanner-user',
           password: 'scanner-password',
+          origin: 'https://example.com',
         },
       }),
+    );
+  });
+
+  it('scopes basic auth to the first target origin and warns about the others', async () => {
+    mockScanQb.getOne.mockResolvedValue(
+      makeScan({
+        mode: ScanMode.URL_LIST,
+        targets: [
+          'https://staging.example.com:8443/de/',
+          'https://staging.example.com:8443/en/',
+          'https://cdn.example.com/page',
+        ],
+        basicAuthUsernameEncrypted: 'enc-user',
+        basicAuthPasswordEncrypted: 'enc-pass',
+      }),
+    );
+    mockBasicAuthCrypto.decryptCredentials.mockReturnValue({
+      username: 'scanner-user',
+      password: 'scanner-password',
+    });
+    const warn = jest
+      .spyOn((processor as any).logger, 'warn')
+      .mockImplementation(() => undefined);
+
+    await processor.process({ data: { scanId: 1 } } as any);
+
+    expect(mockScanner.createContext).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({
+        basicAuth: expect.objectContaining({
+          origin: 'https://staging.example.com:8443',
+        }),
+      }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('https://cdn.example.com'),
     );
   });
 });

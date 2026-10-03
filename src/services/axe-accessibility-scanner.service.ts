@@ -22,14 +22,20 @@ export interface BasicAuth {
   password: string;
 }
 
+/** Basic Auth credentials bound to the one origin they may be sent to. */
+export interface ScopedBasicAuth extends BasicAuth {
+  /** Origin (scheme://host[:port]) whose 401 challenges are answered. */
+  origin: string;
+}
+
 /**
  * Options for an axe-core accessibility scan.
  */
 export interface ScanOptions {
   /** Specific axe rule IDs to run. When empty, all rules run. */
   ruleIds?: string[];
-  /** HTTP Basic Authentication credentials. */
-  basicAuth?: BasicAuth;
+  /** HTTP Basic Authentication credentials, scoped to one origin. */
+  basicAuth?: ScopedBasicAuth;
   /** CSS selector to limit scan scope. Scans entire page when omitted. */
   rootElement?: string;
 }
@@ -141,9 +147,12 @@ export class AxeAccessibilityScanner {
     };
 
     if (options?.basicAuth) {
+      // Without an origin Playwright answers every Basic challenge with these
+      // credentials — cross-origin subresources and redirect targets too.
       contextOptions.httpCredentials = {
         username: options.basicAuth.username,
         password: options.basicAuth.password,
+        origin: options.basicAuth.origin,
       };
     }
 

@@ -78,7 +78,12 @@ export class ScanOptionsDto {
   @ApiPropertyOptional({
     type: () => BasicAuthCredentialsDto,
     description:
-      'Optional HTTP Basic Authentication credentials used during page loading. Credentials are encrypted at rest and never returned in API responses.',
+      'Optional HTTP Basic Authentication credentials used during page loading. ' +
+      'They are sent only to the origin (scheme, host and port) of the first target URL, in answer to its 401 challenge. ' +
+      'They are never sent to other origins: not to subresources, redirect targets or crawled pages on other hosts. ' +
+      'If the target redirects to another origin (for example http to https, or example.com to www.example.com), use the final URL as the target. ' +
+      'Split scans whose targets span several protected origins. ' +
+      'Credentials are encrypted at rest and never returned in API responses.',
   })
   @IsOptional()
   @ValidateNested()

@@ -7,6 +7,7 @@
  * Run alone with:
  *   npx jest --config ./test/jest-e2e.json test/scan-target-security.e2e-spec.ts
  */
+import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { ServerResponse } from 'node:http';
 import { DataSource, Repository } from 'typeorm';
@@ -45,6 +46,12 @@ function violatingPage(
       `<body><h1>${title}</h1><img src="/pixel.png"></body></html>`,
   );
 }
+
+/** Credentials the protected fixture page expects. */
+const BASIC_AUTH = { username: 'scanner', password: 's3cret' };
+const BASIC_AUTH_HEADER = `Basic ${Buffer.from(
+  `${BASIC_AUTH.username}:${BASIC_AUTH.password}`,
+).toString('base64')}`;
 
 /** Answers with a redirect to the given absolute URL. */
 function redirectTo(location: () => string) {
@@ -159,6 +166,23 @@ describe('Scan target security (real browser)', () => {
       routes: {
         '/secret': (_req, res) => violatingPage(res, 200, 'Internal secret'),
         '/frame': (_req, res) => violatingPage(res, 200, 'Internal frame'),
+        // Another origin asking for Basic credentials (a subresource / a
+        // redirect target). Chromium only lets same-site subresources and
+        // navigations raise the challenge, which Playwright then answers.
+        '/auth-pixel': (_req, res) => {
+          res.statusCode = 401;
+          res.setHeader('www-authenticate', 'Basic realm="other"');
+          res.end();
+        },
+        '/auth-page': (req, res) => {
+          if (!req.headers.authorization) {
+            res.statusCode = 401;
+            res.setHeader('www-authenticate', 'Basic realm="other"');
+            res.end();
+            return;
+          }
+          htmlPage('Other login', '<p>Signed in</p>')(req, res);
+        },
         '/evil.js': (_req, res) => {
           res.setHeader('content-type', 'application/javascript');
           res.end("document.title = 'Internal script ran';");
@@ -170,6 +194,21 @@ describe('Scan target security (real browser)', () => {
         '/not-found': (_req, res) => violatingPage(res, 404, 'Missing page'),
         '/server-error': (_req, res) => violatingPage(res, 500, 'Broken page'),
         '/to-internal': redirectTo(() => internalUrl('/secret')),
+        '/protected': (req, res) => {
+          if (req.headers.authorization !== BASIC_AUTH_HEADER) {
+            res.statusCode = 401;
+            res.setHeader('www-authenticate', 'Basic realm="staging"');
+            res.end();
+            return;
+          }
+          htmlPage(
+            'Protected page',
+            // Same site (127.0.0.1), other origin (port).
+            `<img alt="Partner logo" src="http://127.0.0.1:${internal.port}/auth-pixel">` +
+              '<script src="/slow.js"></script>',
+          )(req, res);
+        },
+        '/to-other-login': redirectTo(() => internalUrl('/auth-page')),
         '/alias-a': redirectTo(() => siteUrl('/about.html')),
         '/alias-b': redirectTo(() => siteUrl('/about.html')),
         '/crawl-start': htmlPage(
@@ -448,6 +487,69 @@ describe('Scan target security (real browser)', () => {
       expect(scan.pagesDiscovered).toBe(2);
       expect(scan.pagesScanned).toBe(2);
       expect(scan.pagesFailed).toBe(0);
+    });
+  });
+
+  describe('Basic Auth credentials', () => {
+    const originalKey = process.env.ENCRYPTION_KEY;
+
+    beforeAll(() => {
+      process.env.ENCRYPTION_KEY = randomBytes(32).toString('base64');
+    });
+
+    afterAll(() => {
+      if (originalKey === undefined) delete process.env.ENCRYPTION_KEY;
+      else process.env.ENCRYPTION_KEY = originalKey;
+    });
+
+    /** Runs a single_url scan of `path` with the fixture credentials. */
+    async function scanWithCredentials(path: string): Promise<Scan> {
+      const encrypted = new BasicAuthCryptoService().encryptCredentials(
+        BASIC_AUTH,
+      );
+      const { processor } = buildProcessor({ allowPrivateTargets: true });
+      return runScan(processor, {
+        mode: ScanMode.SINGLE_URL,
+        targets: [siteUrl(path)],
+        basicAuthUsernameEncrypted: encrypted.encryptedUsername,
+        basicAuthPasswordEncrypted: encrypted.encryptedPassword,
+      });
+    }
+
+    it("answers the target origin's challenge but not a same-site subresource's", async () => {
+      const scan = await scanWithCredentials('/protected');
+
+      expect(scan.pagesScanned).toBe(1);
+      expect(scan.pagesFailed).toBe(0);
+      expect(
+        site.requests.some(
+          (request) =>
+            request.url === '/protected' &&
+            request.headers.authorization === BASIC_AUTH_HEADER,
+        ),
+      ).toBe(true);
+      const pixelRequests = internal.requests.filter(
+        (request) => request.url === '/auth-pixel',
+      );
+      expect(pixelRequests.length).toBeGreaterThan(0);
+      expect(
+        pixelRequests.map((request) => request.headers.authorization),
+      ).toEqual(pixelRequests.map(() => undefined));
+    });
+
+    it('does not answer the challenge of a redirect target on another site', async () => {
+      const scan = await scanWithCredentials('/to-other-login');
+
+      const loginRequests = internal.requests.filter(
+        (request) => request.url === '/auth-page',
+      );
+      expect(loginRequests.length).toBeGreaterThan(0);
+      expect(
+        loginRequests.map((request) => request.headers.authorization),
+      ).toEqual(loginRequests.map(() => undefined));
+      // Without credentials the redirect target stays an HTTP 401 page.
+      expect(scan.pagesScanned).toBe(0);
+      expect(scan.pagesFailed).toBe(1);
     });
   });
 });

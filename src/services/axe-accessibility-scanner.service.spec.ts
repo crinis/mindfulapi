@@ -132,6 +132,26 @@ describe('AxeAccessibilityScanner target-policy guard', () => {
     expect(scope.SharedWorker).toBeUndefined();
   });
 
+  it('scopes Basic Auth credentials to their origin', async () => {
+    await build(true).createContext(browser as any, {
+      basicAuth: {
+        username: 'scanner',
+        password: 'secret',
+        origin: 'https://staging.example.com',
+      },
+    });
+
+    expect(browser.newContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        httpCredentials: {
+          username: 'scanner',
+          password: 'secret',
+          origin: 'https://staging.example.com',
+        },
+      }),
+    );
+  });
+
   it('does not intercept requests when private targets are allowed', async () => {
     const scanner = build(true);
     await scanner.createContext(browser as any);

@@ -15,7 +15,7 @@ MindfulAPI is the external scanner backend for the TYPO3 extension [crinis/mindf
 - **Asynchronous processing** — scans run in the background via a Redis-backed queue (BullMQ)
 - **Scoped scanning** — target a CSS selector instead of the whole page
 - **Rule filtering** — run only the axe rules you care about
-- **Basic auth support** — optional per-scan HTTP Basic credentials for protected targets
+- **Basic auth support** — optional per-scan HTTP Basic credentials for protected targets, sent only to the first target's origin
 - **Scan history** — results are stored in SQLite and queryable via the API
 - **HTML & PDF reports** — accessible, print-ready reports generated from scan results
 - **Optional authentication** — protect the API with a Bearer token, or leave it open
@@ -353,6 +353,7 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
   - **WebSockets** opened by a page are checked before they connect. `SharedWorker` is disabled because Playwright cannot intercept its requests. Service workers stay enabled because their requests are checked like page requests.
   - To scan intranet/staging sites, allow specific hosts with `SCAN_TARGET_ALLOW_HOSTS`, or set `SCAN_ALLOW_PRIVATE_TARGETS=true` — only when the API is not exposed to untrusted clients.
   - Limitations: the policy resolves hosts independently of the browser's DNS, so a DNS-rebinding attacker with a very low TTL could flip a record between check and fetch. Redirect hops (see above), WebSockets opened inside a dedicated worker, and non-HTTP channels such as WebRTC can still send requests to blocked addresses; their responses never reach a stored result. This is acceptable for a self-hosted tool, but keep the API access-controlled.
+- **Basic Auth credentials** (`scanOptions.basicAuth`) are sent only to the origin (scheme, host and port) of the first target URL, in answer to its 401 challenge. Subresources, redirect targets and crawled pages on other origins never receive them. If the target redirects to another origin (http → https, `example.com` → `www.example.com`), use the final URL as the target. Split scans whose targets span several protected origins.
 - **Rate limiting** applies globally (`THROTTLE_TTL` / `THROTTLE_LIMIT`); `/health` is exempt.
 - **Request limits.** JSON and form bodies: 1 MB. `url_list`: up to 500 URLs. `crawl`: up to 50 seed URLs, `maxPages` up to 5000 (default 250), `maxDepth` up to 20 (default 4).
 - **Non-root container.** The process runs as the unprivileged `node` user (uid 1000), so `/data` must be writable by it. Fresh installs handle this; upgrades from an old root image need a one-time `chown` (see [Updating](#updating)).
