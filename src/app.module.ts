@@ -63,6 +63,9 @@ import {
     CleanupModule, // Automated cleanup of old scan data
     HealthModule, // Unauthenticated health/readiness probe
   ],
-  providers: [authProvider, { provide: APP_GUARD, useClass: ThrottlerGuard }],
+  // Global guards run in this order. The throttler comes first so requests
+  // the auth guard rejects count against the limit too: otherwise a client
+  // could guess tokens at full speed.
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }, authProvider],
 })
 export class AppModule {}
