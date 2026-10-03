@@ -81,9 +81,11 @@ function makeContext() {
       const page = {
         context: () => context,
         url: jest.fn().mockReturnValue('https://example.com/'),
-        frames: () => [{ url: () => page.url() as string }],
         goto: jest.fn().mockResolvedValue({ status: () => 200 }),
         close: jest.fn().mockResolvedValue(undefined),
+        /** The page that opened this one (a popup), as page.opener() says. */
+        openedBy: null as unknown,
+        opener: jest.fn(() => Promise.resolve(page.openedBy)),
       };
       pages.push(page);
       return page;
@@ -107,6 +109,8 @@ function makeRequest(
   redirectedFrom?: string,
   response: () => Promise<unknown> = () =>
     Promise.resolve({ status: () => 200 }),
+  /** Chromium's net error once the request failed (request.failure()). */
+  errorText?: string,
 ) {
   return {
     url: () => url,
@@ -116,12 +120,8 @@ function makeRequest(
     serviceWorker: () => null,
     isNavigationRequest: () => false,
     response: jest.fn(response),
+    failure: () => (errorText ? { errorText } : null),
   };
-}
-
-/** A navigation request of one of the page's frames. */
-function makeNavigation(url: string, page: unknown) {
-  return { ...makeRequest(url, page), isNavigationRequest: () => true };
 }
 
 /** A request a service worker made: it has no frame. */
@@ -371,11 +371,16 @@ describe('AxeAccessibilityScanner target-policy guard', () => {
 
     describe('to a host the policy could not resolve', () => {
       it.each([
-        ['does not exist', 'http://gone.invalid/p.png'],
-        ['failed to look up', 'http://tracker.flaky/p.png'],
+        ['http://gone.invalid/p.png', 'net::ERR_NAME_NOT_RESOLVED'],
+        ['http://tracker.flaky/p.png', 'net::ERR_NAME_RESOLUTION_FAILED'],
+        ['http://sinkhole.invalid/p.png', 'net::ERR_CONNECTION_REFUSED'],
+        ['http://sinkhole.invalid/p.png', 'net::ERR_ADDRESS_INVALID'],
+        ['http://far.invalid/p.png', 'net::ERR_ADDRESS_UNREACHABLE'],
+        ['http://far.invalid/p.png', 'net::ERR_CONNECTION_TIMED_OUT'],
+        ['http://odd.invalid:25/p.png', 'net::ERR_UNSAFE_PORT'],
       ])(
-        'keeps the page when the browser failed the hop too (name %s)',
-        async (_label, url) => {
+        'keeps the page when the browser could not reach %s either (%s)',
+        async (url, errorText) => {
           const scanner = build(false);
           await scanner.createContext(browser as any);
           const page = context.newPage();
@@ -383,8 +388,8 @@ describe('AxeAccessibilityScanner target-policy guard', () => {
             url,
             page,
             'https://cdn.example/r',
-            // net::ERR_NAME_NOT_RESOLVED: the request got no response.
             () => Promise.resolve(null),
+            errorText,
           );
 
           context.requestListener!(request);
@@ -507,25 +512,12 @@ describe('AxeAccessibilityScanner target-policy guard', () => {
       );
     });
 
-    describe('made by a service worker', () => {
-      /** Opens a page whose main frame navigated to `url`. */
-      const pageAt = (url: string) => {
-        const page = context.newPage();
-        page.url.mockReturnValue(url);
-        context.requestListener!(makeNavigation(url, page));
-        return page;
-      };
-
-      it("rejects only the pages that loaded a document of the worker's origin", async () => {
+    describe('that cannot be attributed to one page', () => {
+      it('rejects every open page for a blocked hop of a service worker', async () => {
         const scanner = build(false);
         await scanner.createContext(browser as any);
-        const client = pageAt('https://a.example/');
-        const other = pageAt('https://b.example/');
-        // Only a frame of this page is on the worker's origin.
-        const embedder = pageAt('https://c.example/');
-        context.requestListener!(
-          makeNavigation('https://a.example/widget', embedder),
-        );
+        const client = context.newPage();
+        const other = context.newPage();
 
         context.requestListener!(
           makeWorkerRequest(
@@ -535,35 +527,17 @@ describe('AxeAccessibilityScanner target-policy guard', () => {
           ),
         );
 
+        // A worker can pass what it read to any page (through an allowed
+        // host), and Playwright does not say which pages it controls.
         await expect(scanner.assertPageAllowed(client)).rejects.toThrow(
           TargetPolicyViolationError,
         );
-        await expect(scanner.assertPageAllowed(embedder)).rejects.toThrow(
+        await expect(scanner.assertPageAllowed(other)).rejects.toThrow(
           TargetPolicyViolationError,
         );
-        await expect(scanner.assertPageAllowed(other)).resolves.toBeUndefined();
-        expect(other.close).not.toHaveBeenCalled();
       });
 
-      it('rejects no page when no open page loaded its origin', async () => {
-        const scanner = build(false);
-        await scanner.createContext(browser as any);
-        const other = pageAt('https://b.example/');
-
-        context.requestListener!(
-          makeWorkerRequest(
-            'http://10.0.0.5/',
-            'https://a.example/sw.js',
-            'https://a.example/r',
-          ),
-        );
-        await flush();
-
-        await expect(scanner.assertPageAllowed(other)).resolves.toBeUndefined();
-        expect(other.close).not.toHaveBeenCalled();
-      });
-
-      it('makes a page that loads the origin during the check wait for it', async () => {
+      it('also rejects a page opened while the check ran, which waits for it', async () => {
         const scanner = build(false);
         await scanner.createContext(browser as any);
         let answer!: (result: unknown) => void;
@@ -579,9 +553,77 @@ describe('AxeAccessibilityScanner target-policy guard', () => {
             'https://a.example/r',
           ),
         );
-        const late = pageAt('https://a.example/late');
+        const late = context.newPage();
 
         const check = scanner.assertPageAllowed(late);
+        await flush();
+        answer(policyDecision('http://10.0.0.5/'));
+
+        await expect(check).rejects.toThrow(TargetPolicyViolationError);
+      });
+
+      it('lets every page pass when a service worker hop is allowed', async () => {
+        const scanner = build(false);
+        await scanner.createContext(browser as any);
+        const page = context.newPage();
+
+        context.requestListener!(
+          makeWorkerRequest(
+            'https://cdn.example/app.js',
+            'https://a.example/sw.js',
+            'https://a.example/r',
+          ),
+        );
+
+        await expect(scanner.assertPageAllowed(page)).resolves.toBeUndefined();
+        expect(page.close).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('in a popup', () => {
+      /** A page and the popup it opened. */
+      const openPopup = () => {
+        const opener = context.newPage();
+        const popup = context.newPage();
+        popup.openedBy = opener;
+        return { opener, popup };
+      };
+
+      it('rejects the page that opened the popup too', async () => {
+        const scanner = build(false);
+        await scanner.createContext(browser as any);
+        const { opener, popup } = openPopup();
+        const bystander = context.newPage();
+
+        context.requestListener!(
+          makeRequest('http://10.0.0.5/', popup, 'https://b.example/r'),
+        );
+
+        await expect(scanner.assertPageAllowed(opener)).rejects.toThrow(
+          /popup.*10\.0\.0\.5/,
+        );
+        expect(popup.close).toHaveBeenCalled();
+        await expect(
+          scanner.assertPageAllowed(bystander),
+        ).resolves.toBeUndefined();
+      });
+
+      it("makes the opener wait for its popup's checks", async () => {
+        const scanner = build(false);
+        await scanner.createContext(browser as any);
+        const { opener, popup } = openPopup();
+        let answer!: (result: unknown) => void;
+        urlPolicy.isAllowedTarget.mockReturnValueOnce(
+          new Promise((resolve) => {
+            answer = resolve;
+          }),
+        );
+        context.requestListener!(
+          makeRequest('http://10.0.0.5/', popup, 'https://b.example/r'),
+        );
+        await flush();
+
+        const check = scanner.assertPageAllowed(opener);
         await flush();
         answer(policyDecision('http://10.0.0.5/'));
 
