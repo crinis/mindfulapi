@@ -189,7 +189,7 @@ describe('env validation', () => {
   });
 
   describe('TRUST_PROXY', () => {
-    it.each(['true', 'false', '1', 'loopback, 172.18.0.0/16', '10.0.0.1'])(
+    it.each(['false', '1', 'loopback, 172.18.0.0/16', '10.0.0.1'])(
       'accepts %p',
       (value) => {
         expect(() => validate({ TRUST_PROXY: value })).not.toThrow();
@@ -200,10 +200,16 @@ describe('env validation', () => {
       'rejects %p at startup',
       (value) => {
         expect(() => validate({ TRUST_PROXY: value })).toThrow(
-          /Invalid environment configuration: TRUST_PROXY must be true, false, a hop count/,
+          /Invalid environment configuration: TRUST_PROXY must be false, a hop count/,
         );
       },
     );
+
+    it('rejects true, whose client address a client can choose', () => {
+      expect(() => validate({ TRUST_PROXY: 'true' })).toThrow(
+        /Invalid environment configuration: TRUST_PROXY=true is not supported/,
+      );
+    });
   });
 
   describe('empty values', () => {

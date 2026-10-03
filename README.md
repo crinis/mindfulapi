@@ -315,7 +315,7 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 | `CORS_ORIGINS` | _(unset)_ | Comma-separated allowed CORS origins; unset disables CORS |
 | `THROTTLE_TTL` | `60` | Rate-limit window in seconds (1–86400) |
 | `THROTTLE_LIMIT` | `100` | Allowed requests per window per client (1–1000000) |
-| `TRUST_PROXY` | _(unset)_ | Proxies whose `X-Forwarded-For` the API trusts for the client address that rate limiting counts by: `true`, `false`, a hop count (1–32), or a comma-separated list of IP addresses, CIDR subnets, `loopback`, `linklocal`, `uniquelocal`. Unset trusts none. See [Security](#security) |
+| `TRUST_PROXY` | _(unset)_ | Proxies whose `X-Forwarded-For` the API trusts for the client address that rate limiting counts by: `false`, a hop count (1–32), or a comma-separated list of IP addresses, CIDR subnets, `loopback`, `linklocal`, `uniquelocal`. Unset trusts none. `true` is refused at startup, because it would make the first `X-Forwarded-For` entry, which the client chooses, the client address. See [Security](#security) |
 
 **Storage and services**
 

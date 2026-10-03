@@ -6,7 +6,6 @@ describe('parseTrustProxy', () => {
   });
 
   it.each([
-    ['true', true],
     ['false', false],
     ['1', 1],
     ['2', 2],
@@ -40,5 +39,11 @@ describe('parseTrustProxy', () => {
     '*',
   ])('rejects %p', (raw) => {
     expect(() => parseTrustProxy(raw)).toThrow(/TRUST_PROXY/);
+  });
+
+  it('rejects true, which trusts the client-chosen left-most X-Forwarded-For entry', () => {
+    expect(() => parseTrustProxy('true')).toThrow(
+      /TRUST_PROXY=true .*left-most X-Forwarded-For.*hop count.*subnet/,
+    );
   });
 });

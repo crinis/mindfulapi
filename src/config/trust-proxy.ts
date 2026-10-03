@@ -3,9 +3,9 @@ import { isIP } from 'net';
 
 /**
  * The Express `trust proxy` values MindfulAPI accepts: a safe subset of what
- * Express takes (no functions, no arbitrary strings).
+ * Express takes (no `true`, no functions, no arbitrary strings).
  */
-export type TrustProxySetting = boolean | number | string[];
+export type TrustProxySetting = false | number | string[];
 
 /** Address ranges `proxy-addr` knows by name. */
 const PRESETS = new Set(['loopback', 'linklocal', 'uniquelocal']);
@@ -25,9 +25,13 @@ function isTrustedAddress(entry: string): boolean {
 
 /**
  * Parses `TRUST_PROXY` into the value for Express's `trust proxy` setting:
- * `true`/`false`, a hop count (1–32), or a comma-separated list of IP
- * addresses, CIDR subnets and the presets `loopback`, `linklocal` and
- * `uniquelocal`.
+ * `false`, a hop count (1–32), or a comma-separated list of IP addresses,
+ * CIDR subnets and the presets `loopback`, `linklocal` and `uniquelocal`.
+ *
+ * `true` is refused: Express then takes the left-most `X-Forwarded-For` entry
+ * as the client address, and behind a proxy that appends to the header (Nginx
+ * with `$proxy_add_x_forwarded_for`) that entry is whatever the client sent,
+ * so every request could claim a new address and escape the rate limit.
  *
  * @returns `null` when unset or empty (Express keeps its default: no proxy is
  * trusted).
@@ -38,7 +42,11 @@ export function parseTrustProxy(
   raw: string | undefined,
 ): TrustProxySetting | null {
   if (raw === undefined || raw === '') return null;
-  if (raw === 'true') return true;
+  if (raw === 'true') {
+    throw new Error(
+      'TRUST_PROXY=true is not supported: it makes the left-most X-Forwarded-For entry the client address, which a client can choose. Set the number of proxies in front of the API (a hop count such as 1) or their IP addresses or subnet list instead',
+    );
+  }
   if (raw === 'false') return false;
   if (/^\d+$/.test(raw)) {
     const hops = Number(raw);
@@ -48,7 +56,7 @@ export function parseTrustProxy(
     if (entries.every(isTrustedAddress)) return entries;
   }
   throw new Error(
-    `TRUST_PROXY must be true, false, a hop count (1-${MAX_HOPS}), or a comma-separated list of IP addresses, CIDR subnets, loopback, linklocal or uniquelocal (got "${raw}")`,
+    `TRUST_PROXY must be false, a hop count (1-${MAX_HOPS}), or a comma-separated list of IP addresses, CIDR subnets, loopback, linklocal or uniquelocal (got "${raw}")`,
   );
 }
 
