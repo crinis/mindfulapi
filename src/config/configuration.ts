@@ -216,7 +216,7 @@ export const agentConfig = registerAs('agent', () => ({
    * the global `AGENT_*` default, so a skill can change its model without
    * duplicating shared settings. The global key and base URL are not
    * inherited by an override that sets another provider (and the key not by
-   * one with its own base URL), so they never reach another endpoint.
+   * one with another base URL), so they never reach another endpoint.
    */
   skillModels: Object.fromEntries(
     Object.values(AgentSkill)
