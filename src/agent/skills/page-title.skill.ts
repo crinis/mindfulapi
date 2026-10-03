@@ -26,8 +26,6 @@ const HEADING_MAX = 120;
 const MAX_HEADINGS = 4;
 /** Longest meta description kept. */
 const DESC_MAX = 200;
-/** Longest suggested replacement title kept. */
-const SUGGEST_MAX = 200;
 
 /**
  * Verdicts the model may return. The one case axe already reports
@@ -61,13 +59,15 @@ const WCAG_FOR_VERDICT: Record<TitleVerdict, string | null> = {
  * unlike the multi-unit page skills — this is a single verdict object, not a
  * findings array. Every field is required (`suggestedTitle` is nullable, not
  * optional): OpenAI strict mode rejects a schema whose `required` array omits a
- * property, so optional fields must be modeled as nullable.
+ * property, so optional fields must be modeled as nullable. Strings carry no
+ * length limit, which would reject the whole answer on one overshoot;
+ * persistence truncates them.
  */
 export const pageTitleSchema = z.object({
   verdict: z.enum(TITLE_VERDICTS),
   confidence: z.number().min(0).max(1),
-  rationale: z.string().max(400),
-  suggestedTitle: z.string().max(SUGGEST_MAX).nullable(),
+  rationale: z.string(),
+  suggestedTitle: z.string().nullable(),
 });
 
 /** A heading captured purely as topic context for judging the title. */

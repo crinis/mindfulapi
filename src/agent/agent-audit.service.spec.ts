@@ -454,4 +454,47 @@ describe('AgentAuditService.evaluate with the real harness', () => {
       aiTasksFailed: 0,
     });
   });
+
+  it('keeps the first 30 findings of an answer that overshoots the caps', async () => {
+    // One finding more than the cap, one rationale longer than the old
+    // 400-character limit: either used to reject the whole answer.
+    const outline = Array.from({ length: 31 }, (_, i) => ({
+      id: `H${i + 1}`,
+      selector: `main > h2:nth-of-type(${i + 1})`,
+      level: 2,
+      tag: 'h2',
+      text: 'More',
+    }));
+    const model = answering({
+      findings: outline.map((heading, i) => ({
+        id: heading.id,
+        verdict: 'vague_or_generic',
+        confidence: 0.9,
+        rationale: i === 0 ? 'x'.repeat(500) : 'Uninformative heading.',
+        suggestedText: null,
+        suggestedLevel: null,
+      })),
+    });
+    const { service, findingRepository, scanRepository } = makeService(
+      {},
+      harnessFor(model),
+    );
+
+    const evidence: HeadingEvidence = { ...headingEvidence, headings: outline };
+
+    await service.evaluate(
+      { id: 1 } as Scan,
+      [{ skill: headingSkill, evidence }],
+      () => Promise.resolve(false),
+    );
+
+    expect(findingRepository.save).toHaveBeenCalledTimes(30);
+    expect(findingRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'x'.repeat(500) }),
+    );
+    expect(scanRepository.update).toHaveBeenLastCalledWith(1, {
+      aiTasksCompleted: 1,
+      aiTasksFailed: 0,
+    });
+  });
 });

@@ -20,7 +20,7 @@ const MAX_FIELDS = 25;
 const NAME_MAX = 120;
 /** Longest describedby (existing instructions) text kept per field. */
 const DESC_MAX = 180;
-/** Max findings the model may return in one page request. */
+/** Max findings kept from one page request; the rest are dropped. */
 const MAX_FINDINGS = 40;
 
 /**
@@ -59,6 +59,11 @@ const WCAG_FOR_VERDICT: Record<FormVerdict, string | null> = {
  * Structured page verdict. Every field is required (`suggestedText` is
  * nullable, not optional): OpenAI strict mode rejects a schema whose `required`
  * array omits a property, so optional fields must be modeled as nullable.
+ *
+ * Arrays and strings carry no size limit: one overshoot would reject the whole
+ * answer (no provider repairs it, and some strip the limit from the schema
+ * they send). The skill keeps the first {@link MAX_FINDINGS} problems and
+ * persistence truncates the text.
  */
 export const formLabelsSchema = z.object({
   findings: z
@@ -67,11 +72,11 @@ export const formLabelsSchema = z.object({
         id: z.string(),
         verdict: z.enum(FORM_VERDICTS),
         confidence: z.number().min(0).max(1),
-        rationale: z.string().max(400),
-        suggestedText: z.string().max(300).nullable(),
+        rationale: z.string(),
+        suggestedText: z.string().nullable(),
       }),
     )
-    .max(MAX_FINDINGS),
+    .describe(`At most ${MAX_FINDINGS} findings, the most important first.`),
 });
 
 /** How a control's accessible name was derived. */
@@ -168,7 +173,9 @@ export class FormLabelsSkill implements AuditSkill<FormEvidence> {
       skill: this.id,
     });
 
-    const problems = data.findings.filter((f) => f.verdict !== 'appropriate');
+    const problems = data.findings
+      .filter((f) => f.verdict !== 'appropriate')
+      .slice(0, MAX_FINDINGS);
     if (problems.length === 0) {
       // No problems, but still surface the request's tokens for accounting.
       return [appropriateDraft(evidence, usage, model)];

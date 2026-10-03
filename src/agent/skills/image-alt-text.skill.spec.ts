@@ -48,6 +48,21 @@ describe('imageAltVerdictSchema (OpenAI strict compatibility)', () => {
   });
 });
 
+describe('imageAltVerdictSchema (no size caps)', () => {
+  // A length cap in the schema rejects the whole answer on one overshoot;
+  // persistence truncates the text instead.
+  it('accepts a long rationale and suggestion', () => {
+    expect(
+      imageAltVerdictSchema.safeParse({
+        verdict: 'inaccurate',
+        confidence: 0.9,
+        rationale: 'r'.repeat(1000),
+        suggestedAlt: 's'.repeat(1000),
+      }).success,
+    ).toBe(true);
+  });
+});
+
 describe('imageNeedsAgentReview (trigger)', () => {
   it('includes images with an alt attribute (even empty/decorative)', () => {
     expect(imageNeedsAgentReview({ alt: '' })).toBe(true);

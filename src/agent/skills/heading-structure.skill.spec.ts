@@ -95,8 +95,43 @@ describe('buildHeadingPrompt', () => {
   });
 });
 
+describe('headingStructureSchema (no size caps)', () => {
+  // A size cap in the schema rejects the whole answer on one overshoot; the
+  // skill keeps the first 30 findings and persistence truncates text instead.
+  it('accepts more findings and longer text than the skill keeps', () => {
+    const finding = {
+      id: 'H1',
+      verdict: 'vague_or_generic',
+      confidence: 0.9,
+      rationale: 'r'.repeat(1000),
+      suggestedText: 's'.repeat(1000),
+      suggestedLevel: null,
+    };
+    const answer = { findings: Array.from({ length: 31 }, () => finding) };
+    expect(headingStructureSchema.safeParse(answer).success).toBe(true);
+  });
+});
+
 describe('HeadingStructureSkill.evaluate', () => {
   const skill = new HeadingStructureSkill();
+
+  it('keeps at most 30 problem findings', async () => {
+    const finding = {
+      id: 'H1',
+      verdict: 'vague_or_generic',
+      confidence: 0.9,
+      rationale: 'r'.repeat(1000),
+      suggestedText: 's'.repeat(1000),
+      suggestedLevel: null,
+    };
+    const drafts = await skill.evaluate(
+      baseEvidence(),
+      harnessReturning({
+        findings: Array.from({ length: 31 }, () => finding),
+      }),
+    );
+    expect(drafts).toHaveLength(30);
+  });
 
   it('returns a single appropriate draft (with usage) when no problems', async () => {
     const drafts = await skill.evaluate(

@@ -101,8 +101,41 @@ describe('buildLinkPrompt', () => {
   });
 });
 
+describe('linkPurposeSchema (no size caps)', () => {
+  // A size cap in the schema rejects the whole answer on one overshoot; the
+  // skill keeps the first 40 findings and persistence truncates text instead.
+  it('accepts more findings and longer text than the skill keeps', () => {
+    const finding = {
+      id: 'L1',
+      verdict: 'vague_or_generic',
+      confidence: 0.9,
+      rationale: 'r'.repeat(1000),
+      suggestedText: 's'.repeat(1000),
+    };
+    const answer = { findings: Array.from({ length: 41 }, () => finding) };
+    expect(linkPurposeSchema.safeParse(answer).success).toBe(true);
+  });
+});
+
 describe('LinkPurposeSkill.evaluate', () => {
   const skill = new LinkPurposeSkill();
+
+  it('keeps at most 40 problem findings', async () => {
+    const finding = {
+      id: 'L1',
+      verdict: 'vague_or_generic',
+      confidence: 0.9,
+      rationale: 'r'.repeat(1000),
+      suggestedText: 's'.repeat(1000),
+    };
+    const drafts = await skill.evaluate(
+      baseEvidence(),
+      harnessReturning({
+        findings: Array.from({ length: 41 }, () => finding),
+      }),
+    );
+    expect(drafts).toHaveLength(40);
+  });
 
   it('returns a single appropriate draft (with usage) when no problems', async () => {
     const drafts = await skill.evaluate(

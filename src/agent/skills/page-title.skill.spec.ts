@@ -42,6 +42,21 @@ describe('pageTitleSchema (OpenAI strict compatibility)', () => {
   });
 });
 
+describe('pageTitleSchema (no size caps)', () => {
+  // A length cap in the schema rejects the whole answer on one overshoot;
+  // persistence truncates the text instead.
+  it('accepts a long rationale and suggestion', () => {
+    expect(
+      pageTitleSchema.safeParse({
+        verdict: 'not_descriptive',
+        confidence: 0.9,
+        rationale: 'r'.repeat(1000),
+        suggestedTitle: 's'.repeat(1000),
+      }).success,
+    ).toBe(true);
+  });
+});
+
 describe('buildTitlePrompt', () => {
   it('renders the title, headings, and meta description', () => {
     const prompt = buildTitlePrompt(baseEvidence());

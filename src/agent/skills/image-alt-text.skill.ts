@@ -46,12 +46,14 @@ const IMAGE_ALT_VERDICTS = [
  * Every field is required (`suggestedAlt` is nullable, not optional): OpenAI's
  * strict structured-output mode rejects a schema whose `required` array omits
  * any property, so optional fields must be modeled as nullable instead.
+ * Strings carry no length limit, which would reject the whole answer on one
+ * overshoot; persistence truncates them.
  */
 export const imageAltVerdictSchema = z.object({
   verdict: z.enum(IMAGE_ALT_VERDICTS),
   confidence: z.number().min(0).max(1),
-  rationale: z.string().max(600),
-  suggestedAlt: z.string().max(300).nullable(),
+  rationale: z.string(),
+  suggestedAlt: z.string().nullable(),
 });
 
 /** Descriptor produced in-browser for each candidate image. */
