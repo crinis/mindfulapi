@@ -59,6 +59,22 @@ describe('BrowserService', () => {
     expect(service.isConnected()).toBe(true);
   });
 
+  it('leaves shutdown signals to the application', async () => {
+    // Playwright's own handlers would close the browser on SIGTERM while the
+    // scan worker is still draining its active scan.
+    mockLaunch.mockResolvedValue(new FakeBrowser());
+
+    await makeService().getBrowser();
+
+    expect(mockLaunch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        handleSIGTERM: false,
+        handleSIGINT: false,
+        handleSIGHUP: false,
+      }),
+    );
+  });
+
   it('launches a new browser after the previous one disconnected', async () => {
     const crashed = new FakeBrowser();
     const replacement = new FakeBrowser();

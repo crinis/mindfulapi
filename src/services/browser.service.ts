@@ -122,12 +122,22 @@ export class BrowserService implements OnApplicationShutdown {
 
   /**
    * Launches a local headless Chromium instance.
+   *
+   * Playwright would close the browser itself on SIGTERM, SIGINT and SIGHUP,
+   * while Nest is still waiting for the scan worker to finish its active
+   * scans; the browser is closed by {@link onApplicationShutdown} instead,
+   * after the worker. Playwright still kills it when the process exits.
    */
   private async launchLocalBrowser(): Promise<Browser> {
     this.logger.log('Launching local Chromium browser instance');
 
     try {
-      const browser = await chromium.launch({ headless: true });
+      const browser = await chromium.launch({
+        headless: true,
+        handleSIGTERM: false,
+        handleSIGINT: false,
+        handleSIGHUP: false,
+      });
       this.connectionType = 'local';
       this.logger.log('Local Chromium browser instance launched successfully');
       return browser;
