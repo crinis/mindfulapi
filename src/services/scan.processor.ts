@@ -40,6 +40,7 @@ import {
 import { scanConfig } from '../config/configuration';
 import { CrawlStrategy } from '../enums/crawl-strategy.enum';
 import { truncate } from '../utils/truncate.util';
+import { readIntSetting } from '../config/numeric-settings';
 import { AgentAuditService } from '../agent/agent-audit.service';
 import type { AuditSkill } from '../agent/skills/audit-skill.interface';
 import type { CollectedUnit } from '../agent/agent-audit.service';
@@ -182,12 +183,10 @@ interface ProgressWriter {
 /**
  * Reads SCAN_CONCURRENCY (1-8, default 1) at import time. The @Processor
  * decorator evaluates before ConfigModule loads, so this reads process.env
- * directly; the value is still bounds-checked by the env validation schema.
+ * directly, with the parser and bounds the env validation schema checks.
  */
 function resolveScanConcurrency(): number {
-  const raw = parseInt(process.env.SCAN_CONCURRENCY ?? '', 10);
-  if (!Number.isFinite(raw)) return 1;
-  return Math.min(Math.max(raw, 1), 8);
+  return readIntSetting('SCAN_CONCURRENCY');
 }
 
 @Injectable()

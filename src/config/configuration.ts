@@ -2,6 +2,7 @@ import { registerAs } from '@nestjs/config';
 import { CronExpression } from '@nestjs/schedule';
 import { AgentSkill } from '../enums/agent-skill.enum';
 import { ScanMode } from '../enums/scan-mode.enum';
+import { readDecimalSetting, readIntSetting } from './numeric-settings';
 import { parseTrustProxy } from './trust-proxy';
 
 /** Provider/model/credentials for a single agent skill (or the global default). */
@@ -128,18 +129,6 @@ function readSkillModelOverride(skill: string): AgentModelConfig | null {
   return hasAny ? override : null;
 }
 
-/** Clamps a parsed integer into [min, max], falling back when not a number. */
-function clampInt(
-  raw: string | undefined,
-  fallback: number,
-  min: number,
-  max: number,
-): number {
-  const parsed = parseInt(raw ?? '', 10);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(Math.max(parsed, min), max);
-}
-
 /** Splits a comma-separated env value into trimmed non-empty entries. */
 function splitList(raw: string | undefined): string[] {
   return (raw ?? '')
@@ -148,21 +137,9 @@ function splitList(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
-/** Clamps a parsed float into [min, max], falling back when not a number. */
-function clampFloat(
-  raw: string | undefined,
-  fallback: number,
-  min: number,
-  max: number,
-): number {
-  const parsed = parseFloat(raw ?? '');
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(Math.max(parsed, min), max);
-}
-
 /** HTTP server and general application settings. */
 export const appConfig = registerAs('app', () => ({
-  port: clampInt(process.env.PORT, 3000, 1, 65535),
+  port: readIntSetting('PORT'),
   nodeEnv: process.env.NODE_ENV || 'development',
   /** Allowed CORS origins; empty list means CORS stays disabled. */
   corsOrigins: splitList(process.env.CORS_ORIGINS),
@@ -174,14 +151,14 @@ export const appConfig = registerAs('app', () => ({
 export const securityConfig = registerAs('security', () => ({
   authToken: process.env.AUTH_TOKEN || null,
   authDisabled: process.env.AUTH_DISABLED === 'true',
-  throttleTtlSeconds: clampInt(process.env.THROTTLE_TTL, 60, 1, 86400),
-  throttleLimit: clampInt(process.env.THROTTLE_LIMIT, 100, 1, 1_000_000),
+  throttleTtlSeconds: readIntSetting('THROTTLE_TTL'),
+  throttleLimit: readIntSetting('THROTTLE_LIMIT'),
 }));
 
 /** Redis connection used by the BullMQ queue. */
 export const redisConfig = registerAs('redis', () => ({
   host: process.env.REDIS_HOST || 'localhost',
-  port: clampInt(process.env.REDIS_PORT, 6379, 1, 65535),
+  port: readIntSetting('REDIS_PORT'),
   password: process.env.REDIS_PASSWORD || undefined,
 }));
 
@@ -194,9 +171,9 @@ export const databaseConfig = registerAs('database', () => ({
 /** Scan execution settings shared by the processor and browser services. */
 export const scanConfig = registerAs('scan', () => ({
   /** Concurrent pages within one scan job (crawl and url_list modes). */
-  crawlConcurrency: clampInt(process.env.CRAWL_CONCURRENCY, 4, 1, 16),
+  crawlConcurrency: readIntSetting('CRAWL_CONCURRENCY'),
   /** Concurrent scan jobs processed by the BullMQ worker. */
-  scanConcurrency: clampInt(process.env.SCAN_CONCURRENCY, 1, 1, 8),
+  scanConcurrency: readIntSetting('SCAN_CONCURRENCY'),
   /** Allows scanning private/internal network targets when true. */
   allowPrivateTargets: process.env.SCAN_ALLOW_PRIVATE_TARGETS === 'true',
   /** Hostnames exempt from the private-target block. */
@@ -259,43 +236,23 @@ export const agentConfig = registerAs('agent', () => ({
     return Array.from(new Set(modes)) as ScanMode[];
   })(),
   /** Concurrent per-unit requests (subagent fan-out) during evaluation. */
-  concurrency: clampInt(process.env.AGENT_CONCURRENCY, 4, 1, 16),
+  concurrency: readIntSetting('AGENT_CONCURRENCY'),
   /** Max work units collected per page across all skills. */
-  maxUnitsPerPage: clampInt(process.env.AGENT_MAX_UNITS_PER_PAGE, 30, 1, 500),
+  maxUnitsPerPage: readIntSetting('AGENT_MAX_UNITS_PER_PAGE'),
   /** Max work units evaluated per scan across all skills. */
-  maxUnitsPerScan: clampInt(
-    process.env.AGENT_MAX_UNITS_PER_SCAN,
-    200,
-    1,
-    10000,
-  ),
+  maxUnitsPerScan: readIntSetting('AGENT_MAX_UNITS_PER_SCAN'),
   /**
    * Output-token cap per individual request. Covers reasoning tokens too, so it
    * is set with headroom for reasoning models (the heaviest skill,
    * `heading_structure` at `low` effort, peaked ~470 but reasoning counts vary).
    */
-  maxTokensPerRequest: clampInt(
-    process.env.AGENT_MAX_TOKENS_PER_REQUEST,
-    2000,
-    1,
-    100000,
-  ),
+  maxTokensPerRequest: readIntSetting('AGENT_MAX_TOKENS_PER_REQUEST'),
   /** Per-request timeout in milliseconds. */
-  requestTimeoutMs: clampInt(
-    process.env.AGENT_REQUEST_TIMEOUT_MS,
-    60_000,
-    1000,
-    600_000,
-  ),
+  requestTimeoutMs: readIntSetting('AGENT_REQUEST_TIMEOUT_MS'),
   /** Skip element screenshots larger than this many bytes. */
-  maxImageBytes: clampInt(
-    process.env.AGENT_MAX_IMAGE_BYTES,
-    1_500_000,
-    1000,
-    20_000_000,
-  ),
+  maxImageBytes: readIntSetting('AGENT_MAX_IMAGE_BYTES'),
   /** Sampling temperature; 0 favours deterministic, low-hallucination output. */
-  temperature: clampFloat(process.env.AGENT_TEMPERATURE, 0, 0, 2),
+  temperature: readDecimalSetting('AGENT_TEMPERATURE'),
   /**
    * Global reasoning effort applied to reasoning models when no profile/per-skill
    * value is set. Unset for the default (sampling) path; provide it only when
@@ -307,6 +264,6 @@ export const agentConfig = registerAs('agent', () => ({
 /** Scheduled data-retention cleanup settings. */
 export const cleanupConfig = registerAs('cleanup', () => ({
   enabled: process.env.CLEANUP_ENABLED !== 'false',
-  retentionDays: clampInt(process.env.CLEANUP_RETENTION_DAYS, 30, 0, 36500),
+  retentionDays: readIntSetting('CLEANUP_RETENTION_DAYS'),
   interval: process.env.CLEANUP_INTERVAL || CronExpression.EVERY_DAY_AT_2AM,
 }));

@@ -120,6 +120,61 @@ describe('env validation', () => {
     expect(() => validate({ SOME_OTHER_TOOL_VAR: 'anything' })).not.toThrow();
   });
 
+  describe('values the application would change', () => {
+    // Each of these used to pass validation and then be clamped or misparsed
+    // by the config namespaces (parseInt/clamp), silently changing it.
+    it.each([
+      ['THROTTLE_TTL', '9999999'],
+      ['THROTTLE_LIMIT', '2000000'],
+      ['CLEANUP_RETENTION_DAYS', '99999'],
+      ['AGENT_REQUEST_TIMEOUT_MS', '900000'],
+      ['AGENT_MAX_TOKENS_PER_REQUEST', '200000'],
+      ['AGENT_MAX_IMAGE_BYTES', '30000000'],
+      ['AGENT_MAX_IMAGE_BYTES', '1.5e6'],
+      ['PORT', '0x50'],
+      ['PORT', '80.5'],
+      ['SCAN_CONCURRENCY', '1e0'],
+      ['REDIS_PORT', '6379abc'],
+      ['AGENT_TEMPERATURE', '0x1'],
+      ['AGENT_TEMPERATURE', '1e0'],
+    ])('rejects %s=%p', (name, value) => {
+      expect(() => validate({ [name]: value })).toThrow(
+        new RegExp(`Invalid environment configuration: ${name} `),
+      );
+    });
+
+    it.each([
+      ['THROTTLE_TTL', '86400'],
+      ['THROTTLE_LIMIT', '1000000'],
+      ['CLEANUP_RETENTION_DAYS', '36500'],
+      ['CLEANUP_RETENTION_DAYS', '0'],
+      ['AGENT_REQUEST_TIMEOUT_MS', '600000'],
+      ['AGENT_MAX_TOKENS_PER_REQUEST', '100000'],
+      ['AGENT_MAX_IMAGE_BYTES', '20000000'],
+      ['PORT', '80'],
+      ['AGENT_TEMPERATURE', '0.7'],
+      ['AGENT_TEMPERATURE', '2'],
+    ])('accepts %s=%p', (name, value) => {
+      expect(() => validate({ [name]: value })).not.toThrow();
+    });
+
+    it.each(['not a cron', '0 25 * * *', '0 2 * *'])(
+      'rejects the cron expression %p for CLEANUP_INTERVAL',
+      (value) => {
+        expect(() => validate({ CLEANUP_INTERVAL: value })).toThrow(
+          /CLEANUP_INTERVAL must be a valid cron expression/,
+        );
+      },
+    );
+
+    it.each(['0 2 * * *', '0 02 * * *', '*/30 * * * * *', '@daily'])(
+      'accepts the cron expression %p for CLEANUP_INTERVAL',
+      (value) => {
+        expect(() => validate({ CLEANUP_INTERVAL: value })).not.toThrow();
+      },
+    );
+  });
+
   describe('TRUST_PROXY', () => {
     it.each(['true', 'false', '1', 'loopback, 172.18.0.0/16', '10.0.0.1'])(
       'accepts %p',

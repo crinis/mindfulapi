@@ -1,4 +1,4 @@
-import { plainToInstance } from 'class-transformer';
+import { plainToInstance, Transform } from 'class-transformer';
 import {
   IsIn,
   IsInt,
@@ -14,6 +14,15 @@ import {
   ValidatorConstraint,
   ValidatorConstraintInterface,
 } from 'class-validator';
+import { validateCronExpression } from 'cron';
+import {
+  DECIMAL_SETTINGS,
+  DecimalSettingName,
+  INTEGER_SETTINGS,
+  IntegerSettingName,
+  parseDecimalInt,
+  parseDecimalNumber,
+} from './numeric-settings';
 import { parseTrustProxy } from './trust-proxy';
 
 /** Parse error for a TRUST_PROXY value, or null when the app accepts it. */
@@ -39,22 +48,85 @@ class TrustProxyConstraint implements ValidatorConstraintInterface {
 }
 
 /**
+ * Accepts the cron expressions the scheduler accepts: @nestjs/schedule hands
+ * CLEANUP_INTERVAL to the same `cron` package version.
+ */
+@ValidatorConstraint({ name: 'cronExpression' })
+class CronExpressionConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    return typeof value === 'string' && validateCronExpression(value).valid;
+  }
+
+  defaultMessage(args: ValidationArguments): string {
+    const reason =
+      typeof args.value === 'string'
+        ? validateCronExpression(args.value).error?.message
+        : undefined;
+    return `${args.property} must be a valid cron expression such as "0 2 * * *"${reason ? ` (${reason})` : ''}`;
+  }
+}
+
+/**
+ * Converts the raw string with the same parser the config namespaces use.
+ * Implicit conversion (`Number()`) would accept forms such as `0x50` or
+ * `1.5e6` that the application then read differently.
+ */
+function parseRaw(parse: (raw: unknown) => number) {
+  return Transform(({ obj, key }) => {
+    const raw = (obj as Record<string, unknown>)[key];
+    return raw === undefined ? undefined : parse(raw);
+  });
+}
+
+/** An integer variable within its {@link INTEGER_SETTINGS} bounds. */
+function IntegerSetting(): PropertyDecorator {
+  return (target, propertyKey) => {
+    const name = propertyKey as IntegerSettingName;
+    const { min, max } = INTEGER_SETTINGS[name];
+    for (const decorate of [
+      IsOptional(),
+      parseRaw(parseDecimalInt),
+      IsInt({ message: `${name} must be a whole number in decimal digits` }),
+      Min(min),
+      Max(max),
+    ]) {
+      decorate(target, propertyKey);
+    }
+  };
+}
+
+/** A decimal variable within its {@link DECIMAL_SETTINGS} bounds. */
+function DecimalSetting(): PropertyDecorator {
+  return (target, propertyKey) => {
+    const name = propertyKey as DecimalSettingName;
+    const { min, max } = DECIMAL_SETTINGS[name];
+    for (const decorate of [
+      IsOptional(),
+      parseRaw(parseDecimalNumber),
+      IsNumber({}, { message: `${name} must be a decimal number such as 0.5` }),
+      Min(min),
+      Max(max),
+    ]) {
+      decorate(target, propertyKey);
+    }
+  };
+}
+
+/**
  * Declarative schema for every environment variable the application reads.
  *
- * Values arrive as strings; numeric properties are converted via implicit
- * class-transformer conversion so malformed numbers fail validation instead
- * of silently falling back. Boolean-ish flags are validated as the literal
- * strings 'true'/'false' and parsed in the config namespaces.
+ * Values arrive as strings. Numeric variables are parsed with the parsers the
+ * config namespaces use and checked against the same bounds
+ * (`numeric-settings.ts`), so a value that passes is used unchanged.
+ * Boolean-ish flags are validated as the literal strings 'true'/'false' and
+ * parsed in the config namespaces.
  */
 export class EnvironmentVariables {
   @IsOptional()
   @IsString()
   NODE_ENV?: string;
 
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(65535)
+  @IntegerSetting()
   PORT?: number;
 
   @IsOptional()
@@ -73,10 +145,7 @@ export class EnvironmentVariables {
   @IsString()
   REDIS_HOST?: string;
 
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(65535)
+  @IntegerSetting()
   REDIS_PORT?: number;
 
   @IsOptional()
@@ -100,27 +169,19 @@ export class EnvironmentVariables {
   @IsIn(['true', 'false'])
   CLEANUP_ENABLED?: string;
 
-  @IsOptional()
-  @IsInt()
-  @Min(0)
+  @IntegerSetting()
   CLEANUP_RETENTION_DAYS?: number;
 
   @IsOptional()
-  @IsString()
+  @Validate(CronExpressionConstraint)
   CLEANUP_INTERVAL?: string;
 
   /** Concurrent pages within one scan job. */
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(16)
+  @IntegerSetting()
   CRAWL_CONCURRENCY?: number;
 
   /** Concurrent scan jobs processed by the BullMQ worker. */
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(8)
+  @IntegerSetting()
   SCAN_CONCURRENCY?: number;
 
   @IsOptional()
@@ -138,15 +199,11 @@ export class EnvironmentVariables {
   CORS_ORIGINS?: string;
 
   /** Rate-limit window in seconds. */
-  @IsOptional()
-  @IsInt()
-  @Min(1)
+  @IntegerSetting()
   THROTTLE_TTL?: number;
 
   /** Allowed requests per window per client. */
-  @IsOptional()
-  @IsInt()
-  @Min(1)
+  @IntegerSetting()
   THROTTLE_LIMIT?: number;
 
   /** Express `trust proxy` for client addresses behind a reverse proxy. */
@@ -196,45 +253,27 @@ export class EnvironmentVariables {
   AGENT_ALLOWED_SCAN_MODES?: string;
 
   /** Concurrent per-unit requests during evaluation. */
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(16)
+  @IntegerSetting()
   AGENT_CONCURRENCY?: number;
 
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(500)
+  @IntegerSetting()
   AGENT_MAX_UNITS_PER_PAGE?: number;
 
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(10000)
+  @IntegerSetting()
   AGENT_MAX_UNITS_PER_SCAN?: number;
 
   /** Output-token cap per individual request. */
-  @IsOptional()
-  @IsInt()
-  @Min(1)
+  @IntegerSetting()
   AGENT_MAX_TOKENS_PER_REQUEST?: number;
 
-  @IsOptional()
-  @IsInt()
-  @Min(1000)
+  @IntegerSetting()
   AGENT_REQUEST_TIMEOUT_MS?: number;
 
-  @IsOptional()
-  @IsInt()
-  @Min(1000)
+  @IntegerSetting()
   AGENT_MAX_IMAGE_BYTES?: number;
 
   /** Sampling temperature (0–2). */
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(2)
+  @DecimalSetting()
   AGENT_TEMPERATURE?: number;
 
   /** Reasoning effort for a reasoning `AGENT_MODEL`. */
@@ -267,7 +306,10 @@ export function validate(
   const validated = plainToInstance(EnvironmentVariables, setValues, {
     enableImplicitConversion: true,
   });
-  const errors = validateSync(validated, { skipMissingProperties: true });
+  const errors = validateSync(validated, {
+    skipMissingProperties: true,
+    stopAtFirstError: true,
+  });
 
   if (errors.length > 0) {
     const details = errors

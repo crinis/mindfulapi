@@ -280,7 +280,7 @@ New: `DELETE /v1/scans/:id`, `POST /v1/scans/:id/cancel`, `GET /health`, respons
 
 ## Configuration
 
-All configuration uses environment variables; [`.env.example`](.env.example) lists them all. An empty value (`VAR=`) means the same as leaving the variable unset, so the default applies. Values are validated at startup: an out-of-range or malformed value (e.g. `SCAN_CONCURRENCY=12`) stops the server with an error instead of being clamped.
+All configuration uses environment variables; [`.env.example`](.env.example) lists them all. An empty value (`VAR=`) means the same as leaving the variable unset, so the default applies. Values are validated at startup: an out-of-range or malformed value (e.g. `SCAN_CONCURRENCY=12`) stops the server with an error, and a value that passes is used exactly as given. Numbers must be plain decimals (`1500000`, not `1.5e6` or `0x50`); the ranges are listed below.
 
 **With Docker Compose,** every variable in `.env` reaches the API container, except the service wiring: `NODE_ENV`, `DATABASE_PATH`, `PLAYWRIGHT_WS_URL`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` and `PORT` are pinned by `docker-compose.yml` to the bundled containers. `PORT` and `BIND_ADDRESS` in `.env` only change where the API is published on the host.
 
@@ -294,8 +294,8 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 | `AUTH_TOKEN` | _(unset)_ | Bearer token for API auth. **The server refuses to start when unset** unless `AUTH_DISABLED=true`, and always refuses the old `.env.example` placeholder `your-secure-api-token-here` |
 | `AUTH_DISABLED` | `false` | `true` runs without authentication (only when `AUTH_TOKEN` is unset). **Not recommended** |
 | `CORS_ORIGINS` | _(unset)_ | Comma-separated allowed CORS origins; unset disables CORS |
-| `THROTTLE_TTL` | `60` | Rate-limit window in seconds |
-| `THROTTLE_LIMIT` | `100` | Allowed requests per window per client |
+| `THROTTLE_TTL` | `60` | Rate-limit window in seconds (1–86400) |
+| `THROTTLE_LIMIT` | `100` | Allowed requests per window per client (1–1000000) |
 | `TRUST_PROXY` | _(unset)_ | Proxies whose `X-Forwarded-For` the API trusts for the client address that rate limiting counts by: `true`, `false`, a hop count (1–32), or a comma-separated list of IP addresses, CIDR subnets, `loopback`, `linklocal`, `uniquelocal`. Unset trusts none. See [Security](#security) |
 
 **Storage and services**
@@ -304,7 +304,7 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 |----------|---------|-------------|
 | `DATABASE_PATH` | `./data/database.sqlite` | SQLite database file path |
 | `REDIS_HOST` | `localhost` | Redis hostname |
-| `REDIS_PORT` | `6379` | Redis port |
+| `REDIS_PORT` | `6379` | Redis port (1–65535) |
 | `REDIS_PASSWORD` | _(unset)_ | Redis password |
 | `PLAYWRIGHT_WS_URL` | _(unset)_ | WebSocket URL of a remote Playwright server (e.g. `ws://playwright:3000`). **Required in Docker** — the production image has no browser. Unset uses a locally installed Chromium (local development only) |
 | `ENCRYPTION_KEY` | _(unset)_ | 32-byte key (base64 or hex) for sensitive stored data, currently scan `basicAuth` credentials. Required only when such fields are used. Generate with `openssl rand -base64 32` |
@@ -325,8 +325,8 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CLEANUP_ENABLED` | `true` | Scheduled deletion of old scans. `POST /v1/cleanup` works regardless |
-| `CLEANUP_RETENTION_DAYS` | `30` | Days to keep scans. `0` deletes every scan on each run |
-| `CLEANUP_INTERVAL` | `0 2 * * *` | Cron schedule for cleanup |
+| `CLEANUP_RETENTION_DAYS` | `30` | Days to keep scans (0–36500). `0` deletes every scan on each run |
+| `CLEANUP_INTERVAL` | `0 2 * * *` | Cron schedule for cleanup: five fields, or six with seconds first. An invalid expression stops the server at startup |
 
 **AI audit** (see [AI accessibility audit](#ai-accessibility-audit-optional))
 
@@ -342,11 +342,11 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 | `AGENT_REASONING_EFFORT` | _(unset)_ | `none`, `minimal`, `low`, `medium`, `high`, `xhigh` for a reasoning `AGENT_MODEL`. `gpt-5.4+` reject `minimal` (use `none`); only the original `gpt-5-nano`/`gpt-5-mini` accept it. How it combines with the profile: [Per-skill model selection](#per-skill-model-selection) |
 | `AGENT_SKILL_<ID>_{PROVIDER,MODEL,API_KEY,BASE_URL,REASONING_EFFORT}` | _(inherits `AGENT_*` / profile)_ | Per-skill override, e.g. `AGENT_SKILL_HEADING_STRUCTURE_REASONING_EFFORT`. See [Per-skill model selection](#per-skill-model-selection) |
 | `AGENT_CONCURRENCY` | `4` | Concurrent requests during evaluation, one per unit — an image (`image_alt_text`) or a page (text-only skills) (1–16) |
-| `AGENT_MAX_UNITS_PER_PAGE` | `30` | Cap on collected work units per page |
-| `AGENT_MAX_UNITS_PER_SCAN` | `200` | Cap on evaluated work units per scan (see [cost note](#per-skill-model-selection)) |
-| `AGENT_MAX_TOKENS_PER_REQUEST` | `2000` | Output-token cap per request (includes reasoning tokens) |
-| `AGENT_REQUEST_TIMEOUT_MS` | `60000` | Per-request timeout |
-| `AGENT_MAX_IMAGE_BYTES` | `1500000` | Skip element screenshots larger than this |
+| `AGENT_MAX_UNITS_PER_PAGE` | `30` | Cap on collected work units per page (1–500) |
+| `AGENT_MAX_UNITS_PER_SCAN` | `200` | Cap on evaluated work units per scan (1–10000; see [cost note](#per-skill-model-selection)) |
+| `AGENT_MAX_TOKENS_PER_REQUEST` | `2000` | Output-token cap per request, including reasoning tokens (1–100000) |
+| `AGENT_REQUEST_TIMEOUT_MS` | `60000` | Per-request timeout in milliseconds (1000–600000) |
+| `AGENT_MAX_IMAGE_BYTES` | `1500000` | Skip element screenshots larger than this many bytes (1000–20000000) |
 | `AGENT_TEMPERATURE` | `0` | Sampling temperature (0–2); omitted whenever a reasoning effort applies |
 
 ## Security
