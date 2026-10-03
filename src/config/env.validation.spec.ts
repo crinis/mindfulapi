@@ -7,15 +7,18 @@ import { EnvironmentVariables, validate } from './env.validation';
 
 /**
  * The environment the API container receives from `docker compose config`
- * with the shipped `.env.example` copied to `.env` (env_file + the pinned
- * `environment:` entries). Regenerate after changing docker-compose.yml or
- * .env.example: copy both into an empty directory, rename .env.example to .env
- * and run `docker compose config --format json` there.
+ * with the shipped `.env.example` copied to `.env` and the two values the
+ * quickstart asks for filled in (AUTH_TOKEN, PLAYWRIGHT_WS_PATH): env_file plus
+ * the pinned `environment:` entries. Regenerate after changing
+ * docker-compose.yml or .env.example: copy both into an empty directory,
+ * rename .env.example to .env, fill in those two values and run
+ * `docker compose config --format json` there.
  */
 const COMPOSE_ENV_FROM_ENV_EXAMPLE: Record<string, string> = {
   AGENT_ALLOWED_SCAN_MODES: 'single_url',
   AGENT_ENABLED: 'false',
-  AUTH_TOKEN: 'your-secure-api-token-here',
+  AUTH_TOKEN:
+    '0000000000000000000000000000000000000000000000000000000000000000',
   CLEANUP_ENABLED: 'true',
   CLEANUP_INTERVAL: '0 2 * * *',
   CLEANUP_RETENTION_DAYS: '30',
@@ -23,7 +26,8 @@ const COMPOSE_ENV_FROM_ENV_EXAMPLE: Record<string, string> = {
   DATABASE_PATH: '/data/database.sqlite',
   IGNORE_HTTPS_ERRORS: 'false',
   NODE_ENV: 'production',
-  PLAYWRIGHT_WS_URL: 'ws://playwright:3000',
+  PLAYWRIGHT_WS_PATH: '0123456789abcdef0123456789abcdef',
+  PLAYWRIGHT_WS_URL: 'ws://playwright:3000/0123456789abcdef0123456789abcdef',
   PORT: '3000',
   REDIS_HOST: 'redis',
   REDIS_PASSWORD: '',
@@ -175,6 +179,15 @@ describe('env validation', () => {
     );
   });
 
+  it('accepts a Playwright server URL with a secret path', () => {
+    const validated = validate({
+      PLAYWRIGHT_WS_URL: 'ws://playwright:3000/0123456789abcdef',
+    });
+    expect(validated.PLAYWRIGHT_WS_URL).toBe(
+      'ws://playwright:3000/0123456789abcdef',
+    );
+  });
+
   describe('TRUST_PROXY', () => {
     it.each(['true', 'false', '1', 'loopback, 172.18.0.0/16', '10.0.0.1'])(
       'accepts %p',
@@ -196,6 +209,12 @@ describe('env validation', () => {
   describe('empty values', () => {
     it('accepts the environment docker compose renders from .env.example', () => {
       expect(() => validate(COMPOSE_ENV_FROM_ENV_EXAMPLE)).not.toThrow();
+    });
+
+    it('leaves an empty AUTH_TOKEN to the auth guard, which refuses to start', () => {
+      expect(() =>
+        validate({ ...COMPOSE_ENV_FROM_ENV_EXAMPLE, AUTH_TOKEN: '' }),
+      ).not.toThrow();
     });
 
     it('accepts the empty values of the old compose passthrough', () => {

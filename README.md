@@ -53,13 +53,18 @@ The stack consists of three containers:
 | `redis` | Queue backend for asynchronous scan processing |
 | `playwright` | Headless Chromium browser server used for page scanning |
 
-**1. Create your `.env` file:**
+**1. Create your `.env` file and set its two secrets:**
 
 ```bash
 cp .env.example .env
+openssl rand -hex 32   # paste the output after AUTH_TOKEN=
+openssl rand -hex 16   # paste the output after PLAYWRIGHT_WS_PATH=
 ```
 
-Set `AUTH_TOKEN` in `.env` to a strong random value, for example the output of `openssl rand -hex 32`. `.env.example` ships it empty, and the API refuses to start until it is set: the `mindfulapi` container exits with *"AUTH_TOKEN is not set"*. `docker compose` itself refuses to start when the `AUTH_TOKEN` line is missing from `.env`. The placeholder `your-secure-api-token-here` that older versions of `.env.example` contained is refused as well. See [Configuration](#configuration) for all other variables.
+- `AUTH_TOKEN` is the bearer token clients send. `.env.example` ships it empty, and the API refuses to start until it is set: the `mindfulapi` container exits with *"AUTH_TOKEN is not set"*. The placeholder `your-secure-api-token-here` that older versions of `.env.example` contained is refused as well.
+- `PLAYWRIGHT_WS_PATH` is the secret path of the browser server (see [Security](#security)). `docker compose` refuses to start while it is empty.
+
+`.env` is not a shell script, so `$(...)` is not executed there: paste the command output. `docker compose` also refuses to start when the `AUTH_TOKEN` line is missing from `.env`. See [Configuration](#configuration) for all other variables.
 
 **2. Start all services in the background:**
 
@@ -75,7 +80,7 @@ The first run pulls the images, which may take a minute.
 docker compose ps
 ```
 
-All three services should show `running` (Redis also shows `healthy`). If a service shows `exited`, read its logs:
+All three services should show `running (healthy)`. If a service shows `exited` or `restarting`, read its logs:
 
 ```bash
 docker compose logs mindfulapi
@@ -170,13 +175,14 @@ cp .env.example .env
 Set at least these values in `.env`:
 
 ```bash
-AUTH_TOKEN=<your_strong_random_token>   # protect every API request
-PORT=3000                               # or any port you prefer
-ENCRYPTION_KEY=<output of: openssl rand -base64 32>  # required for basicAuth fields
-IGNORE_HTTPS_ERRORS=false               # keep this false in production
+AUTH_TOKEN=<output of: openssl rand -hex 32>          # protect every API request
+PLAYWRIGHT_WS_PATH=<output of: openssl rand -hex 16>  # secret path of the browser server
+PORT=3000                                             # or any port you prefer
+ENCRYPTION_KEY=<output of: openssl rand -base64 32>   # required for basicAuth fields
+IGNORE_HTTPS_ERRORS=false                             # keep this false in production
 ```
 
-`.env` is not a shell script, so `$(...)` is not executed. Run `openssl rand -base64 32` (and e.g. `openssl rand -hex 32` for the token) in a terminal and paste the output.
+`.env` is not a shell script, so `$(...)` is not executed. Run the `openssl` commands in a terminal and paste the output.
 
 **3. Start the stack:**
 
@@ -256,7 +262,20 @@ docker compose pull
 docker compose up -d
 ```
 
-**Upgrading from an image that ran as root.** The container now runs as the unprivileged `node` user (uid 1000). A `/data` volume created by an older root image is not writable for it, and SQLite fails on startup with *"attempt to write a readonly database"*. Fix the ownership once with a one-off container that mounts the same volume:
+#### Upgrading from 0.7.1
+
+Change `.env` **before** running any `docker compose` command (`pull` and `down` included): Compose refuses every command until `PLAYWRIGHT_WS_PATH` is set.
+
+- **Add `PLAYWRIGHT_WS_PATH`** with the output of `openssl rand -hex 16`. Compose now starts the browser server on that secret path and connects the API to it (see [Security](#security)). The error *"required variable PLAYWRIGHT_WS_PATH is missing a value"* means it is still missing.
+- **Replace a placeholder `AUTH_TOKEN`.** If `.env` still contains `AUTH_TOKEN=your-secure-api-token-here` from an older `.env.example`, the API now refuses to start. Set a token from `openssl rand -hex 32` and give it to your clients (e.g. the TYPO3 extension).
+- **The API port is published on `127.0.0.1` only.** Clients on other hosts that connected to port 3000 directly need a reverse proxy, or `BIND_ADDRESS=0.0.0.0` plus a firewall that filters Docker traffic (see [Deploying](#deploying-to-a-linux-server)). A TYPO3 instance in the DDEV network is unaffected: it uses `http://mindfulapi:3000`.
+- **Configuration is validated strictly.** Numbers must be plain decimals within the ranges in [Configuration](#configuration); values the API used to clamp (for example `THROTTLE_TTL` above `86400`) now stop it at startup, and `CLEANUP_INTERVAL` must be a valid cron expression. An empty value now counts as unset instead of failing validation.
+- **Requests with a wrong token count against the rate limit.** Behind a reverse proxy, set `TRUST_PROXY=1` so each client gets its own limit.
+- **Per-skill AI overrides** that set another provider or their own base URL no longer inherit `AGENT_API_KEY` (see [Per-skill model selection](#per-skill-model-selection)).
+
+#### Upgrading from an image that ran as root
+
+The container now runs as the unprivileged `node` user (uid 1000). A `/data` volume created by an older root image is not writable for it, and SQLite fails on startup with *"attempt to write a readonly database"*. Fix the ownership once with a one-off container that mounts the same volume:
 
 ```bash
 docker compose down
@@ -282,7 +301,7 @@ New: `DELETE /v1/scans/:id`, `POST /v1/scans/:id/cancel`, `GET /health`, respons
 
 All configuration uses environment variables; [`.env.example`](.env.example) lists them all. An empty value (`VAR=`) means the same as leaving the variable unset, so the default applies. Values are validated at startup: an out-of-range or malformed value (e.g. `SCAN_CONCURRENCY=12`) stops the server with an error, and a value that passes is used exactly as given. Numbers must be plain decimals (`1500000`, not `1.5e6` or `0x50`); the ranges are listed below.
 
-**With Docker Compose,** every variable in `.env` reaches the API container, except the service wiring: `NODE_ENV`, `DATABASE_PATH`, `PLAYWRIGHT_WS_URL`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` and `PORT` are pinned by `docker-compose.yml` to the bundled containers. `PORT` and `BIND_ADDRESS` in `.env` only change where the API is published on the host.
+**With Docker Compose,** every variable in `.env` reaches the API container, except the service wiring: `NODE_ENV`, `DATABASE_PATH`, `PLAYWRIGHT_WS_URL` (built from `PLAYWRIGHT_WS_PATH`), `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` and `PORT` are pinned by `docker-compose.yml` to the bundled containers. `PORT` and `BIND_ADDRESS` in `.env` only change where the API is published on the host.
 
 **Server and authentication**
 
@@ -306,7 +325,8 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 | `REDIS_HOST` | `localhost` | Redis hostname |
 | `REDIS_PORT` | `6379` | Redis port (1–65535) |
 | `REDIS_PASSWORD` | _(unset)_ | Redis password |
-| `PLAYWRIGHT_WS_URL` | _(unset)_ | WebSocket URL of a remote Playwright server (e.g. `ws://playwright:3000`). **Required in Docker** — the production image has no browser. Unset uses a locally installed Chromium (local development only) |
+| `PLAYWRIGHT_WS_URL` | _(unset)_ | WebSocket URL of a remote Playwright server, including its path (e.g. `ws://playwright:3000/<secret path>`). **Required in Docker** — the production image has no browser; Docker Compose builds it from `PLAYWRIGHT_WS_PATH`. Unset uses a locally installed Chromium (local development only) |
+| `PLAYWRIGHT_WS_PATH` | _(unset)_ | Compose only, **required**: secret path of the bundled Playwright run-server (letters and digits, e.g. `openssl rand -hex 16`). Compose starts the run-server with `--path /<value>` and sets `PLAYWRIGHT_WS_URL=ws://playwright:3000/<value>`; it refuses to start while the value is empty. See [Security](#security) |
 | `ENCRYPTION_KEY` | _(unset)_ | 32-byte key (base64 or hex) for sensitive stored data, currently scan `basicAuth` credentials. Required only when such fields are used. Generate with `openssl rand -base64 32` |
 | `MINDFULAPI_IMAGE` | `ghcr.io/crinis/mindfulapi:latest` | Compose only: the image to run (see [Container image tags](#container-image-tags)) |
 
@@ -359,10 +379,12 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
   - **WebSockets** opened by a page are checked before they connect. The check is Playwright's page-level `WebSocket` shim: it does not reach dedicated workers, and page script can get past it, so it is defence in depth only. `SharedWorker`, `WebSocketStream`, `WebTransport` and WebRTC peer connections are removed from pages because Playwright cannot intercept their connections; dedicated workers keep `WebSocket`, `WebSocketStream` and `WebTransport`. Service workers stay enabled because their requests are checked like page requests.
   - To scan intranet/staging sites, allow specific hosts with `SCAN_TARGET_ALLOW_HOSTS`, or set `SCAN_ALLOW_PRIVATE_TARGETS=true` — only when the API is not exposed to untrusted clients.
   - Limitations: the policy resolves hosts independently of the browser's DNS, so a DNS-rebinding attacker with a very low TTL could flip a record between check and fetch. Redirect hops (see above), sockets opened inside a dedicated worker, and speculation-rules prefetch/prerender can still send a request to a blocked address; the scanner never stores or reports what comes back, but a malicious page can read and exfiltrate a CORS-readable redirect-hop response during the close window. Closing these completely needs an egress proxy. This residual is acceptable for scanning trusted sites from an access-controlled API; do not point the scanner at untrusted content without an egress proxy.
-- **Keep the Playwright run-server out of reach of scanned pages.** In Docker the browser runs inside the `playwright` container, next to the run-server that controls it, so a scanned page can address the run-server at its own loopback address and at `playwright:3000`.
+- **The Playwright run-server is protected by a secret path.** In Docker the browser runs inside the `playwright` container, next to the run-server that controls it, so a scanned page can address the run-server at its own loopback address and at `playwright:3000`.
   - Ordinary requests and page WebSockets to either address are blocked by the SSRF protection above (both are private addresses), unless `SCAN_ALLOW_PRIVATE_TARGETS=true`.
-  - A WebSocket the shim does not see (for example one opened in a dedicated worker) is not checked, and `run-server --host 0.0.0.0` as used in `docker-compose.yml` does not check the connecting origin. A malicious page could then use the Playwright protocol to open browsers and load URLs, internal ones included, from inside the container.
-  - Network isolation cannot separate a page from the run-server: they share the container's network. Give the run-server an unguessable endpoint path instead: in `docker-compose.yml`, append `--path /<random secret>` to the `playwright` command and the same path to the API's `PLAYWRIGHT_WS_URL` (e.g. `ws://playwright:3000/<random secret>`). Connections to any other path are refused; the healthcheck keeps working. Never add `--unsafe`. Complete protection needs an egress proxy or scanning only trusted sites; keep the API access-controlled.
+  - A WebSocket the shim does not see (for example one opened in a dedicated worker) is not checked, and `run-server --host 0.0.0.0` does not check the connecting origin. With the run-server's endpoint, a malicious page could use the Playwright protocol to open browsers and load URLs, internal ones included, from inside the container.
+  - Network isolation cannot separate a page from the run-server: they share the container's network. `docker-compose.yml` therefore starts the run-server with `--path /<PLAYWRIGHT_WS_PATH>` and connects the API to `ws://playwright:3000/<PLAYWRIGHT_WS_PATH>`. WebSocket connections to any other path are refused with `400`. Plain HTTP requests get `200 Running` on any path, so the healthcheck (`GET /`) keeps working.
+  - The run-server tells plain HTTP clients its path (`GET /json`). That response has no `Access-Control-Allow-Origin` header, so page script on another origin cannot read it, and the SSRF protection blocks direct requests to the run-server's addresses. DNS rebinding (see Limitations above) would make a page same-origin with the run-server, so the secret path does not close that case.
+  - Never add `--unsafe` to the run-server. Complete protection needs an egress proxy or scanning only trusted sites; keep the API access-controlled.
 - **Basic Auth credentials** (`scanOptions.basicAuth`) are sent only to the origin (scheme, host and port) of the first target URL, in answer to its 401 challenge. Subresources, redirect targets and crawled pages on other origins never receive them. If the target redirects to another origin (http → https, `example.com` → `www.example.com`), use the final URL as the target. Split scans whose targets span several protected origins.
 - **Rate limiting** applies to every request per client address (`THROTTLE_TTL` / `THROTTLE_LIMIT`) before authentication, so requests with a wrong token count too and tokens cannot be guessed at full speed. `/health` is exempt.
   - Behind a reverse proxy every request comes from the proxy's address, so all clients share one limit until `TRUST_PROXY` names the proxy. For one proxy in front, set `TRUST_PROXY=1`: the client address is then the last `X-Forwarded-For` entry, the one the proxy adds (Caddy does this by default; Nginx needs `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`).
@@ -572,7 +594,7 @@ For DDEV-based setups, see the network note below.
 
 With [DDEV](https://ddev.readthedocs.io/) (a local development environment common for TYPO3), MindfulAPI can join the `ddev_default` Docker network and reach sites at `*.ddev.site` without extra routing.
 
-**1. Add the included override file.** `docker-compose.ddev.yml` is an **override**: always combine it with the base `docker-compose.yml`. Either set `COMPOSE_FILE` in your shell (or in `.env`):
+**1. Add the included override file.** `docker-compose.ddev.yml` is an **override**: always combine it with the base `docker-compose.yml`, whose settings apply unchanged (`.env` needs `AUTH_TOKEN` and `PLAYWRIGHT_WS_PATH` as in the [Quickstart](#quickstart)). Either set `COMPOSE_FILE` in your shell (or in `.env`):
 
 ```bash
 export COMPOSE_FILE=docker-compose.yml:docker-compose.ddev.yml

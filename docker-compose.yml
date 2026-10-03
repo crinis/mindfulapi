@@ -17,13 +17,17 @@ services:
     # A version mismatch will lead to failures.
     image: mcr.microsoft.com/playwright:v1.60.0-noble
     restart: unless-stopped
+    # The run-server accepts browser connections only on the secret path
+    # /PLAYWRIGHT_WS_PATH: bound to 0.0.0.0 it checks no origin or Host, and a
+    # page scanned in this container could otherwise connect to it. Compose
+    # refuses to start while PLAYWRIGHT_WS_PATH is unset or empty.
     command:
       - /bin/sh
       - -c
-      - "npx -y playwright@1.60.0 run-server --port 3000 --host 0.0.0.0"
+      - "npx -y playwright@1.60.0 run-server --port 3000 --host 0.0.0.0 --path '/${PLAYWRIGHT_WS_PATH:?PLAYWRIGHT_WS_PATH must be set in .env to a random string, e.g. the output of openssl rand -hex 16 (see Updating in the README)}'"
     healthcheck:
-      # The Playwright server accepts WebSocket upgrades; a plain HTTP request
-      # returns 400 (not 200), which is enough to confirm it is alive.
+      # Plain HTTP requests get 200 "Running" on any path; only WebSocket
+      # upgrades need the secret path.
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
       interval: 10s
       timeout: 5s
@@ -54,7 +58,7 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_PATH=/data/database.sqlite
-      - PLAYWRIGHT_WS_URL=ws://playwright:3000
+      - PLAYWRIGHT_WS_URL=ws://playwright:3000/${PLAYWRIGHT_WS_PATH:?PLAYWRIGHT_WS_PATH must be set in .env to a random string, e.g. the output of openssl rand -hex 16 (see Updating in the README)}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       # The bundled redis service runs without a password.

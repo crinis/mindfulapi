@@ -10,6 +10,11 @@
 #
 # Or set COMPOSE_FILE so plain `docker compose` picks both files up:
 #   export COMPOSE_FILE=docker-compose.yml:docker-compose.ddev.yml
+#
+# Everything else comes from docker-compose.yml, including the browser
+# server's secret path: .env needs AUTH_TOKEN and PLAYWRIGHT_WS_PATH. The
+# TYPO3 extension reaches the API by service name (http://mindfulapi:3000) on
+# ddev_default, not through the port published on the host.
 
 services:
   playwright:
