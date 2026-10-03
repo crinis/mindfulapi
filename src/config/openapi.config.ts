@@ -1,4 +1,5 @@
-import { DocumentBuilder, OpenAPIObject } from '@nestjs/swagger';
+import { INestApplication } from '@nestjs/common';
+import { DocumentBuilder, OpenAPIObject, SwaggerModule } from '@nestjs/swagger';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { version: packageVersion } = require('../../package.json') as {
   version: string;
@@ -24,44 +25,27 @@ export const createOpenApiConfig = () =>
     .addTag('Health', 'Liveness and readiness probes')
     .addBearerAuth({
       description:
-        'Set the AUTH_TOKEN environment variable to enable authentication. ' +
-        'When authentication is disabled (AUTH_DISABLED=true), the token is ignored.',
+        'The AUTH_TOKEN configured on the server. Required on every endpoint ' +
+        'except /health, unless the server runs with AUTH_DISABLED=true, ' +
+        'which ignores the token.',
       type: 'http',
       scheme: 'bearer',
+      // The token is an opaque shared secret, not the JWT Nest assumes.
+      bearerFormat: undefined,
     })
     .addServer('/', 'Current environment')
     .build();
 
 /**
- * Post-processes the generated document to express that authentication is
- * optional: the empty security requirement `{}` is the only OpenAPI-legal way
- * to say "no auth is also accepted" alongside the bearer scheme.
+ * Builds the OpenAPI document of an application: what the running server
+ * serves at `/api-json` and what `npm run generate:openapi` commits.
  *
- * Each `@ApiBearerAuth()` controller also emits an operation-level
- * `security: [{ bearer: [] }]`, which fully overrides the document default —
- * so the empty requirement has to be appended to every such operation too,
- * otherwise the spec still mandates auth on every non-health endpoint even in
- * `AUTH_DISABLED=true` mode.
- *
- * @param document The document produced by SwaggerModule.createDocument.
+ * Operations of `@ApiBearerAuth()` controllers require the bearer token and
+ * the rest (`/health`) declare no requirement, which is what the server
+ * enforces by default. `AUTH_DISABLED=true` is a deployment opt-out the
+ * scheme description mentions; the contract does not advertise anonymous
+ * access as an alternative.
  */
-export function patchOpenApiDocument(document: OpenAPIObject): OpenAPIObject {
-  document.security = [{ bearer: [] }, {}];
-
-  for (const pathItem of Object.values(document.paths ?? {})) {
-    for (const operation of Object.values(pathItem)) {
-      const security = (operation as { security?: unknown })?.security;
-      if (!Array.isArray(security)) {
-        continue;
-      }
-      const allowsNoAuth = security.some(
-        (requirement) => Object.keys(requirement as object).length === 0,
-      );
-      if (!allowsNoAuth) {
-        security.push({});
-      }
-    }
-  }
-
-  return document;
+export function createOpenApiDocument(app: INestApplication): OpenAPIObject {
+  return SwaggerModule.createDocument(app, createOpenApiConfig());
 }

@@ -368,6 +368,7 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
   - Behind a reverse proxy every request comes from the proxy's address, so all clients share one limit until `TRUST_PROXY` names the proxy. For one proxy in front, set `TRUST_PROXY=1`: the client address is then the last `X-Forwarded-For` entry, the one the proxy adds (Caddy does this by default; Nginx needs `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`).
   - With Docker Compose, a proxy on the host reaches the container from the Docker network's gateway address, not from loopback, so `TRUST_PROXY=loopback` does not match; use the hop count.
   - Set `TRUST_PROXY` only when every request passes the proxy (the default `BIND_ADDRESS=127.0.0.1` with the proxy on the same host). A client that reaches the API directly could otherwise pick its own address with `X-Forwarded-For` and escape the limit.
+- **API documentation is public.** `/api` (Swagger UI), `/api-json` and `/api-yaml` are served without the token: they are registered outside the API's guards, and a browser could not send a bearer token to the Swagger UI page anyway. They serve the same document as the committed [`openapi.json`](openapi.json): routes, schemas and the version number, no configuration and no scan data. Block these paths at the reverse proxy if they should not be reachable.
 - **Request limits.** JSON and form bodies: 1 MB. `url_list`: up to 500 URLs. `crawl`: up to 50 seed URLs, `maxPages` up to 5000 (default 250), `maxDepth` up to 20 (default 4).
 - **Non-root container.** The process runs as the unprivileged `node` user (uid 1000), so `/data` must be writable by it. Fresh installs handle this; upgrades from an old root image need a one-time `chown` (see [Updating](#updating)).
 - **Single replica.** SQLite and the in-process cleanup schedule assume exactly one API instance. Scale throughput with `SCAN_CONCURRENCY`, not with replicas.
@@ -546,6 +547,8 @@ The OpenAPI 3 specification is generated from the code, so it never drifts from 
 
 - **Interactive Swagger UI:** `http://localhost:3000/api` (while the server is running)
 - **OpenAPI document:** `http://localhost:3000/api-json` (or `api-yaml`), and a committed copy at [`openapi.json`](openapi.json)
+
+Every endpoint except `/health` requires the bearer token unless the server runs with `AUTH_DISABLED=true`. The documentation pages themselves are public (see [Security](#security)).
 
 All endpoints are under `/v1` (for example `POST /v1/scans`). Errors follow [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json`.
 

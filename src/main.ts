@@ -7,10 +7,7 @@ import { ValidationError } from 'class-validator';
 import helmet from 'helmet';
 import * as express from 'express';
 import { AppModule } from './app.module';
-import {
-  createOpenApiConfig,
-  patchOpenApiDocument,
-} from './config/openapi.config';
+import { createOpenApiDocument } from './config/openapi.config';
 import { applyTrustProxy, TrustProxySetting } from './config/trust-proxy';
 import { ProblemDetailsFilter } from './filters/problem-details.filter';
 import {
@@ -74,9 +71,9 @@ async function bootstrap() {
 
   app.useGlobalFilters(new ProblemDetailsFilter(app.get(HttpAdapterHost)));
 
-  const document = patchOpenApiDocument(
-    SwaggerModule.createDocument(app, createOpenApiConfig()),
-  );
+  // Registered on the HTTP adapter, outside the global guards: the docs are
+  // public. They hold the same document as the committed openapi.json.
+  const document = createOpenApiDocument(app);
   SwaggerModule.setup('api', app, document, {
     jsonDocumentUrl: 'api-json',
     yamlDocumentUrl: 'api-yaml',

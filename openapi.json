@@ -167,8 +167,7 @@
         "security": [
           {
             "bearer": []
-          },
-          {}
+          }
         ],
         "summary": "Start a new accessibility scan run",
         "tags": [
@@ -283,8 +282,7 @@
         "security": [
           {
             "bearer": []
-          },
-          {}
+          }
         ],
         "summary": "List scan runs",
         "tags": [
@@ -390,8 +388,7 @@
         "security": [
           {
             "bearer": []
-          },
-          {}
+          }
         ],
         "summary": "Get scan by ID",
         "tags": [
@@ -471,8 +468,7 @@
         "security": [
           {
             "bearer": []
-          },
-          {}
+          }
         ],
         "summary": "Delete a scan run",
         "tags": [
@@ -571,8 +567,7 @@
         "security": [
           {
             "bearer": []
-          },
-          {}
+          }
         ],
         "summary": "Cancel a scan run",
         "tags": [
@@ -636,8 +631,7 @@
         "security": [
           {
             "bearer": []
-          },
-          {}
+          }
         ],
         "summary": "List all axe-core rules",
         "tags": [
@@ -729,8 +723,7 @@
         "security": [
           {
             "bearer": []
-          },
-          {}
+          }
         ],
         "summary": "Generate an HTML accessibility report for a scan",
         "tags": [
@@ -823,8 +816,7 @@
         "security": [
           {
             "bearer": []
-          },
-          {}
+          }
         ],
         "summary": "Generate a PDF accessibility report for a scan",
         "tags": [
@@ -882,8 +874,7 @@
         "security": [
           {
             "bearer": []
-          },
-          {}
+          }
         ],
         "summary": "Trigger manual cleanup",
         "tags": [
@@ -941,8 +932,7 @@
         "security": [
           {
             "bearer": []
-          },
-          {}
+          }
         ],
         "summary": "Get cleanup retention policy",
         "tags": [
@@ -1022,8 +1012,7 @@
     "securitySchemes": {
       "bearer": {
         "scheme": "bearer",
-        "bearerFormat": "JWT",
-        "description": "Set the AUTH_TOKEN environment variable to enable authentication. When authentication is disabled (AUTH_DISABLED=true), the token is ignored.",
+        "description": "The AUTH_TOKEN configured on the server. Required on every endpoint except /health, unless the server runs with AUTH_DISABLED=true, which ignores the token.",
         "type": "http"
       }
     },
@@ -2141,11 +2130,5 @@
         ]
       }
     }
-  },
-  "security": [
-    {
-      "bearer": []
-    },
-    {}
-  ]
+  }
 }
