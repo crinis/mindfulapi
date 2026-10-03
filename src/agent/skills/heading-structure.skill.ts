@@ -479,6 +479,47 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
               child instanceof Element &&
               (child.matches(HEADING_SELECTOR) || containsHeading(child)),
           );
+        /** Blocks separate words; inline elements run within a line. */
+        const separatorFor = (el: Element): string =>
+          INLINE.has(el.tagName) ? '' : ' ';
+        // The text a node renders, read from the flat tree like the snippets
+        // (`textContent` misses slotted text and shows a slot's fallback even
+        // when content is assigned to it), whitespace collapsed. The walk
+        // stops once the text is longer than `limit`, so the result is then
+        // longer than `limit` but cut short.
+        const flatText = (node: Node | null, limit = Infinity): string => {
+          const parts: string[] = [];
+          let length = 0;
+          let afterSpace = true;
+          const add = (piece: string): boolean => {
+            let text = piece.replace(/\s+/g, ' ');
+            if (afterSpace && text.startsWith(' ')) text = text.slice(1);
+            if (text) {
+              parts.push(text);
+              length += text.length;
+              afterSpace = text.endsWith(' ');
+            }
+            return length - (afterSpace ? 1 : 0) > limit;
+          };
+          const walk = (parent: Node): boolean => {
+            for (const child of flatChildren(parent)) {
+              if (child.nodeType === Node.TEXT_NODE) {
+                if (add(child.textContent ?? '')) return true;
+              } else if (
+                child instanceof Element &&
+                !NON_CONTENT.has(child.tagName)
+              ) {
+                const separator = separatorFor(child);
+                if (add(separator) || walk(child) || add(separator)) {
+                  return true;
+                }
+              }
+            }
+            return false;
+          };
+          if (node) walk(node);
+          return parts.join('').trim();
+        };
 
         const nearestLandmark = (el: Element): string | undefined => {
           const landmark = flatClosest(
@@ -527,8 +568,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
             ) {
               const index = headingIndex.get(child);
               if (index !== undefined) current = index;
-              // Blocks separate words; inline elements run within a line.
-              const separator = INLINE.has(child.tagName) ? '' : ' ';
+              const separator = separatorFor(child);
               append(separator, inHeading);
               gatherText(child, inHeading || index !== undefined);
               append(separator, inHeading);
@@ -552,7 +592,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
             ...locate(el),
             level,
             tag,
-            text: collapse(el.textContent).slice(0, headingTextMax),
+            text: flatText(el, headingTextMax).slice(0, headingTextMax),
             landmark: nearestLandmark(el),
             snippet: snippet || undefined,
           };
@@ -584,7 +624,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
             continue;
           }
           if (!isVisible(el)) continue;
-          const text = collapse(el.textContent);
+          const text = flatText(el, fakeMaxText);
           if (text.length < 2 || text.length > fakeMaxText) continue;
 
           const style = window.getComputedStyle(el);
@@ -614,7 +654,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
           if (!prominent) continue;
 
           // Must actually head some following content.
-          const following = collapse(el.nextElementSibling?.textContent);
+          const following = flatText(el.nextElementSibling, fakeFollowingMin);
           if (following.length < fakeFollowingMin) continue;
 
           // A styled wrapper around a real heading is that heading.
@@ -665,7 +705,7 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
             continue;
           }
           if (containsHeading(el)) continue;
-          const text = collapse(el.textContent);
+          const text = flatText(el);
           if (text.length < sectionMinText) continue;
           unheadedSections.push({
             id: `S${unheadedSections.length + 1}`,

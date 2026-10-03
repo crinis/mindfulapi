@@ -301,6 +301,56 @@ describe('HeadingStructureSkill.collect (real browser)', () => {
       expect(evidence?.headings[3].snippet).toBe('Slotted content.');
     });
 
+    it('reads the text that slots render into headings and candidates', async () => {
+      const longText = 'Parcels leave our warehouse every weekday. '.repeat(20);
+      const evidence = await collectFrom(
+        doc(`
+          ${component('product-card', '<h2><slot name="title"></slot></h2><slot></slot>')}
+          ${component('x-banner', '<h3><slot>Untitled</slot></h3>')}
+          ${component(
+            'x-promo',
+            '<p style="font-size: 26px"><slot name="title"></slot></p><slot></slot>',
+          )}
+          ${component('x-article', '<section><slot></slot></section>')}
+          <main>
+            <h1>Store</h1>
+            <product-card>
+              <span slot="title">Trail <b>shoes</b></span>
+              <p>Light shoes for long runs.</p>
+            </product-card>
+            <x-banner>Summer sale</x-banner>
+            <x-banner></x-banner>
+            <x-promo>
+              <span slot="title">Payment</span>
+              <p>We accept all major cards and bank transfers.</p>
+            </x-promo>
+            <x-article><p>${longText}</p></x-article>
+          </main>`),
+      );
+
+      // Named slot, default slot, and the fallback of a slot nothing is
+      // assigned to.
+      expect(evidence?.headings.map((h) => h.text)).toEqual([
+        'Store',
+        'Trail shoes',
+        'Summer sale',
+        'Untitled',
+      ]);
+      expect(evidence?.headings[1].snippet).toBe('Light shoes for long runs.');
+      expect(evidence?.fakeHeadingCandidates).toEqual([
+        expect.objectContaining({
+          text: 'Payment',
+          selector: expect.any(String),
+        }),
+      ]);
+      expect(evidence?.unheadedSections).toEqual([
+        expect.objectContaining({
+          snippet: longText.trim().slice(0, 150),
+          textLength: longText.trim().length,
+        }),
+      ]);
+    });
+
     it('does not list a section whose heading is inside a component', async () => {
       const evidence = await collectFrom(
         doc(`
