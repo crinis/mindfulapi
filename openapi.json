@@ -834,7 +834,7 @@
     },
     "/v1/cleanup": {
       "post": {
-        "description": "Immediately runs the cleanup process to delete scans older than the configured retention period, bypassing the enabled flag.",
+        "description": "Immediately runs the cleanup process to delete finished (completed, failed or canceled) scans older than the configured retention period, bypassing the enabled flag. Pending, running and analyzing scans are never deleted.",
         "operationId": "triggerCleanup",
         "parameters": [],
         "responses": {
@@ -2006,13 +2006,13 @@
           "deletedScans": {
             "type": "integer",
             "example": 12,
-            "description": "Number of scan runs deleted.",
+            "description": "Number of finished scan runs deleted.",
             "minimum": 0
           },
           "cutoffDate": {
             "type": "string",
             "example": "2026-06-09T00:00:00.000Z",
-            "description": "Scans created before this timestamp were deleted.",
+            "description": "Finished (completed, failed or canceled) scans created before this timestamp were deleted.",
             "format": "date-time"
           }
         },

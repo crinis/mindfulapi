@@ -28,7 +28,7 @@ export class CleanupController {
     operationId: 'triggerCleanup',
     summary: 'Trigger manual cleanup',
     description:
-      'Immediately runs the cleanup process to delete scans older than the configured retention period, bypassing the enabled flag.',
+      'Immediately runs the cleanup process to delete finished (completed, failed or canceled) scans older than the configured retention period, bypassing the enabled flag. Pending, running and analyzing scans are never deleted.',
   })
   @ApiResponse({
     status: 200,

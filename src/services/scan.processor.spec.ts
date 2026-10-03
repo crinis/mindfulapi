@@ -236,7 +236,10 @@ describe('ScanProcessor', () => {
     };
 
     mockScanRepo = {
-      findOne: jest.fn(),
+      // The cancellation check reads the row; a missing row means deleted.
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 1, status: ScanStatus.RUNNING }),
       // Mirrors TypeORM's UpdateResult; resetScanResults reads `affected` to
       // detect a cancellation that raced the RUNNING transition.
       update: jest.fn().mockResolvedValue({ affected: 1 }),
@@ -1387,6 +1390,71 @@ describe('ScanProcessor', () => {
       pagesDiscovered: 2,
       pagesScanned: 1,
       pagesFailed: 1,
+    });
+  });
+
+  describe('deleted scans', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('stops loading pages once the scan row is gone', async () => {
+      mockScanQb.getOne.mockResolvedValue(
+        makeScan({
+          mode: ScanMode.URL_LIST,
+          targets: [
+            'https://example.com/a',
+            'https://example.com/b',
+            'https://example.com/c',
+          ],
+        }),
+      );
+      processor = new ScanProcessor(
+        mockScanRepo as any,
+        mockIssueRepo as any,
+        mockBrowserService as any,
+        mockScanner as any,
+        mockBasicAuthCrypto as any,
+        { ...scanConfig(), crawlConcurrency: 1 },
+        mockUrlPolicy as any,
+        mockAgentAudit as any,
+      );
+      // The row exists for the first page and is deleted while it loads.
+      mockScanRepo.findOne.mockResolvedValueOnce({
+        id: 1,
+        status: ScanStatus.RUNNING,
+      });
+      mockScanRepo.findOne.mockResolvedValue(null);
+      // Pages take longer than the cancellation check's cache window.
+      let now = Date.now();
+      jest.spyOn(Date, 'now').mockImplementation(() => (now += 3000));
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(mockScanner.scanPage).toHaveBeenCalledTimes(1);
+      expect(mockScanRepo.update).not.toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ status: ScanStatus.COMPLETED }),
+      );
+    });
+
+    it('does not start the AI audit of a deleted scan', async () => {
+      mockScanQb.getOne.mockResolvedValue(makeScan());
+      mockAgentAudit.resolveSkills.mockReturnValue([{ id: 'image_alt_text' }]);
+      mockAgentAudit.collectForPage.mockResolvedValue([{ id: 'unit-1' }]);
+      (mockAgentAudit as any).remainingScanUnits = jest
+        .fn()
+        .mockReturnValue(10);
+      // Deleted while its page was being scanned.
+      mockScanRepo.findOne.mockResolvedValue(null);
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(mockAgentAudit.evaluate).not.toHaveBeenCalled();
+      expect(mockScanRepo.update).not.toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ status: ScanStatus.ANALYZING }),
+      );
     });
   });
 

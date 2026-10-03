@@ -2,13 +2,23 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan } from 'typeorm';
+import { In, Repository, LessThan } from 'typeorm';
 import { Scan } from '../entities/scan.entity';
+import { ScanStatus } from '../enums/scan-status.enum';
 import { CleanupConfigDto } from '../dto/cleanup.dto';
 import { cleanupConfig } from '../config/configuration';
 
+/** Statuses of scans that are finished and may be deleted by cleanup. */
+const FINISHED_STATUSES = [
+  ScanStatus.COMPLETED,
+  ScanStatus.FAILED,
+  ScanStatus.CANCELED,
+];
+
 /**
- * Service for automated cleanup of old scan data.
+ * Service for automated cleanup of old scan data. Only finished scans are
+ * deleted: a pending, running or analyzing scan still has a queue job or a
+ * worker that would run on without its row.
  *
  * Configuration via environment variables:
  * - CLEANUP_ENABLED: Enable/disable automatic cleanup (default: true)
@@ -61,7 +71,7 @@ export class CleanupService {
   }
 
   /**
-   * Deletes scans older than the configured retention period.
+   * Deletes finished scans older than the configured retention period.
    *
    * @returns The number of scans deleted and the cutoff date used.
    */
@@ -77,7 +87,10 @@ export class CleanupService {
     this.logger.log(`Cleaning up scans older than ${cutoffDate.toISOString()}`);
 
     const scans = await this.scanRepository.find({
-      where: { createdAt: LessThan(cutoffDate) },
+      where: {
+        createdAt: LessThan(cutoffDate),
+        status: In(FINISHED_STATUSES),
+      },
       select: { id: true },
     });
 

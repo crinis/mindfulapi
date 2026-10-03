@@ -8,15 +8,16 @@ export class CleanupResultDto {
   @ApiProperty({
     type: 'integer',
     example: 12,
-    description: 'Number of scan runs deleted.',
+    description: 'Number of finished scan runs deleted.',
     minimum: 0,
   })
   deletedScans: number;
 
-  /** ISO 8601 cutoff — scans created before this were deleted. */
+  /** ISO 8601 cutoff — finished scans created before this were deleted. */
   @ApiProperty({
     example: '2026-06-09T00:00:00.000Z',
-    description: 'Scans created before this timestamp were deleted.',
+    description:
+      'Finished (completed, failed or canceled) scans created before this timestamp were deleted.',
     format: 'date-time',
   })
   cutoffDate: string;

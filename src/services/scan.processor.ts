@@ -1040,13 +1040,15 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
 
   /**
    * Reads the current persisted status to detect an out-of-band cancellation.
+   * A deleted scan counts as canceled: nothing it still produced could be
+   * stored, so its pages and AI audit must not be spent on.
    */
   private async isCanceled(scanId: number): Promise<boolean> {
     const row = await this.scanRepository.findOne({
       where: { id: scanId },
       select: { id: true, status: true },
     });
-    return row?.status === ScanStatus.CANCELED;
+    return !row || row.status === ScanStatus.CANCELED;
   }
 
   /**

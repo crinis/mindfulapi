@@ -463,7 +463,9 @@ export class ScanService {
    * @throws NotFoundException When no run exists for the given ID.
    */
   async remove(id: number): Promise<void> {
-    // Best-effort: drop any queued job so a deleted scan isn't processed.
+    // Stop the work first. Best-effort: drop a queued job so a deleted scan
+    // isn't processed. A running scan stops at its next cancellation check,
+    // which treats a deleted scan as canceled.
     await this.scanQueueService.cancelScanJob(id).catch(() => undefined);
 
     const result = await this.scanRepository.delete(id);

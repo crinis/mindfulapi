@@ -88,6 +88,34 @@ describe('CleanupService', () => {
       expect(mockRepo.delete).toHaveBeenCalledWith([1, 2]);
     });
 
+    it('only deletes finished scans, never pending or running ones', async () => {
+      mockRepo.find.mockResolvedValue([]);
+
+      await service.performCleanup();
+
+      const { status } = mockRepo.find.mock.calls[0][0].where;
+      expect(status.value).toEqual([
+        ScanStatus.COMPLETED,
+        ScanStatus.FAILED,
+        ScanStatus.CANCELED,
+      ]);
+    });
+
+    it('keeps active scans even when every scan is due (retention 0)', async () => {
+      const zeroRetention = new (CleanupService as any)(mockRepo, {
+        ...cleanupConfig(),
+        retentionDays: 0,
+      });
+      mockRepo.find.mockResolvedValue([]);
+
+      await zeroRetention.performCleanup();
+
+      const { status } = mockRepo.find.mock.calls[0][0].where;
+      expect(status.value).not.toContain(ScanStatus.RUNNING);
+      expect(status.value).not.toContain(ScanStatus.PENDING);
+      expect(status.value).not.toContain(ScanStatus.ANALYZING);
+    });
+
     it('queries with a cutoff date in the past', async () => {
       mockRepo.find.mockResolvedValue([]);
       const before = new Date();
