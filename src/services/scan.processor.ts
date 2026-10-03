@@ -261,7 +261,10 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
       .getOne();
 
     if (!scan) {
-      throw new Error(`Scan ${scanId} not found`);
+      // Deleted after it was queued. Deleted counts as canceled: end the job
+      // instead of letting BullMQ retry it for a row that is gone.
+      this.logger.log(`Scan ${scanId} no longer exists; its job ends here`);
+      return;
     }
 
     this.logger.log(`Processing scan ${scanId} in mode ${scan.mode}`);

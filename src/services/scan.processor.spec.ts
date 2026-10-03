@@ -333,13 +333,16 @@ describe('ScanProcessor', () => {
     );
   });
 
-  it('throws when scan does not exist', async () => {
+  it('ends the job of a deleted scan without a retry', async () => {
+    // Deleted counts as canceled: throwing would make BullMQ retry the job
+    // for a row that is gone.
     mockScanQb.getOne.mockResolvedValue(null);
 
     await expect(
       processor.process({ data: { scanId: 999 } } as any),
-    ).rejects.toThrow('Scan 999 not found');
+    ).resolves.toBeUndefined();
     expect(mockScanRepo.update).not.toHaveBeenCalled();
+    expect(mockBrowserService.getBrowser).not.toHaveBeenCalled();
   });
 
   it('aborts without scanning when a cancellation races the reset', async () => {
