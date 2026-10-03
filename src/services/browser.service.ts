@@ -7,6 +7,7 @@ import {
 import { ConfigType } from '@nestjs/config';
 import { Browser, chromium } from 'playwright';
 import { scanConfig } from '../config/configuration';
+import { redactUrlPath } from '../utils/redact-url-path.util';
 
 /**
  * Manages a single shared Playwright browser instance for the whole app.
@@ -100,8 +101,11 @@ export class BrowserService implements OnApplicationShutdown {
    * @param wsUrl External Playwright endpoint URL.
    */
   private async connectToExternalPlaywright(wsUrl: string): Promise<Browser> {
+    // The endpoint path is the run-server's secret: keep it out of logs and
+    // of the error, which the scan processor logs and BullMQ stores.
+    const redact = (text: string) => redactUrlPath(text, wsUrl);
     this.logger.log(
-      `Connecting to external Playwright via WebSocket: ${wsUrl}`,
+      `Connecting to external Playwright via WebSocket: ${redact(wsUrl)}`,
     );
 
     try {
@@ -110,13 +114,14 @@ export class BrowserService implements OnApplicationShutdown {
       this.logger.log('Connected to external Playwright instance');
       return browser;
     } catch (error) {
+      const message = redact(
+        error instanceof Error ? error.message : String(error),
+      );
       this.logger.error(
-        `Failed to connect to external Playwright at ${wsUrl}:`,
-        error,
+        `Failed to connect to external Playwright at ${redact(wsUrl)}: ${message}`,
+        error instanceof Error && error.stack ? redact(error.stack) : undefined,
       );
-      throw new Error(
-        `Unable to connect to external Playwright: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      throw new Error(`Unable to connect to external Playwright: ${message}`);
     }
   }
 

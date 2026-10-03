@@ -140,6 +140,47 @@ describe('BrowserService', () => {
     expect(mockLaunch).not.toHaveBeenCalled();
   });
 
+  it('keeps the secret path of the Playwright server out of logs and errors', async () => {
+    const secret = '0123456789abcdef0123456789abcdef';
+    const wsUrl = `ws://playwright:3000/${secret}`;
+    mockConnect
+      .mockRejectedValueOnce(
+        new Error(
+          `browserType.connect: WebSocket error: connect ECONNREFUSED 172.18.0.3:3000\nCall log:\n  - <ws connecting> ${wsUrl}\n  - <ws error> ${wsUrl} error connect ECONNREFUSED 172.18.0.3:3000\n`,
+        ),
+      )
+      .mockResolvedValueOnce(new FakeBrowser());
+    const service = makeService(wsUrl);
+    const logger = (service as any).logger;
+    const logged: unknown[] = [];
+    for (const level of ['log', 'warn', 'error'] as const) {
+      jest
+        .spyOn(logger, level)
+        .mockImplementation((...args: unknown[]) => logged.push(...args));
+    }
+
+    const failure = await service.getBrowser().catch((error: Error) => error);
+    await service.getBrowser();
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain(
+      'Unable to connect to external Playwright: browserType.connect: WebSocket error: connect ECONNREFUSED',
+    );
+    expect((failure as Error).message).not.toContain(secret);
+    expect((failure as Error).message).toContain(
+      'ws://playwright:3000/<redacted>',
+    );
+    expect(logged.length).toBeGreaterThan(0);
+    for (const entry of logged) {
+      expect(String(entry)).not.toContain(secret);
+    }
+    expect(logged.map(String)).toContain(
+      'Connecting to external Playwright via WebSocket: ws://playwright:3000/<redacted>',
+    );
+    // The real URL is still what the browser connects to.
+    expect(mockConnect).toHaveBeenCalledWith(wsUrl);
+  });
+
   it('closes the browser on shutdown without treating it as a crash', async () => {
     const browser = new FakeBrowser();
     mockLaunch.mockResolvedValue(browser);
