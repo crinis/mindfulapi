@@ -37,7 +37,10 @@ jest.mock('@crawlee/memory-storage', () => ({
 
 import { ScanProcessor } from './scan.processor';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
-import { PageNavigationError } from './axe-accessibility-scanner.service';
+import {
+  PageNavigationError,
+  TargetPolicyViolationError,
+} from './axe-accessibility-scanner.service';
 import { scanConfig } from '../config/configuration';
 import { Scan } from '../entities/scan.entity';
 import { ScanMode } from '../enums/scan-mode.enum';
@@ -94,6 +97,7 @@ describe('ScanProcessor', () => {
   let mockScanner: {
     createContext: jest.Mock;
     scanPage: jest.Mock;
+    assertPageAllowed: jest.Mock;
   };
   let mockBasicAuthCrypto: jest.Mocked<
     Pick<BasicAuthCryptoService, 'decryptCredentials'>
@@ -160,6 +164,7 @@ describe('ScanProcessor', () => {
     mockScanner = {
       createContext: jest.fn().mockResolvedValue(mockContext),
       scanPage: jest.fn(),
+      assertPageAllowed: jest.fn().mockResolvedValue(undefined),
     };
     mockBasicAuthCrypto = {
       decryptCredentials: jest.fn(),
@@ -548,7 +553,7 @@ describe('ScanProcessor', () => {
 
     expect(mockAgentAudit.collectForPage).toHaveBeenCalledTimes(1);
     expect(mockAgentAudit.collectForPage.mock.calls[0][2]).toBe(
-      'https://example.com/',
+      'https://example.com/a',
     );
     expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
       status: ScanStatus.COMPLETED,
@@ -556,6 +561,108 @@ describe('ScanProcessor', () => {
       pagesScanned: 1,
       pagesFailed: 1,
     });
+  });
+
+  it('re-checks the target policy after evidence collection and discards a violating page', async () => {
+    mockScanQb.getOne.mockResolvedValue(
+      makeScan({ targets: ['https://example.com'] }),
+    );
+    mockAgentAudit.resolveSkills.mockReturnValue([{ id: 'image_alt_text' }]);
+    mockAgentAudit.collectForPage.mockResolvedValue([{ id: 'unit-1' }]);
+    (mockAgentAudit as any).remainingScanUnits = jest.fn().mockReturnValue(10);
+    mockScanner.scanPage.mockResolvedValue({
+      finalUrl: 'https://example.com/',
+      issues: [
+        {
+          ruleId: 'image-alt',
+          description: 'Images must have alternative text',
+          impact: IssueImpact.CRITICAL,
+          pageUrl: 'https://example.com/',
+        },
+      ],
+    });
+    // A lazy-loaded image followed a redirect to a blocked address while the
+    // evidence (element screenshots) was being collected.
+    mockScanner.assertPageAllowed.mockRejectedValue(
+      new TargetPolicyViolationError(
+        'redirect to blocked target http://10.0.0.5/x.png',
+      ),
+    );
+
+    await processor.process({ data: { scanId: 1 } } as any);
+
+    expect(mockAgentAudit.collectForPage).toHaveBeenCalledTimes(1);
+    expect(mockScanner.assertPageAllowed).toHaveBeenCalled();
+    expect(mockIssueRepo.save).not.toHaveBeenCalled();
+    // Nothing was buffered, so the AI phase never starts.
+    expect(mockAgentAudit.evaluate).not.toHaveBeenCalled();
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      status: ScanStatus.COMPLETED,
+      pagesDiscovered: 1,
+      pagesScanned: 0,
+      pagesFailed: 1,
+    });
+  });
+
+  it('buffers collected evidence only after the page passed the final policy check', async () => {
+    mockScanQb.getOne.mockResolvedValue(
+      makeScan({ targets: ['https://example.com'] }),
+    );
+    mockAgentAudit.resolveSkills.mockReturnValue([{ id: 'image_alt_text' }]);
+    mockAgentAudit.collectForPage.mockResolvedValue([{ id: 'unit-1' }]);
+    (mockAgentAudit as any).remainingScanUnits = jest.fn().mockReturnValue(10);
+    mockScanner.scanPage.mockResolvedValue({
+      finalUrl: 'https://example.com/',
+      issues: [],
+    });
+
+    await processor.process({ data: { scanId: 1 } } as any);
+
+    expect(mockAgentAudit.evaluate).toHaveBeenCalledWith(
+      expect.anything(),
+      [{ id: 'unit-1' }],
+      expect.any(Function),
+    );
+  });
+
+  it('does not mine links from a crawl page that violated the policy after its scan', async () => {
+    mockScanQb.getOne.mockResolvedValue(
+      makeScan({ mode: ScanMode.CRAWL, targets: ['https://example.com'] }),
+    );
+    const page = {
+      url: jest.fn().mockReturnValue('https://example.com/'),
+      evaluate: jest.fn().mockResolvedValue(['https://example.com/about']),
+      close: jest.fn().mockResolvedValue(undefined),
+    };
+    mockContext.newPage.mockResolvedValue(page);
+    mockScanner.scanPage.mockResolvedValue({
+      finalUrl: 'https://example.com/',
+      issues: [],
+    });
+    // Clean while scanning; a timer-driven request reached a blocked target
+    // before link discovery.
+    mockScanner.assertPageAllowed
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValue(
+        new TargetPolicyViolationError('redirect to blocked target'),
+      );
+    const enqueueLinks = jest.fn();
+
+    mockCrawlerRunHandler = async ({ requestHandler }) => {
+      await requestHandler({
+        request: {
+          url: 'https://example.com/',
+          uniqueKey: 'https://example.com/',
+          userData: { depth: 0 },
+        },
+        enqueueLinks,
+      });
+    };
+
+    await processor.process({ data: { scanId: 1 } } as any);
+
+    expect(page.evaluate).not.toHaveBeenCalled();
+    expect(enqueueLinks).not.toHaveBeenCalled();
   });
 
   it('counts policy-blocked pages as failed without opening a page', async () => {

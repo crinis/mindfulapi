@@ -65,6 +65,15 @@ export async function startFixtureSiteServer(
     }
     void handleRequest(root, request.url || '/', response);
   });
+  // WebSocket handshakes arrive as 'upgrade', not 'request'; record and refuse.
+  server.on('upgrade', (request, socket) => {
+    requests.push({
+      method: 'UPGRADE',
+      url: request.url ?? '/',
+      headers: request.headers,
+    });
+    socket.destroy();
+  });
 
   await new Promise<void>((resolveListen, rejectListen) => {
     server.once('error', rejectListen);

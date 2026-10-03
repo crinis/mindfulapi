@@ -278,38 +278,71 @@ export class ScanProcessor extends WorkerHost {
   }
 
   /**
-   * Collects trigger-filtered agent evidence from a live page into the run
-   * buffer. Never throws — agent collection must not fail a page scan.
+   * Collects trigger-filtered agent evidence from a live page. Never throws —
+   * agent collection must not fail a page scan.
    */
   private async collectAgentEvidence(
     agent: AgentRun | undefined,
     page: Page,
     pageUrl: string,
     issues: ScannedIssue[],
-  ): Promise<void> {
+  ): Promise<CollectedUnit[]> {
     if (!agent || agent.skills.length === 0) {
-      return;
+      return [];
     }
     try {
-      const units = await this.agentAudit.collectForPage(
+      return await this.agentAudit.collectForPage(
         agent.skills,
         page,
         pageUrl,
         issues,
         agent.buffer.length,
       );
-      // Concurrent page handlers may each have read the same buffer length
-      // before awaiting collection, so re-check the scan-wide cap here where the
-      // push is synchronous and clamp to the room that is actually left.
-      const room = this.agentAudit.remainingScanUnits(agent.buffer.length);
-      if (room > 0) {
-        agent.buffer.push(...units.slice(0, room));
-      }
     } catch (error) {
       this.logger.warn(
         `Agent evidence collection failed for ${pageUrl}: ${String(error)}`,
       );
+      return [];
     }
+  }
+
+  /** Adds collected evidence to the run buffer, clamped to the scan-wide cap. */
+  private bufferAgentEvidence(
+    agent: AgentRun | undefined,
+    units: CollectedUnit[],
+  ): void {
+    if (!agent || units.length === 0) {
+      return;
+    }
+    // Concurrent page handlers may each have read the same buffer length
+    // before awaiting collection, so re-check the scan-wide cap here where the
+    // push is synchronous and clamp to the room that is actually left.
+    const room = this.agentAudit.remainingScanUnits(agent.buffer.length);
+    if (room > 0) {
+      agent.buffer.push(...units.slice(0, room));
+    }
+  }
+
+  /**
+   * Persists an analysed page: collects its AI-audit evidence while the page
+   * is still live, re-verifies the target policy (collection can make the page
+   * load more, e.g. lazy images), and only then stores the issues and buffers
+   * the evidence.
+   *
+   * @throws TargetPolicyViolationError When the page reached a blocked
+   * target; nothing from it is stored or buffered.
+   */
+  private async commitScannedPage(
+    scanId: number,
+    agent: AgentRun | undefined,
+    page: Page,
+    pageUrl: string,
+    issues: ScannedIssue[],
+  ): Promise<void> {
+    const units = await this.collectAgentEvidence(agent, page, pageUrl, issues);
+    await this.scanner.assertPageAllowed(page);
+    await this.saveIssues(scanId, issues);
+    this.bufferAgentEvidence(agent, units);
   }
 
   /**
@@ -357,14 +390,19 @@ export class ScanProcessor extends WorkerHost {
           }
           const page = await context.newPage();
           try {
-            const { issues } = await this.scanner.scanPage(
+            const { finalUrl, issues } = await this.scanner.scanPage(
               page,
               task.url,
               scanOptions,
             );
-            await this.saveIssues(scan.id, issues);
+            await this.commitScannedPage(
+              scan.id,
+              agent,
+              page,
+              finalUrl,
+              issues,
+            );
             progress.pagesScanned += 1;
-            await this.collectAgentEvidence(agent, page, page.url(), issues);
           } catch (error) {
             progress.pagesFailed += 1;
             this.logger.warn(
@@ -462,18 +500,24 @@ export class ScanProcessor extends WorkerHost {
             // Scan phase — failures here count as page failures.
             let discoverLinks = true;
             try {
-              const { issues } = await this.scanner.scanPage(
+              const { finalUrl, issues } = await this.scanner.scanPage(
                 page,
                 request.url,
                 scanOptions,
               );
-              await this.saveIssues(scan.id, issues);
+              await this.commitScannedPage(
+                scan.id,
+                agent,
+                page,
+                finalUrl,
+                issues,
+              );
               progress.pagesScanned += 1;
-              await this.collectAgentEvidence(agent, page, page.url(), issues);
             } catch (error) {
               progress.pagesFailed += 1;
-              // A rejected page (e.g. an HTTP error page) is not site
-              // content, so its links are not followed either.
+              // A rejected page (an HTTP error page, or one that reached a
+              // blocked target) is not site content: its links are not
+              // followed either.
               discoverLinks = !(error instanceof PageRejectedError);
               this.logger.warn(
                 `Failed page ${request.url} in scan ${scan.id}: ${String(error)}`,
@@ -484,6 +528,9 @@ export class ScanProcessor extends WorkerHost {
             if (discoverLinks && depth < maxDepth && seen.size < maxPages) {
               let hrefs: string[] = [];
               try {
+                // The page may have reached a blocked target since its scan
+                // (timers, late subresources); never mine such a page.
+                await this.scanner.assertPageAllowed(page);
                 hrefs = await page.evaluate(() =>
                   Array.from(
                     document.querySelectorAll<HTMLAnchorElement>('a[href]'),

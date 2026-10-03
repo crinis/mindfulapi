@@ -346,10 +346,13 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 ## Security
 
 - **Authentication is required by default.** The server does not start unless `AUTH_TOKEN` is set (or `AUTH_DISABLED=true` explicitly). Tokens are compared in constant time.
-- **SSRF protection.** Hosts that resolve to private or reserved ranges (loopback, RFC 1918, link-local/cloud-metadata `169.254.169.254`, CGNAT, ULA, etc.) are blocked.
-  - The block applies to **every** browser request: the initial navigation, each redirect, and every subresource (image, script, iframe). A permitted public page cannot pivot to an internal address.
+- **SSRF protection.** Hosts that resolve to private or reserved ranges (loopback, RFC 1918, link-local/cloud-metadata `169.254.169.254`, CGNAT, ULA, etc., including IPv6 addresses that embed such an IPv4 address: IPv4-mapped, IPv4-compatible, NAT64 `64:ff9b::/96`) are blocked. In the browser:
+  - **Every request a page starts** (navigation, iframe, image, script, stylesheet, fetch/XHR, worker and service-worker requests) is checked before it is sent, and aborted when blocked.
+  - **Redirect hops** are checked as they start. Playwright cannot stop a hop in flight, so the redirected request itself is still sent. The page is then closed and counted as failed. Nothing from it is analysed, stored, crawled further or sent to the AI provider.
+  - **The final URL** of every page is checked again after navigation, before analysis.
+  - **WebSockets** opened by a page are checked before they connect. `SharedWorker` is disabled because Playwright cannot intercept its requests. Service workers stay enabled because their requests are checked like page requests.
   - To scan intranet/staging sites, allow specific hosts with `SCAN_TARGET_ALLOW_HOSTS`, or set `SCAN_ALLOW_PRIVATE_TARGETS=true` — only when the API is not exposed to untrusted clients.
-  - Limitation: the policy resolves hosts independently of the browser's DNS. A DNS-rebinding attacker with a very low TTL could flip a record between check and fetch. This is acceptable for a self-hosted tool, but keep the API access-controlled.
+  - Limitations: the policy resolves hosts independently of the browser's DNS, so a DNS-rebinding attacker with a very low TTL could flip a record between check and fetch. Redirect hops (see above), WebSockets opened inside a dedicated worker, and non-HTTP channels such as WebRTC can still send requests to blocked addresses; their responses never reach a stored result. This is acceptable for a self-hosted tool, but keep the API access-controlled.
 - **Rate limiting** applies globally (`THROTTLE_TTL` / `THROTTLE_LIMIT`); `/health` is exempt.
 - **Request limits.** JSON and form bodies: 1 MB. `url_list`: up to 500 URLs. `crawl`: up to 50 seed URLs, `maxPages` up to 5000 (default 250), `maxDepth` up to 20 (default 4).
 - **Non-root container.** The process runs as the unprivileged `node` user (uid 1000), so `/data` must be writable by it. Fresh installs handle this; upgrades from an old root image need a one-time `chown` (see [Updating](#updating)).
