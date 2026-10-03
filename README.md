@@ -8,6 +8,8 @@ MindfulAPI is the external scanner backend for the TYPO3 extension [crinis/mindf
 > - Significant parts of this application were generated or refined with the help of AI tools.
 > - Run MindfulAPI only in a secure environment and apply proper hardening before exposing it publicly.
 
+> **Release status.** `docker-compose.yml` runs the `latest` image, currently release 0.7.1. This README and `.env.example` follow the `main` branch, which the `dev` image is built from. Behaviour that 0.7.1 does not have yet is marked _Unreleased_, followed by what 0.7.1 does instead; see [Container image tags](#container-image-tags) to choose an image. What `docker-compose.yml` itself sets up (the published address, the browser server's secret path) applies to every image.
+
 ## Features
 
 - **Axe-core scanning** — industry-standard accessibility rules mapped to WCAG 2 / Section 508
@@ -15,7 +17,7 @@ MindfulAPI is the external scanner backend for the TYPO3 extension [crinis/mindf
 - **Asynchronous processing** — scans run in the background via a Redis-backed queue (BullMQ)
 - **Scoped scanning** — target a CSS selector instead of the whole page
 - **Rule filtering** — run only the axe rules you care about
-- **Basic auth support** — optional per-scan HTTP Basic credentials for protected targets, sent only to the first target's origin
+- **Basic auth support** — optional per-scan HTTP Basic credentials for protected targets, sent only to the first target's origin (_Unreleased; 0.7.1 also answers other origins' challenges, e.g. after a redirect_)
 - **Scan history** — results are stored in SQLite and queryable via the API
 - **HTML & PDF reports** — accessible, print-ready reports generated from scan results
 - **Optional authentication** — protect the API with a Bearer token, or leave it open
@@ -61,7 +63,7 @@ openssl rand -hex 32   # paste the output after AUTH_TOKEN=
 openssl rand -hex 16   # paste the output after PLAYWRIGHT_WS_PATH=
 ```
 
-- `AUTH_TOKEN` is the bearer token clients send. `.env.example` ships it empty, and the API refuses to start until it is set: the `mindfulapi` container exits with *"AUTH_TOKEN is not set"*. The placeholder `your-secure-api-token-here` that older versions of `.env.example` contained is refused as well.
+- `AUTH_TOKEN` is the bearer token clients send. `.env.example` ships it empty, and the API refuses to start until it is set: the `mindfulapi` container exits with *"AUTH_TOKEN is not set"*. The placeholder `your-secure-api-token-here` that older versions of `.env.example` contained is refused as well (_Unreleased; 0.7.1 accepts it, so never keep it_).
 - `PLAYWRIGHT_WS_PATH` is the secret path of the browser server (see [Security](#security)). `docker compose` refuses to start while it is empty.
 
 `.env` is not a shell script, so `$(...)` is not executed there: paste the command output. `docker compose` also refuses to start when the `AUTH_TOKEN` line is missing from `.env`. See [Configuration](#configuration) for all other variables.
@@ -266,10 +268,15 @@ docker compose up -d
 
 Change `.env` **before** running any `docker compose` command (`pull` and `down` included): Compose refuses every command until `PLAYWRIGHT_WS_PATH` is set.
 
+**When you pull this repository.** These changes come with `docker-compose.yml` and apply to every image, `latest` (0.7.1) included:
+
 - **Add `PLAYWRIGHT_WS_PATH`** with the output of `openssl rand -hex 16`. Compose now starts the browser server on that secret path and connects the API to it (see [Security](#security)). The error *"required variable PLAYWRIGHT_WS_PATH is missing a value"* means it is still missing.
-- **Replace a placeholder `AUTH_TOKEN`.** If `.env` still contains `AUTH_TOKEN=your-secure-api-token-here` from an older `.env.example`, the API now refuses to start. Set a token from `openssl rand -hex 32` and give it to your clients (e.g. the TYPO3 extension).
 - **The API port is published on `127.0.0.1` only.** Clients on other hosts that connected to port 3000 directly need a reverse proxy, or `BIND_ADDRESS=0.0.0.0` plus a firewall that filters Docker traffic (see [Deploying](#deploying-to-a-linux-server)). A TYPO3 instance in the DDEV network is unaffected: it uses `http://mindfulapi:3000`.
-- **Configuration is validated strictly.** Numbers must be plain decimals within the ranges in [Configuration](#configuration); values the API used to clamp (for example `THROTTLE_TTL` above `86400`) now stop it at startup, and `CLEANUP_INTERVAL` must be a valid cron expression. An empty value now counts as unset instead of failing validation.
+
+**When you move to the `dev` image or the next release.** These changes are unreleased:
+
+- **Replace a placeholder `AUTH_TOKEN`.** If `.env` still contains `AUTH_TOKEN=your-secure-api-token-here` from an older `.env.example`, the API refuses to start. Set a token from `openssl rand -hex 32` and give it to your clients (e.g. the TYPO3 extension). Do this on 0.7.1 too: the placeholder is public.
+- **Configuration is validated strictly.** Numbers must be plain decimals within the ranges in [Configuration](#configuration); values 0.7.1 clamps (for example `THROTTLE_TTL` above `86400`) stop the API at startup, and `CLEANUP_INTERVAL` must be a valid cron expression. An empty value counts as unset instead of failing validation.
 - **Requests with a wrong token count against the rate limit.** Behind a reverse proxy, set `TRUST_PROXY=1` so each client gets its own limit.
 - **Per-skill AI overrides** that set another provider or their own base URL no longer inherit `AGENT_API_KEY` (see [Per-skill model selection](#per-skill-model-selection)).
 
@@ -299,7 +306,7 @@ New: `DELETE /v1/scans/:id`, `POST /v1/scans/:id/cancel`, `GET /health`, respons
 
 ## Configuration
 
-All configuration uses environment variables; [`.env.example`](.env.example) lists them all. An empty value (`VAR=`) means the same as leaving the variable unset, so the default applies. Values are validated at startup: an out-of-range or malformed value (e.g. `SCAN_CONCURRENCY=12`) stops the server with an error, and a value that passes is used exactly as given. Numbers must be plain decimals (`1500000`, not `1.5e6` or `0x50`); the ranges are listed below.
+All configuration uses environment variables; [`.env.example`](.env.example) lists them all. An empty value (`VAR=`) means the same as leaving the variable unset, so the default applies (_Unreleased; 0.7.1 stops at startup on an empty boolean, enum or most numeric variables, e.g. `AGENT_PROVIDER=`_). Values are validated at startup: an out-of-range or malformed value (e.g. `SCAN_CONCURRENCY=12`) stops the server with an error, and a value that passes is used exactly as given. Numbers must be plain decimals (`1500000`, not `1.5e6` or `0x50`); the ranges are listed below (_Unreleased; 0.7.1 accepts some out-of-range values and clamps them to these ranges, and reads numbers with `parseInt`, so `AGENT_MAX_IMAGE_BYTES=1.5e6` is used as `1000`_).
 
 **With Docker Compose,** every variable in `.env` reaches the API container, except the service wiring: `NODE_ENV`, `DATABASE_PATH`, `PLAYWRIGHT_WS_URL` (built from `PLAYWRIGHT_WS_PATH`), `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` and `PORT` are pinned by `docker-compose.yml` to the bundled containers. `PORT` and `BIND_ADDRESS` in `.env` only change where the API is published on the host.
 
@@ -310,12 +317,12 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 | `NODE_ENV` | `development` | Any value other than `production` enables SQL query logging |
 | `PORT` | `3000` | HTTP server port (1–65535). With Docker Compose: the published host port |
 | `BIND_ADDRESS` | `127.0.0.1` | Compose only: host address the API port is published on. The default allows only this host (e.g. a reverse proxy). `0.0.0.0` publishes on every interface, past host firewalls such as ufw — see [Deploying](#deploying-to-a-linux-server) |
-| `AUTH_TOKEN` | _(unset)_ | Bearer token for API auth. **The server refuses to start when unset** unless `AUTH_DISABLED=true`, and always refuses the old `.env.example` placeholder `your-secure-api-token-here` |
+| `AUTH_TOKEN` | _(unset)_ | Bearer token for API auth. **The server refuses to start when unset** unless `AUTH_DISABLED=true`, and always refuses the old `.env.example` placeholder `your-secure-api-token-here` (_Unreleased; 0.7.1 accepts it_) |
 | `AUTH_DISABLED` | `false` | `true` runs without authentication (only when `AUTH_TOKEN` is unset). **Not recommended** |
 | `CORS_ORIGINS` | _(unset)_ | Comma-separated allowed CORS origins; unset disables CORS |
 | `THROTTLE_TTL` | `60` | Rate-limit window in seconds (1–86400) |
 | `THROTTLE_LIMIT` | `100` | Allowed requests per window per client address and endpoint (1–1000000) |
-| `TRUST_PROXY` | _(unset)_ | Proxies whose `X-Forwarded-For` the API trusts for the client address that rate limiting counts by: `false`, a hop count (1–32), or a comma-separated list of IP addresses, CIDR subnets, `loopback`, `linklocal`, `uniquelocal`. Unset trusts none. `true` is refused at startup, because it would make the first `X-Forwarded-For` entry, which the client chooses, the client address. See [Security](#security) |
+| `TRUST_PROXY` | _(unset)_ | Proxies whose `X-Forwarded-For` the API trusts for the client address that rate limiting counts by: `false`, a hop count (1–32), or a comma-separated list of IP addresses, CIDR subnets, `loopback`, `linklocal`, `uniquelocal`. Unset trusts none. `true` is refused at startup, because it would make the first `X-Forwarded-For` entry, which the client chooses, the client address. See [Security](#security). _Unreleased; 0.7.1 ignores it_ |
 
 **Storage and services**
 
@@ -345,7 +352,7 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CLEANUP_ENABLED` | `true` | Scheduled deletion of old finished scans. `POST /v1/cleanup` works regardless |
-| `CLEANUP_RETENTION_DAYS` | `30` | Days to keep finished scans (0–36500). `0` deletes every finished scan (completed, failed or canceled) on each run. Pending, running and analyzing scans are never deleted |
+| `CLEANUP_RETENTION_DAYS` | `30` | Days to keep finished scans (0–36500). `0` deletes every finished scan (completed, failed or canceled) on each run. Pending, running and analyzing scans are never deleted (_Unreleased; 0.7.1 deletes scans of every status, `0` included_) |
 | `CLEANUP_INTERVAL` | `0 2 * * *` | Cron schedule for cleanup: five fields, or six with seconds first. An invalid expression stops the server at startup |
 
 **AI audit** (see [AI accessibility audit](#ai-accessibility-audit-optional))
@@ -355,12 +362,12 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 | `AGENT_ENABLED` | `false` | Enable the AI audit |
 | `AGENT_PROVIDER` | _(unset)_ | `openai`, `anthropic`, or `openai-compatible` (OpenRouter / local models) |
 | `AGENT_MODEL` | _(unset)_ | Model for every skill. Optional for OpenAI (unset → [tuned per-skill profile](#choosing-an-apigateway-and-model)); required for other providers |
-| `AGENT_API_KEY` | _(unset)_ | Provider API key, never logged. Not checked at startup: a scan requesting the AI audit gets a `400` while a requested skill's `openai`/`anthropic` key is missing; a key the provider refuses makes those units fail (`tasksFailed`) |
+| `AGENT_API_KEY` | _(unset)_ | Provider API key, never logged. Not checked at startup: a scan requesting the AI audit gets a `400` while a requested skill's `openai`/`anthropic` key is missing; a key the provider refuses makes those units fail (`tasksFailed`). _Unreleased; 0.7.1 accepts such scans and records a fallback verdict for each unit_ |
 | `AGENT_BASE_URL` | _(unset)_ | Base URL for `openai-compatible` (OpenRouter or a local server) |
 | `AGENT_SKILLS` | `image_alt_text,heading_structure,link_purpose,form_labels,page_title` | Skills clients may request. Unset or empty means all; unknown values are silently ignored |
-| `AGENT_ALLOWED_SCAN_MODES` | `single_url` | Scan modes that may request an AI audit: `single_url`, `url_list`, `crawl`. Not yet released: available in the `dev` image; releases up to 0.7.1 allow every mode |
+| `AGENT_ALLOWED_SCAN_MODES` | `single_url` | Scan modes that may request an AI audit: `single_url`, `url_list`, `crawl`. _Unreleased; 0.7.1 allows every mode_ |
 | `AGENT_REASONING_EFFORT` | _(unset)_ | `none`, `minimal`, `low`, `medium`, `high`, `xhigh` for a reasoning `AGENT_MODEL`. `gpt-5.4+` reject `minimal` (use `none`); only the original `gpt-5-nano`/`gpt-5-mini` accept it. How it combines with the profile: [Per-skill model selection](#per-skill-model-selection) |
-| `AGENT_SKILL_<ID>_{PROVIDER,MODEL,API_KEY,BASE_URL,REASONING_EFFORT}` | _(unset fields fall back to `AGENT_*` / profile; see description)_ | Per-skill override, e.g. `AGENT_SKILL_HEADING_STRUCTURE_REASONING_EFFORT`. The key and base URL are inherited only within the same endpoint: an override with another provider inherits neither `AGENT_API_KEY` nor `AGENT_BASE_URL`, one with its own base URL not the key. See [Per-skill model selection](#per-skill-model-selection) |
+| `AGENT_SKILL_<ID>_{PROVIDER,MODEL,API_KEY,BASE_URL,REASONING_EFFORT}` | _(unset fields fall back to `AGENT_*` / profile; see description)_ | Per-skill override, e.g. `AGENT_SKILL_HEADING_STRUCTURE_REASONING_EFFORT`. The key and base URL are inherited only within the same endpoint: an override with another provider inherits neither `AGENT_API_KEY` nor `AGENT_BASE_URL`, one with its own base URL not the key (_Unreleased; 0.7.1 inherits both in every override_). See [Per-skill model selection](#per-skill-model-selection) |
 | `AGENT_CONCURRENCY` | `4` | Concurrent requests during evaluation, one per unit — an image (`image_alt_text`) or a page (text-only skills) (1–16) |
 | `AGENT_MAX_UNITS_PER_PAGE` | `30` | Cap on collected work units per page (1–500) |
 | `AGENT_MAX_UNITS_PER_SCAN` | `200` | Cap on evaluated work units per scan (1–10000; see [cost note](#per-skill-model-selection)) |
@@ -371,8 +378,8 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 
 ## Security
 
-- **Authentication is required by default.** The server does not start unless `AUTH_TOKEN` is set (or `AUTH_DISABLED=true` explicitly), and never with the placeholder token that older versions of `.env.example` shipped. Tokens are compared in constant time.
-- **SSRF protection.** Hosts that resolve to private or reserved ranges (loopback, RFC 1918, link-local/cloud-metadata `169.254.169.254`, CGNAT, ULA, etc., including IPv6 addresses that embed such an IPv4 address: IPv4-mapped, IPv4-compatible, NAT64 `64:ff9b::/96`) are blocked. In the browser:
+- **Authentication is required by default.** The server does not start unless `AUTH_TOKEN` is set (or `AUTH_DISABLED=true` explicitly), and never with the placeholder token that older versions of `.env.example` shipped (_Unreleased; 0.7.1 accepts it_). Tokens are compared in constant time.
+- **SSRF protection.** Hosts that resolve to private or reserved ranges (loopback, RFC 1918, link-local/cloud-metadata `169.254.169.254`, CGNAT, ULA, etc., including IPv6 addresses that embed such an IPv4 address: IPv4-mapped, IPv4-compatible, NAT64 `64:ff9b::/96`) are blocked (_IPv4-compatible and NAT64 unreleased; 0.7.1 checks IPv4-mapped addresses only_). In the browser (_the redirect-hop, final-URL and WebSocket checks and the removed APIs below are unreleased; 0.7.1 only aborts requests to blocked hosts before they are sent, so a redirect or a WebSocket to a blocked host goes through and the page is analysed_):
   - **Nearly every request a page starts** (navigation, iframe, image, script, stylesheet, fetch/XHR, and requests from dedicated and service workers) is checked before it is sent, and aborted when its host is blocked. The exception is speculation-rules prefetch and prerender (`<script type="speculationrules">`): Chromium sends these requests without Playwright seeing them, so a page can make the browser send a GET to a blocked host. Like a redirect hop, that request is not stopped, and the scanner never analyses, stores or forwards its response (see Limitations).
   - **Redirect hops** are checked as they start. Playwright cannot stop a hop in flight, so the redirected request is still sent and its response reaches the browser. The page is then closed and counted as failed, and the scanner never analyses, stores, crawls or sends to the AI provider anything the page loaded. A malicious page's own JavaScript can still read a CORS-readable response from the blocked host and exfiltrate it to an allowed host in the short window before the page closes; fully closing this needs an egress proxy (see below).
   - **The final URL** of every page is checked again after navigation, before analysis.
@@ -380,17 +387,17 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
   - To scan intranet/staging sites, allow specific hosts with `SCAN_TARGET_ALLOW_HOSTS`, or set `SCAN_ALLOW_PRIVATE_TARGETS=true` — only when the API is not exposed to untrusted clients.
   - **Limitations (accepted risks).** DNS rebinding: the policy resolves each host once per scan, independently of the browser's own DNS lookups, so a host whose DNS answers change can pass the check with a public address and then be reached at a private one. Redirect hops (see above), sockets opened inside a dedicated worker, and speculation-rules prefetch/prerender can still send a request to a blocked address. The scanner never stores or reports what comes back, but a malicious page can read and exfiltrate a CORS-readable redirect-hop response during the close window. Closing these completely needs an egress proxy that resolves and pins addresses. This residual is acceptable for scanning trusted sites from an access-controlled API; do not point the scanner at untrusted content without an egress proxy.
 - **The Playwright run-server is protected by a secret path.** In Docker the browser runs inside the `playwright` container, next to the run-server that controls it, so a scanned page can address the run-server at its own loopback address and at `playwright:3000`.
-  - Ordinary requests and page WebSockets to either address are blocked by the SSRF protection above (both are private addresses), unless `SCAN_ALLOW_PRIVATE_TARGETS=true`.
+  - Ordinary requests and page WebSockets to either address are blocked by the SSRF protection above (both are private addresses), unless `SCAN_ALLOW_PRIVATE_TARGETS=true` (_page WebSockets unreleased; 0.7.1 does not check them_).
   - A WebSocket the shim does not see (for example one opened in a dedicated worker) is not checked, and `run-server --host 0.0.0.0` does not check the connecting origin. With the run-server's endpoint, a malicious page could use the Playwright protocol to open browsers and load URLs, internal ones included, from inside the container.
   - Network isolation cannot separate a page from the run-server: they share the container's network. `docker-compose.yml` therefore starts the run-server with `--path /<PLAYWRIGHT_WS_PATH>` and connects the API to `ws://playwright:3000/<PLAYWRIGHT_WS_PATH>`. WebSocket connections to any other path are refused with `400`. Plain HTTP requests get `200` on any path, so the healthcheck (`GET /`) keeps working.
   - The run-server tells plain HTTP clients its path (`GET /json`). That response has no `Access-Control-Allow-Origin` header, so page script on another origin cannot read it, and the SSRF protection blocks direct requests to the run-server's addresses. A page whose host name is rebound to the run-server's address (DNS rebinding, see Limitations above) would be same-origin with it and could read the path, so the secret path does not close that case.
   - Never add `--unsafe` to the run-server. Complete protection needs an egress proxy or scanning only trusted sites; keep the API access-controlled.
-- **Basic Auth credentials** (`scanOptions.basicAuth`) are sent only to the origin (scheme, host and port) of the first target URL, in answer to its 401 challenge. Subresources, redirect targets and crawled pages on other origins never receive them. If the target redirects to another origin (http → https, `example.com` → `www.example.com`), use the final URL as the target. Split scans whose targets span several protected origins.
-- **Rate limiting** counts requests per client address and endpoint, for the API routes (`THROTTLE_TTL` / `THROTTLE_LIMIT`). It runs before authentication, so requests with a wrong token count too and tokens cannot be guessed at full speed. `/health`, the documentation pages and paths without a route are not counted.
-  - Behind a reverse proxy every request comes from the proxy's address, so all clients share one limit until `TRUST_PROXY` names the proxy. For one proxy in front, set `TRUST_PROXY=1`: the client address is then the last `X-Forwarded-For` entry, the one the proxy adds (Caddy does this by default; Nginx needs `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`).
+- **Basic Auth credentials** (`scanOptions.basicAuth`) are sent only to the origin (scheme, host and port) of the first target URL, in answer to its 401 challenge. Subresources, redirect targets and crawled pages on other origins never receive them. If the target redirects to another origin (http → https, `example.com` → `www.example.com`), use the final URL as the target. Split scans whose targets span several protected origins. _Unreleased; 0.7.1 answers Basic challenges from other origins with the credentials too, redirect targets included._
+- **Rate limiting** counts requests per client address and endpoint, for the API routes (`THROTTLE_TTL` / `THROTTLE_LIMIT`). It runs before authentication, so requests with a wrong token count too and tokens cannot be guessed at full speed (_Unreleased; in 0.7.1 a request with a wrong token is rejected before it is counted_). `/health`, the documentation pages and paths without a route are not counted.
+  - Behind a reverse proxy every request comes from the proxy's address, so all clients share one limit until `TRUST_PROXY` names the proxy (_Unreleased; 0.7.1 has no `TRUST_PROXY`, so behind a proxy all clients always share one limit_). For one proxy in front, set `TRUST_PROXY=1`: the client address is then the last `X-Forwarded-For` entry, the one the proxy adds (Caddy does this by default; Nginx needs `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`).
   - With Docker Compose, a proxy on the host reaches the container from the Docker network's gateway address, not from loopback, so `TRUST_PROXY=loopback` does not match; use the hop count.
   - Set `TRUST_PROXY` only when every request passes the proxy (the default `BIND_ADDRESS=127.0.0.1` with the proxy on the same host). A client that reaches the API directly could otherwise pick its own address with `X-Forwarded-For` and escape the limit.
-- **API documentation is public.** `/api` (Swagger UI), `/api-json` and `/api-yaml` are served without the token: they are registered outside the API's guards, and a browser could not send a bearer token to the Swagger UI page anyway. They serve the same document as the committed [`openapi.json`](openapi.json): routes, schemas and the version number, no configuration and no scan data. Block these paths at the reverse proxy if they should not be reachable.
+- **API documentation is public.** `/api` (Swagger UI), `/api-json` and `/api-yaml` are served without the token: they are registered outside the API's guards, and a browser could not send a bearer token to the Swagger UI page anyway. They serve the same document as [`openapi.json`](openapi.json) of the running version: routes, schemas and the version number, no configuration and no scan data. Block these paths at the reverse proxy if they should not be reachable.
 - **Request limits.** JSON and form bodies: 1 MB. `url_list`: up to 500 URLs. `crawl`: up to 50 seed URLs, `maxPages` up to 5000 (default 250), `maxDepth` up to 20 (default 4).
 - **Non-root container.** The process runs as the unprivileged `node` user (uid 1000), so `/data` must be writable by it. Fresh installs handle this; upgrades from an old root image need a one-time `chown` (see [Updating](#updating)).
 - **Seccomp.** The shipped compose files do not apply [`seccomp_profile.json`](seccomp_profile.json); every container runs with Docker's default seccomp profile. The file is an outdated variant of Docker's default profile with one added rule that lets processes create user namespaces (`clone`, `setns` and `unshare` without `CAP_SYS_ADMIN`), which Chromium's own sandbox needs. Do not apply it. It has no rules for newer system calls such as `clone3` and refuses every call it does not list with `EPERM`, which can break thread creation in current images (not tested here). And the sandbox it was written for is off: the run-server launches Chromium with `--no-sandbox`, as root in this container, and ignores a client's request to enable the sandbox unless it runs with `--unsafe`, which must not be used.
@@ -402,14 +409,14 @@ Axe-core is deterministic: it can tell that an image _has_ an `alt` attribute, b
 
 - **Disabled by default.** Enable it with `AGENT_ENABLED=true` and a provider ([Choosing an API/gateway and model](#choosing-an-apigateway-and-model)).
 - **Opt-in per scan.** Each scan request must ask for it. By default it runs every server-enabled skill; clients may request a subset.
-- **`single_url` scans only by default.** Allow more modes with `AGENT_ALLOWED_SCAN_MODES=single_url,url_list,crawl` (this also restores the previous all-mode behavior). The restriction ships in the `dev` image and the next release; the `latest` image (0.7.1) still allows every mode.
+- **`single_url` scans only by default.** Allow more modes with `AGENT_ALLOWED_SCAN_MODES=single_url,url_list,crawl` (this also restores the previous all-mode behavior). _Unreleased; 0.7.1 allows every mode._
 
 ### How it works
 
 - **Deterministic-first.** A skill judges only _semantics_ that axe cannot check. It never re-reports what axe or an attribute/structure check already settles (see the last column of [Skills](#skills)), so there are no duplicates and no wasted tokens.
 - **Minimal, structured evidence.** Evidence is collected while the page is live and kept small (see [Skills](#skills)).
 - **Forced structured output.** Every request returns a fixed verdict with a confidence score, and each finding records its WCAG success criterion. Low-confidence or unjudgeable cases become `insufficient_evidence` findings flagged for human review.
-- **Failed requests are reported, never hidden.** A work unit whose request fails counts in `aiAudit.tasksFailed` and produces no findings; no verdict is invented for it. Failures include a rejected API key (or a missing one where an `openai-compatible` gateway needs it), a quota or rate limit, a network error or timeout, and a model answer that does not match the expected format. The SDK retries a retryable API error once; an invalid answer is not retried. The scan still completes with its axe results. "No AI findings" therefore means "no problems found" only when `tasksFailed` is `0`.
+- **Failed requests are reported, never hidden.** A work unit whose request fails counts in `aiAudit.tasksFailed` and produces no findings; no verdict is invented for it. Failures include a rejected API key (or a missing one where an `openai-compatible` gateway needs it), a quota or rate limit, a network error or timeout, and a model answer that does not match the expected format. The SDK retries a retryable API error once; an invalid answer is not retried. The scan still completes with its axe results. "No AI findings" therefore means "no problems found" only when `tasksFailed` is `0`. _Unreleased; 0.7.1 records a fallback verdict for a failed unit instead (an `insufficient_evidence` finding for an image, no findings for the other skills) and counts it as completed._
 - **New lifecycle status.** With an AI audit, a scan moves `pending → running` (axe) `→ analyzing` (agents) `→ completed`. Any scan can instead end as `failed` or `canceled`. Clients must tolerate `analyzing`.
 - **Reports.** AI findings also appear in the HTML and PDF reports.
 
@@ -430,14 +437,14 @@ Axe-core is deterministic: it can tell that an image _has_ an `alt` attribute, b
 | Skill | Requests | Evidence (sent to the LLM provider) |
 | --- | --- | --- |
 | `image_alt_text` | one per image (vision) | Cropped element screenshot + accessible-name attributes |
-| `heading_structure` | one per page (text-only) | Heading outline (level, text, short content snippet each; headings in open shadow roots of web components included), plus styled-block and unheaded-section candidates |
+| `heading_structure` | one per page (text-only) | Heading outline (level, text, short content snippet each; headings in open shadow roots of web components included, _unreleased_), plus styled-block and unheaded-section candidates |
 | `link_purpose` | one per page (text-only) | Deduplicated inventory of named links: accessible name, compact destination, surrounding context. Repeated nav/footer links collapse to one line |
 | `form_labels` | one per page (text-only) | Form controls: accessible name and its source, control type, placeholder, existing described-by instructions, constraint hints |
 | `page_title` | one per page (text-only) | The `<title>` plus top headings and meta description as topic context |
 
-On each page, the one-per-page skills get their request first; `image_alt_text` uses the rest of `AGENT_MAX_UNITS_PER_PAGE`. `AGENT_MAX_UNITS_PER_SCAN` is shared by the pages in the order they finish. On the page where it runs out, that page's images are dropped first and its page-level requests last; pages after that get no AI units at all, page-level requests included.
+On each page, the one-per-page skills get their request first; `image_alt_text` uses the rest of `AGENT_MAX_UNITS_PER_PAGE`. `AGENT_MAX_UNITS_PER_SCAN` is shared by the pages in the order they finish. On the page where it runs out, that page's images are dropped first and its page-level requests last; pages after that get no AI units at all, page-level requests included. _Unreleased; in 0.7.1 images can use the whole page cap before the page-level skills._
 
-Evidence collection ends 15 seconds before the two-minute page limit. Images that never stand still (for example script-driven motion) can take seconds per screenshot; when the time runs out, only the evidence collected so far is judged, and the page keeps its axe results. Images that are not rendered (such as inside `content-visibility: hidden`) are skipped, and CSS animations are frozen for the screenshot.
+Evidence collection ends 15 seconds before the two-minute page limit. Images that never stand still (for example script-driven motion) can take seconds per screenshot; when the time runs out, only the evidence collected so far is judged, and the page keeps its axe results. Images that are not rendered (such as inside `content-visibility: hidden`) are skipped, and CSS animations are frozen for the screenshot. _Unreleased; 0.7.1 has no time limit per page._
 
 > **Privacy.** When the AI audit runs, the evidence above is sent to the configured LLM provider. Only enable it with a provider you trust, and consider a self-hosted/local model for sensitive sites.
 
@@ -453,9 +460,9 @@ POST /v1/scans
 ```
 
 - Omit `skills` to run every skill enabled by `AGENT_SKILLS`, or pass an explicit list for a subset.
-- `scanOptions.rootElement` limits the AI audit to the same region as axe: the skills collect only images, headings, links and form controls inside the matching elements. `page_title` still judges the page's `<title>`.
+- `scanOptions.rootElement` limits the AI audit to the same region as axe: the skills collect only images, headings, links and form controls inside the matching elements. `page_title` still judges the page's `<title>`. _Unreleased; 0.7.1 audits the whole page._
 - The request returns a `400` problem if the audit is disabled server-side, the mode is excluded by `AGENT_ALLOWED_SCAN_MODES`, or a skill is not whitelisted.
-- It also returns a `400` problem if a requested skill cannot reach a model: no provider, an unsupported provider, no model, no API key for `openai` or `anthropic`, or no base URL for `openai-compatible`. The problem's `detail` names the settings to fix. An invalid key or an unreachable endpoint is only detected when the requests run, and then counts in `tasksFailed`.
+- It also returns a `400` problem if a requested skill cannot reach a model: no provider, an unsupported provider, no model, no API key for `openai` or `anthropic`, or no base URL for `openai-compatible`. The problem's `detail` names the settings to fix. An invalid key or an unreachable endpoint is only detected when the requests run, and then counts in `tasksFailed`. _Unreleased; 0.7.1 accepts such a scan and records fallback verdicts._
 - Scan responses gain an `aiAudit` summary and an `agentFindings` array; list summaries gain `agentFindingCount`.
 - `aiAudit` holds `status` (`pending`, `running`, `completed`, or `skipped` when nothing was eligible or the scan failed/was canceled first), `requestedSkills`, and the task counters `tasksTotal`, `tasksCompleted` and `tasksFailed`. `completed` means the evaluation finished, not that every unit succeeded: units in `tasksFailed` were not checked.
 
@@ -472,7 +479,7 @@ Every `agentFindings` entry has the **same shape regardless of skill**, so clien
 | `message` | **Human-readable problem description** |
 | `suggestion` | Concrete fix, when offered |
 | `pageUrl`, `selector` | Where the problem is |
-| `details` | Skill-specific extras (e.g. `currentAlt` and `src` for images, `suggestedLevel` for headings) |
+| `details` | Skill-specific extras (e.g. `currentAlt` and `src` for images, `suggestedLevel` for headings; `src` is _unreleased_) |
 | `model` | Provenance — the model that produced the finding |
 
 ### Choosing an API/gateway and model
@@ -536,7 +543,7 @@ So `AGENT_REASONING_EFFORT` has no effect on skills that use a profile model; us
 - An override that sets a **different provider** inherits neither `AGENT_API_KEY` nor `AGENT_BASE_URL`.
 - An override that sets its **own base URL** does not inherit `AGENT_API_KEY`.
 
-So the global key is never sent to another gateway or to a key-less local server. Give such a skill its own `AGENT_SKILL_<ID>_API_KEY` when its endpoint needs one; for `openai` and `anthropic` a scan request is rejected until it has one.
+So the global key is never sent to another gateway or to a key-less local server. Give such a skill its own `AGENT_SKILL_<ID>_API_KEY` when its endpoint needs one; for `openai` and `anthropic` a scan request is rejected until it has one. _Unreleased; 0.7.1 sends `AGENT_API_KEY` and `AGENT_BASE_URL` to every override's endpoint._
 
 ```bash
 # Zero-config optimized set: pick the provider, leave AGENT_MODEL unset →
@@ -581,6 +588,8 @@ All endpoints are under `/v1` (for example `POST /v1/scans`). Errors follow [RFC
 - it, or a redirect it follows, reaches an address the [SSRF protection](#security) blocks;
 - it is a crawl seed that redirects out of the crawl's scope;
 - it does not finish within two minutes.
+
+_Unreleased; 0.7.1 analyses and stores HTTP error pages and pages that redirect to blocked or out-of-scope addresses like any other page, and has no time limit per page._
 
 The unauthenticated health probe is `GET /health`:
 
