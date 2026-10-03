@@ -385,6 +385,17 @@ describe('Scan target security (real browser)', () => {
                 'beforeend', '<img src="/pixel.png"><button></button>');
             </script>`,
           )(req, res),
+        // Opens sockets to a blocked host (localhost) from its install handler.
+        '/socket-sw.js': (_req, res) => {
+          res.setHeader('content-type', 'application/javascript');
+          res.end(
+            "self.addEventListener('install', (event) => {" +
+              ` const url = 'ws://localhost:${sinkPort}/live';` +
+              ' try { new WebSocket(url); } catch (error) {}' +
+              ' try { new WebSocketStream(url); } catch (error) {}' +
+              ' event.waitUntil(new Promise((resolve) => setTimeout(resolve, 1000))); });',
+          );
+        },
         '/shared-worker.js': (_req, res) => {
           res.setHeader('content-type', 'application/javascript');
           res.end('onconnect = () => {};');
@@ -951,6 +962,32 @@ describe('Scan target security (real browser)', () => {
           'image-alt',
         ]);
         expect(sinkTraffic).toEqual([]);
+      });
+
+      // The README's residual: workers keep the native socket APIs. Update
+      // the README when this starts failing.
+      it("leaves a service worker's sockets unchecked (documented residual)", async () => {
+        const { scanner } = buildProcessor(guarded);
+        const context = await scanner.createContext(
+          await browserService.getBrowser(),
+        );
+        try {
+          const page = await context.newPage();
+          await page.goto(siteUrl('/index.html'));
+
+          await page.evaluate(() =>
+            navigator.serviceWorker.register('/socket-sw.js'),
+          );
+          for (let waited = 0; sinkTraffic.length < 2 && waited < 5000; ) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            waited += 50;
+          }
+
+          // WebSocket and WebSocketStream both reached the blocked host.
+          expect(sinkTraffic).toEqual(['tcp connection', 'tcp connection']);
+        } finally {
+          await context.close();
+        }
       });
     });
   });
