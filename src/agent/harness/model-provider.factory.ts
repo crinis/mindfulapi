@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import type { LanguageModel } from 'ai';
@@ -80,7 +81,11 @@ function settingNames(skill?: string): ModelSettingNames {
  */
 @Injectable()
 export class ModelProviderFactory {
-  /** Built models cached per resolved config (provider|model|baseUrl). */
+  /**
+   * Built models cached per resolved config: provider, model, base URL and
+   * API key. A built model carries its key, so skills that share a model but
+   * not a key must not share the instance.
+   */
   private readonly cache = new Map<string, LanguageModel>();
 
   constructor(
@@ -181,7 +186,12 @@ export class ModelProviderFactory {
   async getModel(skill?: string): Promise<LanguageModel> {
     const { provider, model, apiKey, baseUrl } =
       this.resolveUsableModelConfig(skill);
-    const cacheKey = `${provider}|${model}|${baseUrl ?? ''}`;
+    // The key enters the cache key only as a digest, so the map's keys never
+    // hold the secret itself.
+    const keyDigest = apiKey
+      ? createHash('sha256').update(apiKey).digest('hex')
+      : '';
+    const cacheKey = `${provider}|${model}|${baseUrl ?? ''}|${keyDigest}`;
     const existing = this.cache.get(cacheKey);
     if (existing) {
       return existing;

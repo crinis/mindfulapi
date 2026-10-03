@@ -19,6 +19,63 @@ const settings = (overrides: Partial<AgentSettings>): AgentSettings => ({
 const makeFactory = (overrides: Partial<AgentSettings>): ModelProviderFactory =>
   new ModelProviderFactory(settings(overrides));
 
+/** A per-skill override that sets only the given fields. */
+const override = (
+  fields: Partial<AgentSettings['skillModels'][string]>,
+): AgentSettings['skillModels'][string] => ({
+  provider: null,
+  model: null,
+  apiKey: null,
+  baseUrl: null,
+  reasoningEffort: null,
+  ...fields,
+});
+
+/** The request a real SDK model would send, captured by a stubbed fetch. */
+interface SentRequest {
+  url: string;
+  authorization: string | null;
+}
+
+/**
+ * Lets a model built by the real provider package send one request and
+ * captures it. The SDK reads `globalThis.fetch` per call, so the stub answers
+ * every request and nothing leaves the process.
+ */
+async function requestSentBy(model: unknown): Promise<SentRequest> {
+  const sent: SentRequest[] = [];
+  const fetchSpy = jest
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation((input, init) => {
+      sent.push({
+        url: input instanceof Request ? input.url : String(input),
+        authorization: new Headers(init?.headers).get('authorization'),
+      });
+      return Promise.resolve(new Response('{}', { status: 400 }));
+    });
+  try {
+    await (model as { doGenerate(options: unknown): Promise<unknown> })
+      .doGenerate({
+        prompt: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+      })
+      .catch(() => undefined);
+  } finally {
+    fetchSpy.mockRestore();
+  }
+  expect(sent).toHaveLength(1);
+  return sent[0];
+}
+
+/** Lets the mocked `@ai-sdk/openai` build real models. */
+const useRealOpenAI = (): void => {
+  const actual =
+    jest.requireActual<typeof import('@ai-sdk/openai')>('@ai-sdk/openai');
+  createOpenAIMock.mockImplementation(actual.createOpenAI);
+};
+
+/** Never reached (fetch is stubbed); keeps a broken stub off the real API. */
+const UNREACHABLE_BASE_URL = 'http://127.0.0.1:9/v1';
+
 describe('ModelProviderFactory.getModel', () => {
   beforeEach(() => createOpenAIMock.mockReset());
 
@@ -69,6 +126,29 @@ describe('ModelProviderFactory.getModel', () => {
     expect(first).toBe(model);
     expect(second).toBe(model);
     expect(createOpenAIMock).toHaveBeenCalledTimes(1); // cached
+  });
+
+  it('builds a separate model per API key when skills share a model', async () => {
+    useRealOpenAI();
+    const factory = makeFactory({
+      provider: 'openai',
+      model: 'shared-model',
+      apiKey: 'sk-global',
+      baseUrl: UNREACHABLE_BASE_URL,
+      skillModels: {
+        link_purpose: override({ apiKey: 'sk-link' }),
+        page_title: override({ apiKey: 'sk-title' }),
+      },
+    });
+
+    const link = await factory.getModel('link_purpose');
+    const title = await factory.getModel('page_title');
+
+    expect(link).not.toBe(title);
+    expect((await requestSentBy(link)).authorization).toBe('Bearer sk-link');
+    expect((await requestSentBy(title)).authorization).toBe('Bearer sk-title');
+    // Skills with the same key still share one model.
+    expect(await factory.getModel('link_purpose')).toBe(link);
   });
 
   it('applies a per-skill model override merged over the defaults', () => {
