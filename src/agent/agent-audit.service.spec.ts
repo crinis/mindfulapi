@@ -415,6 +415,28 @@ describe('AgentAuditService.evaluate', () => {
     expect(evaluatedAfterRejection).toBe(0);
   });
 
+  it('does not start a unit once another worker failed during its check', async () => {
+    const { service } = makeService({ concurrency: 2 });
+    const evaluate = jest.fn().mockResolvedValue([]);
+    const skill = {
+      id: AgentSkill.IMAGE_ALT_TEXT,
+      evaluate,
+    } as unknown as AuditSkill;
+    const units = Array.from({ length: 4 }, () => ({ skill, evidence }));
+    // The first worker's check is slow; the second one's fails meanwhile.
+    let checks = 0;
+    const isCanceled = (): Promise<boolean> =>
+      ++checks === 1
+        ? new Promise((resolve) => setTimeout(() => resolve(false), 20))
+        : Promise.reject(new Error('SQLITE_BUSY: database is locked'));
+
+    await expect(
+      service.evaluate({ id: 1 } as Scan, units, isCanceled),
+    ).rejects.toThrow('SQLITE_BUSY');
+
+    expect(evaluate).not.toHaveBeenCalled();
+  });
+
   it('stops evaluating once cancellation is observed', async () => {
     const { service, findingRepository } = makeService({ concurrency: 1 });
     const evaluate = jest.fn().mockResolvedValue([problemDraft()]);

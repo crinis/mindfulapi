@@ -281,6 +281,8 @@ export class AgentAuditService {
             stopped = true;
             return;
           }
+          // Another worker may have failed during the check.
+          if (stopped) return;
           await evaluateUnit(units[i]);
         }
       } catch (error) {
