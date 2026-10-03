@@ -61,7 +61,11 @@ export class CrawlOptionsDto {
     description:
       'URL discovery strategy. `same_hostname` restricts to the seed host, ' +
       '`same_domain` allows subdomains, `same_origin` also matches protocol, ' +
-      '`all` follows any link.',
+      '`all` follows any link. The scope is set by each seed: when a seed ' +
+      'redirects within its own site (for example http to https, or ' +
+      'example.com to www.example.com) its landing URL sets the scope instead. ' +
+      'A page that redirects outside the scope is skipped. A page reached ' +
+      'through several redirecting URLs is scanned once.',
   })
   @IsOptional()
   @IsEnum(CrawlStrategy)

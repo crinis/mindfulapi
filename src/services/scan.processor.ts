@@ -32,6 +32,10 @@ import {
   normalizeHttpUrl,
 } from '../utils/url-normalization.util';
 import { DEFAULT_CRAWL_OPTIONS } from '../constants/crawl-options.constants';
+import {
+  isWithinCrawlScope,
+  resolveSeedScope,
+} from '../utils/crawl-scope.util';
 import { scanConfig } from '../config/configuration';
 import { CrawlStrategy } from '../enums/crawl-strategy.enum';
 import { truncate } from '../utils/truncate.util';
@@ -428,6 +432,11 @@ export class ScanProcessor extends WorkerHost {
    * browser entirely through {@link BrowserService}. Links are extracted from
    * each loaded page and passed to Crawlee's native `enqueueLinks` utility,
    * which applies the strategy and glob filters before adding them to the queue.
+   *
+   * The strategy is applied against each seed's scope (the seed URL, or its
+   * landing URL when it redirects within its own site), not against the URL a
+   * page redirected to. A page whose final URL leaves that scope, or that was
+   * already scanned under another URL, is skipped.
    */
   private async performCrawl(
     scan: Scan,
@@ -437,15 +446,15 @@ export class ScanProcessor extends WorkerHost {
     const seedUrls = this.resolveScanTargets(scan);
     const maxPages = scan.crawlMaxPages ?? DEFAULT_CRAWL_OPTIONS.maxPages;
     const maxDepth = scan.crawlMaxDepth ?? DEFAULT_CRAWL_OPTIONS.maxDepth;
-    const strategy =
-      CRAWL_STRATEGY_TO_ENQUEUE[
-        scan.crawlStrategy ?? DEFAULT_CRAWL_OPTIONS.strategy
-      ];
+    const crawlStrategy = scan.crawlStrategy ?? DEFAULT_CRAWL_OPTIONS.strategy;
+    const strategy = CRAWL_STRATEGY_TO_ENQUEUE[crawlStrategy];
     const globs = scan.crawlGlobs || [];
     const excludeGlobs = scan.crawlExcludeGlobs || [];
     const concurrency = this.config.crawlConcurrency;
 
     const seen = new Set(seedUrls);
+    /** Normalized final URLs already analysed, so redirect aliases scan once. */
+    const scannedFinalUrls = new Set<string>();
     const crawlConfig = new Configuration({
       storageClient: new MemoryStorage({ persistStorage: false }),
     });
@@ -496,23 +505,64 @@ export class ScanProcessor extends WorkerHost {
             return;
           }
           const page = await context.newPage();
+          // Links are scoped by the crawl's seed, never by wherever a page
+          // redirected to; children inherit the scope through userData.
+          let scopeUrl =
+            typeof request.userData.scopeUrl === 'string'
+              ? request.userData.scopeUrl
+              : request.url;
           try {
             // Scan phase — failures here count as page failures.
-            let discoverLinks = true;
+            let discoverLinks = false;
             try {
-              const { finalUrl, issues } = await this.scanner.scanPage(
+              const { finalUrl } = await this.scanner.openPage(
                 page,
                 request.url,
-                scanOptions,
               );
-              await this.commitScannedPage(
-                scan.id,
-                agent,
-                page,
-                finalUrl,
-                issues,
-              );
-              progress.pagesScanned += 1;
+              if (depth === 0) {
+                // apex → www or http → https keeps the crawl on the seed's
+                // site; a redirect to another site does not move it there.
+                scopeUrl = resolveSeedScope(request.url, finalUrl);
+              }
+              const finalKey = normalizeHttpUrl(finalUrl) ?? finalUrl;
+
+              if (!isWithinCrawlScope(finalUrl, scopeUrl, crawlStrategy)) {
+                if (depth === 0) {
+                  // Most likely a wrong seed URL — surface it as a failure.
+                  progress.pagesFailed += 1;
+                  this.logger.warn(
+                    `Seed ${request.url} in scan ${scan.id} redirected outside the crawl scope to ${finalUrl}`,
+                  );
+                } else {
+                  // Like a link the strategy filters out: not a crawl page.
+                  progress.pagesDiscovered -= 1;
+                  this.logger.debug(
+                    `Skipped ${request.url} in scan ${scan.id}: redirected outside the crawl scope to ${finalUrl}`,
+                  );
+                }
+              } else if (scannedFinalUrls.has(finalKey)) {
+                // Another URL already redirected to this page.
+                progress.pagesDiscovered -= 1;
+                this.logger.debug(
+                  `Skipped ${request.url} in scan ${scan.id}: already scanned as ${finalKey}`,
+                );
+              } else {
+                scannedFinalUrls.add(finalKey);
+                const { issues } = await this.scanner.analyzeLoadedPage(
+                  page,
+                  scanOptions,
+                  finalUrl,
+                );
+                await this.commitScannedPage(
+                  scan.id,
+                  agent,
+                  page,
+                  finalUrl,
+                  issues,
+                );
+                progress.pagesScanned += 1;
+                discoverLinks = true;
+              }
             } catch (error) {
               progress.pagesFailed += 1;
               // A rejected page (an HTTP error page, or one that reached a
@@ -545,7 +595,8 @@ export class ScanProcessor extends WorkerHost {
               if (hrefs.length > 0) {
                 await enqueueLinks({
                   urls: hrefs,
-                  baseUrl: page.url(),
+                  baseUrl: scopeUrl,
+                  userData: { scopeUrl },
                   strategy,
                   globs: globs.length ? globs : undefined,
                   exclude: excludeGlobs.length ? excludeGlobs : undefined,

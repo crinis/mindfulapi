@@ -16,6 +16,7 @@ import { Issue } from '../src/entities/issue.entity';
 import { AgentFinding } from '../src/entities/agent-finding.entity';
 import { ScanMode } from '../src/enums/scan-mode.enum';
 import { ScanStatus } from '../src/enums/scan-status.enum';
+import { CrawlStrategy } from '../src/enums/crawl-strategy.enum';
 import { BrowserService } from '../src/services/browser.service';
 import {
   AxeAccessibilityScanner,
@@ -169,6 +170,13 @@ describe('Scan target security (real browser)', () => {
         '/not-found': (_req, res) => violatingPage(res, 404, 'Missing page'),
         '/server-error': (_req, res) => violatingPage(res, 500, 'Broken page'),
         '/to-internal': redirectTo(() => internalUrl('/secret')),
+        '/alias-a': redirectTo(() => siteUrl('/about.html')),
+        '/alias-b': redirectTo(() => siteUrl('/about.html')),
+        '/crawl-start': htmlPage(
+          'Crawl start',
+          '<nav><a href="/to-internal">Partner</a> <a href="/alias-a">About</a>' +
+            ' <a href="/alias-b">About us</a></nav>',
+        ),
         '/r/frame': redirectTo(() => internalUrl('/frame')),
         '/r/script': redirectTo(() => internalUrl('/evil.js')),
         // Holds back DOMContentLoaded so an iframe's redirect resolves first.
@@ -413,6 +421,33 @@ describe('Scan target security (real browser)', () => {
       } finally {
         await context.close();
       }
+    });
+  });
+
+  describe('crawl scope across redirects', () => {
+    it('neither follows a link off the seed host nor scans a redirect target twice', async () => {
+      // Both hosts are reachable; only the crawl scope keeps the crawl home.
+      const { processor } = buildProcessor({ allowPrivateTargets: true });
+
+      const scan = await runScan(processor, {
+        mode: ScanMode.CRAWL,
+        targets: [siteUrl('/crawl-start')],
+        crawlMaxPages: 10,
+        crawlMaxDepth: 1,
+        crawlStrategy: CrawlStrategy.SameHostname,
+      });
+
+      expect(scan.status).toBe(ScanStatus.COMPLETED);
+      const issuePages = new Set(scan.issues.map((issue) => issue.pageUrl));
+      expect([...issuePages]).toEqual([siteUrl('/about.html')]);
+      const aboutButtonIssues = scan.issues.filter(
+        (issue) => issue.ruleId === 'button-name',
+      );
+      expect(aboutButtonIssues).toHaveLength(1);
+      // Seed + about; the off-host link and the second alias are no pages.
+      expect(scan.pagesDiscovered).toBe(2);
+      expect(scan.pagesScanned).toBe(2);
+      expect(scan.pagesFailed).toBe(0);
     });
   });
 });

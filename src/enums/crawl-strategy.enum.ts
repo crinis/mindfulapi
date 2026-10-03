@@ -1,5 +1,7 @@
 /**
  * URL-matching strategy passed to Crawlee's `enqueueLinks` during crawl discovery.
+ * It is applied against the crawl scope of the page's seed (see
+ * `resolveSeedScope`), not against the URL a page redirected to.
  *
  * Wire values are snake_case for consistency with the rest of the API (e.g.
  * {@link ScanMode}). They are mapped to Crawlee's kebab-case
@@ -10,7 +12,7 @@ export enum CrawlStrategy {
   /** Follow all discovered links regardless of host or protocol. */
   All = 'all',
   /**
-   * Only follow links on the same hostname as the page being crawled.
+   * Only follow links on the same hostname as the crawl seed.
    * For example, `https://docs.example.com` and `https://example.com` are
    * treated as different hosts.
    */

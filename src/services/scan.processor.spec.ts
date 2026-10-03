@@ -84,6 +84,79 @@ const makeScan = (overrides: Partial<Scan> = {}): Scan => ({
   ...overrides,
 });
 
+/** A request the simulated crawler handed to the processor. */
+interface SimulatedRequest {
+  url: string;
+  uniqueKey: string;
+  userData: Record<string, unknown>;
+}
+
+/**
+ * Drives the processor's requestHandler like Crawlee's BasicCrawler: a FIFO
+ * queue seeded with `seeds` and an enqueueLinks that, like Crawlee, applies
+ * `userData`, filters by strategy against `baseUrl` (simplified: hostname for
+ * same-hostname) and by globs, then calls transformRequestFunction.
+ */
+function simulateCrawl(seeds: string[]) {
+  const handled: SimulatedRequest[] = [];
+  const enqueueCalls: Array<{ baseUrl?: string; urls: string[] }> = [];
+
+  const run = async ({
+    requestHandler,
+  }: {
+    requestHandler: (context: any) => Promise<void>;
+  }) => {
+    const pending: SimulatedRequest[] = seeds.map((url) => ({
+      url,
+      uniqueKey: url,
+      userData: { depth: 0 },
+    }));
+
+    while (pending.length > 0) {
+      const request = pending.shift()!;
+      handled.push(request);
+      const enqueueLinks = (options: any) => {
+        enqueueCalls.push({ baseUrl: options.baseUrl, urls: options.urls });
+        for (const href of options.urls || []) {
+          if (
+            options.strategy === 'same-hostname' &&
+            new URL(href).hostname !==
+              new URL(options.baseUrl ?? request.url).hostname
+          ) {
+            continue;
+          }
+          if (
+            options.globs &&
+            !options.globs.some((g: string) =>
+              href.startsWith(g.replace('/**', '')),
+            )
+          ) {
+            continue;
+          }
+          if (
+            options.exclude &&
+            options.exclude.some((g: string) =>
+              href.includes(g.replace('**/', '').replace('/**', '')),
+            )
+          ) {
+            continue;
+          }
+          const transformed = options.transformRequestFunction({
+            url: href,
+            userData: { ...(options.userData ?? {}) },
+          });
+          if (transformed) {
+            pending.push(transformed);
+          }
+        }
+      };
+      await requestHandler({ request, enqueueLinks });
+    }
+  };
+
+  return { run, handled, enqueueCalls };
+}
+
 describe('ScanProcessor', () => {
   let processor: ScanProcessor;
   let mockScanRepo: MockRepo;
@@ -97,6 +170,8 @@ describe('ScanProcessor', () => {
   let mockScanner: {
     createContext: jest.Mock;
     scanPage: jest.Mock;
+    openPage: jest.Mock;
+    analyzeLoadedPage: jest.Mock;
     assertPageAllowed: jest.Mock;
   };
   let mockBasicAuthCrypto: jest.Mocked<
@@ -163,7 +238,20 @@ describe('ScanProcessor', () => {
 
     mockScanner = {
       createContext: jest.fn().mockResolvedValue(mockContext),
-      scanPage: jest.fn(),
+      // Mirrors the real scanner: scanPage = openPage + analyzeLoadedPage.
+      scanPage: jest.fn(
+        async (page: unknown, url: string, options: unknown) => {
+          const { finalUrl } = await mockScanner.openPage(page, url);
+          return mockScanner.analyzeLoadedPage(page, options, finalUrl);
+        },
+      ),
+      openPage: jest.fn((_page: unknown, url: string) =>
+        Promise.resolve({ finalUrl: url, status: 200 }),
+      ),
+      analyzeLoadedPage: jest.fn(
+        (_page: unknown, _options: unknown, pageUrl: string) =>
+          Promise.resolve({ finalUrl: pageUrl, issues: [] }),
+      ),
       assertPageAllowed: jest.fn().mockResolvedValue(undefined),
     };
     mockBasicAuthCrypto = {
@@ -308,7 +396,6 @@ describe('ScanProcessor', () => {
       }),
     );
 
-    // Return different pages per newPage() call so we can track URLs
     const pageHrefs = [
       'https://example.com/about',
       'https://example.com/admin',
@@ -322,8 +409,8 @@ describe('ScanProcessor', () => {
       }),
     );
 
-    mockScanner.scanPage.mockImplementation(
-      (_page: unknown, pageUrl: string) => ({
+    mockScanner.analyzeLoadedPage.mockImplementation(
+      (_page: unknown, _options: unknown, pageUrl: string) => ({
         finalUrl: pageUrl,
         issues: pageUrl.includes('/about')
           ? [
@@ -338,62 +425,7 @@ describe('ScanProcessor', () => {
       }),
     );
 
-    mockCrawlerRunHandler = async ({ requestHandler }) => {
-      const pending: any[] = [
-        {
-          url: 'https://example.com/',
-          uniqueKey: 'https://example.com/',
-          userData: { depth: 0 },
-        },
-      ];
-
-      const processRequest = async (request: any) => {
-        const enqueueLinks = (options: any) => {
-          for (const href of options.urls || []) {
-            // Simulate Crawlee strategy filtering
-            if (
-              options.strategy === 'same-hostname' &&
-              new URL(href).hostname !==
-                new URL(options.baseUrl ?? request.url).hostname
-            ) {
-              continue;
-            }
-            // Simulate Crawlee glob filtering (simplified: check if url includes glob prefix)
-            if (
-              options.globs &&
-              !options.globs.some((g: string) =>
-                href.startsWith(g.replace('/**', '')),
-              )
-            ) {
-              continue;
-            }
-            if (
-              options.exclude &&
-              options.exclude.some((g: string) =>
-                href.includes(g.replace('**/', '').replace('/**', '')),
-              )
-            ) {
-              continue;
-            }
-
-            const transformed = options.transformRequestFunction({
-              url: href,
-              userData: {},
-            });
-            if (transformed) {
-              pending.push({ ...transformed, loadedUrl: transformed.url });
-            }
-          }
-        };
-
-        await requestHandler({ request, enqueueLinks });
-      };
-
-      while (pending.length > 0) {
-        const next = pending.shift();
-        await processRequest(next);
-      }
-    };
+    mockCrawlerRunHandler = simulateCrawl(['https://example.com/']).run;
 
     await processor.process({ data: { scanId: 1 } } as any);
 
@@ -407,7 +439,7 @@ describe('ScanProcessor', () => {
         userData: { depth: 0 },
       },
     ]);
-    expect(mockScanner.scanPage).toHaveBeenCalledTimes(2);
+    expect(mockScanner.analyzeLoadedPage).toHaveBeenCalledTimes(2);
     expect(mockIssueRepo.save).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
@@ -423,6 +455,201 @@ describe('ScanProcessor', () => {
       pagesDiscovered: 2,
       pagesScanned: 2,
       pagesFailed: 0,
+    });
+  });
+
+  describe('crawl scope across redirects', () => {
+    /**
+     * Pages whose URL follows openPage: `redirects` maps a requested URL to
+     * its final URL, `links` maps a final URL to the hrefs found on it.
+     */
+    const serveSite = (
+      redirects: Record<string, string>,
+      links: Record<string, string[]>,
+    ) => {
+      mockContext.newPage.mockImplementation(() => {
+        const page = {
+          currentUrl: 'about:blank',
+          url: jest.fn(() => page.currentUrl),
+          evaluate: jest.fn(() =>
+            Promise.resolve(links[page.currentUrl] ?? []),
+          ),
+          close: jest.fn().mockResolvedValue(undefined),
+        };
+        return Promise.resolve(page);
+      });
+      mockScanner.openPage.mockImplementation(
+        (page: { currentUrl: string }, url: string) => {
+          page.currentUrl = redirects[url] ?? url;
+          return Promise.resolve({ finalUrl: page.currentUrl, status: 200 });
+        },
+      );
+      mockScanner.analyzeLoadedPage.mockImplementation(
+        (_page: unknown, _options: unknown, pageUrl: string) =>
+          Promise.resolve({
+            finalUrl: pageUrl,
+            issues: [
+              {
+                ruleId: 'image-alt',
+                description: 'Images must have alternative text',
+                impact: IssueImpact.CRITICAL,
+                pageUrl,
+              },
+            ],
+          }),
+      );
+    };
+
+    const crawlScan = (overrides: Partial<Scan> = {}) =>
+      makeScan({
+        mode: ScanMode.CRAWL,
+        targets: ['https://example.com'],
+        crawlMaxPages: 10,
+        crawlMaxDepth: 3,
+        crawlStrategy: CrawlStrategy.SameHostname,
+        ...overrides,
+      });
+
+    const storedPageUrls = () =>
+      (mockIssueRepo.save as jest.Mock).mock.calls.flatMap(([entities]) =>
+        entities.map((entity: { pageUrl: string }) => entity.pageUrl),
+      );
+
+    it('skips a page that redirects off the crawl scope and does not crawl from it', async () => {
+      mockScanQb.getOne.mockResolvedValue(crawlScan());
+      serveSite(
+        { 'https://example.com/out': 'https://other.example.net/landing' },
+        {
+          'https://example.com/': ['https://example.com/out'],
+          'https://other.example.net/landing': [
+            'https://other.example.net/next',
+          ],
+        },
+      );
+      const crawl = simulateCrawl(['https://example.com/']);
+      mockCrawlerRunHandler = crawl.run;
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(crawl.handled.map((r) => r.url)).toEqual([
+        'https://example.com/',
+        'https://example.com/out',
+      ]);
+      expect(storedPageUrls()).toEqual(['https://example.com/']);
+      expect(mockScanner.analyzeLoadedPage).toHaveBeenCalledTimes(1);
+      expect(crawl.enqueueCalls).toEqual([
+        { baseUrl: 'https://example.com/', urls: ['https://example.com/out'] },
+      ]);
+      // The redirect alias is not a page of this crawl.
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+        status: ScanStatus.COMPLETED,
+        pagesDiscovered: 1,
+        pagesScanned: 1,
+        pagesFailed: 0,
+      });
+    });
+
+    it('scopes a seed by its same-site landing URL (apex → www)', async () => {
+      mockScanQb.getOne.mockResolvedValue(crawlScan());
+      serveSite(
+        { 'https://example.com/': 'https://www.example.com/' },
+        {
+          'https://www.example.com/': [
+            'https://www.example.com/about',
+            'https://shop.example.com/',
+          ],
+        },
+      );
+      const crawl = simulateCrawl(['https://example.com/']);
+      mockCrawlerRunHandler = crawl.run;
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(crawl.enqueueCalls[0].baseUrl).toBe('https://www.example.com/');
+      expect(crawl.handled[1]).toEqual(
+        expect.objectContaining({
+          url: 'https://www.example.com/about',
+          userData: expect.objectContaining({
+            depth: 1,
+            scopeUrl: 'https://www.example.com/',
+          }),
+        }),
+      );
+      expect(storedPageUrls()).toEqual([
+        'https://www.example.com/',
+        'https://www.example.com/about',
+      ]);
+    });
+
+    it('fails a seed that redirects to another site', async () => {
+      mockScanQb.getOne.mockResolvedValue(crawlScan());
+      serveSite(
+        { 'https://example.com/': 'https://elsewhere.org/' },
+        { 'https://elsewhere.org/': ['https://elsewhere.org/more'] },
+      );
+      const crawl = simulateCrawl(['https://example.com/']);
+      mockCrawlerRunHandler = crawl.run;
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(mockScanner.analyzeLoadedPage).not.toHaveBeenCalled();
+      expect(mockIssueRepo.save).not.toHaveBeenCalled();
+      expect(crawl.enqueueCalls).toEqual([]);
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+        status: ScanStatus.COMPLETED,
+        pagesDiscovered: 1,
+        pagesScanned: 0,
+        pagesFailed: 1,
+      });
+    });
+
+    it('scans a page that several URLs redirect to only once', async () => {
+      mockScanQb.getOne.mockResolvedValue(crawlScan());
+      serveSite(
+        {
+          'https://example.com/a': 'https://example.com/target',
+          'https://example.com/b': 'https://example.com/target/',
+        },
+        {
+          'https://example.com/': [
+            'https://example.com/a',
+            'https://example.com/b',
+          ],
+        },
+      );
+      const crawl = simulateCrawl(['https://example.com/']);
+      mockCrawlerRunHandler = crawl.run;
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(storedPageUrls()).toEqual([
+        'https://example.com/',
+        'https://example.com/target',
+      ]);
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+        status: ScanStatus.COMPLETED,
+        pagesDiscovered: 2,
+        pagesScanned: 2,
+        pagesFailed: 0,
+      });
+    });
+
+    it('follows a redirect to another host when the strategy is all', async () => {
+      mockScanQb.getOne.mockResolvedValue(
+        crawlScan({ crawlStrategy: CrawlStrategy.All }),
+      );
+      serveSite(
+        { 'https://example.com/out': 'https://other.example.net/landing' },
+        { 'https://example.com/': ['https://example.com/out'] },
+      );
+      mockCrawlerRunHandler = simulateCrawl(['https://example.com/']).run;
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(storedPageUrls()).toEqual([
+        'https://example.com/',
+        'https://other.example.net/landing',
+      ]);
     });
   });
 
@@ -463,11 +690,6 @@ describe('ScanProcessor', () => {
       close: jest.fn().mockResolvedValue(undefined),
     });
 
-    mockScanner.scanPage.mockResolvedValue({
-      finalUrl: 'https://example.com/',
-      issues: [],
-    });
-
     mockCrawlerRunHandler = async ({ requestHandler }) => {
       await requestHandler({
         request: {
@@ -481,7 +703,7 @@ describe('ScanProcessor', () => {
 
     await processor.process({ data: { scanId: 1 } } as any);
 
-    expect(mockScanner.scanPage).toHaveBeenCalledTimes(1);
+    expect(mockScanner.analyzeLoadedPage).toHaveBeenCalledTimes(1);
     expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
       status: ScanStatus.COMPLETED,
       pagesDiscovered: 1,
@@ -501,7 +723,7 @@ describe('ScanProcessor', () => {
       close: jest.fn().mockResolvedValue(undefined),
     };
     mockContext.newPage.mockResolvedValue(page);
-    mockScanner.scanPage.mockRejectedValue(
+    mockScanner.openPage.mockRejectedValue(
       new PageNavigationError(
         'Navigation to https://example.com/ ended with HTTP 404',
       ),
@@ -635,10 +857,6 @@ describe('ScanProcessor', () => {
       close: jest.fn().mockResolvedValue(undefined),
     };
     mockContext.newPage.mockResolvedValue(page);
-    mockScanner.scanPage.mockResolvedValue({
-      finalUrl: 'https://example.com/',
-      issues: [],
-    });
     // Clean while scanning; a timer-driven request reached a blocked target
     // before link discovery.
     mockScanner.assertPageAllowed
