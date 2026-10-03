@@ -27,7 +27,6 @@ const harnessReturning = (result: unknown): AgentHarnessService =>
       data: result,
       usage: { inputTokens: 120, outputTokens: 20 },
       model: 'gpt-4.1-mini',
-      degraded: false,
     }),
   }) as unknown as AgentHarnessService;
 
@@ -132,19 +131,16 @@ describe('PageTitleSkill.evaluate', () => {
     expect(draft.details).toMatchObject({ verdict: 'not_descriptive' });
   });
 
-  it('treats the degraded fallback as a benign appropriate draft', async () => {
-    // On generation failure the harness returns the skill's SAFE_RESULT
-    // (verdict "appropriate"), which must never surface as a false positive.
-    const drafts = await skill.evaluate(
-      baseEvidence(),
-      harnessReturning({
-        verdict: 'appropriate',
-        confidence: 0,
-        rationale: 'unavailable',
-        suggestedTitle: null,
-      }),
+  it('propagates a failed request instead of reporting the title as fine', async () => {
+    // The unit then counts as failed: no verdict is invented for it.
+    const harness = {
+      evaluateStructured: jest
+        .fn()
+        .mockRejectedValue(new Error('AI_APICallError: quota exceeded')),
+    } as unknown as AgentHarnessService;
+
+    await expect(skill.evaluate(baseEvidence(), harness)).rejects.toThrow(
+      'quota exceeded',
     );
-    expect(drafts).toHaveLength(1);
-    expect(drafts[0].category).toBe('appropriate');
   });
 });

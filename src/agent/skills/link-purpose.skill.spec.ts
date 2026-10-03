@@ -49,7 +49,6 @@ const harnessReturning = (result: unknown): AgentHarnessService =>
       data: result,
       usage: { inputTokens: 90, outputTokens: 30 },
       model: 'gpt-4.1-nano',
-      degraded: false,
     }),
   }) as unknown as AgentHarnessService;
 

@@ -375,7 +375,8 @@ Axe-core is deterministic: it can tell that an image _has_ an `alt` attribute, b
 
 - **Deterministic-first.** A skill judges only _semantics_ that axe cannot check. It never re-reports what axe or an attribute/structure check already settles (see the last column of [Skills](#skills)), so there are no duplicates and no wasted tokens.
 - **Minimal, structured evidence.** Evidence is collected while the page is live and kept small (see [Skills](#skills)).
-- **Forced structured output.** Every request returns a fixed verdict with a confidence score, and each finding records its WCAG success criterion. Low-confidence or unjudgeable cases become `insufficient_evidence` findings flagged for human review. If generation or validation still fails after a retry, the harness also falls back to `insufficient_evidence`, so a scan never breaks and the model never fabricates a verdict.
+- **Forced structured output.** Every request returns a fixed verdict with a confidence score, and each finding records its WCAG success criterion. Low-confidence or unjudgeable cases become `insufficient_evidence` findings flagged for human review.
+- **Failed requests are reported, never hidden.** A work unit whose request fails counts in `aiAudit.tasksFailed` and produces no findings; no verdict is invented for it. Failures include a missing or rejected API key, a quota or rate limit, a network error or timeout, and a model answer that does not match the expected format. The SDK retries a retryable API error once; an invalid answer is not retried. The scan still completes with its axe results. "No AI findings" therefore means "no problems found" only when `tasksFailed` is `0`.
 - **New lifecycle status.** With an AI audit, a scan moves `pending → running` (axe) `→ analyzing` (agents) `→ completed`. Any scan can instead end as `failed` or `canceled`. Clients must tolerate `analyzing`.
 - **Reports.** AI findings also appear in the HTML and PDF reports.
 
@@ -416,8 +417,9 @@ POST /v1/scans
 
 - Omit `skills` to run every skill enabled by `AGENT_SKILLS`, or pass an explicit list for a subset.
 - The request returns a `400` problem if the audit is disabled server-side, the mode is excluded by `AGENT_ALLOWED_SCAN_MODES`, or a skill is not whitelisted.
+- It also returns a `400` problem if a requested skill cannot reach a model: no provider, an unsupported provider, no model, no API key for `openai` or `anthropic`, or no base URL for `openai-compatible`. The problem's `detail` names the settings to fix. An invalid key or an unreachable endpoint is only detected when the requests run, and then counts in `tasksFailed`.
 - Scan responses gain an `aiAudit` summary and an `agentFindings` array; list summaries gain `agentFindingCount`.
-- `aiAudit` holds `status` (`pending`, `running`, `completed`, or `skipped` when nothing was eligible or the scan failed/was canceled first), `requestedSkills`, and task counters.
+- `aiAudit` holds `status` (`pending`, `running`, `completed`, or `skipped` when nothing was eligible or the scan failed/was canceled first), `requestedSkills`, and the task counters `tasksTotal`, `tasksCompleted` and `tasksFailed`. `completed` means the evaluation finished, not that every unit succeeded: units in `tasksFailed` were not checked.
 
 Every `agentFindings` entry has the **same shape regardless of skill**, so clients render them uniformly:
 

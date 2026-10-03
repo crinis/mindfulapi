@@ -1,10 +1,24 @@
+import { MockLanguageModelV4 } from 'ai/test';
 import { AgentAuditService } from './agent-audit.service';
 import { agentConfig } from '../config/configuration';
 import { AgentSkill } from '../enums/agent-skill.enum';
 import { IssueImpact } from '../enums/issue-impact.enum';
 import { Scan } from '../entities/scan.entity';
 import type { SkillRegistry } from './skills/skill-registry';
-import type { AgentHarnessService } from './harness/agent-harness.service';
+import { AgentHarnessService } from './harness/agent-harness.service';
+import { ModelProviderFactory } from './harness/model-provider.factory';
+import {
+  ImageAltTextSkill,
+  type ImageEvidence,
+} from './skills/image-alt-text.skill';
+import {
+  HeadingStructureSkill,
+  type HeadingEvidence,
+} from './skills/heading-structure.skill';
+import {
+  PageTitleSkill,
+  type PageTitleEvidence,
+} from './skills/page-title.skill';
 import type {
   AgentFindingDraft,
   AuditSkill,
@@ -22,7 +36,10 @@ const settings = (overrides: Partial<AgentSettings> = {}): AgentSettings => ({
   ...overrides,
 });
 
-const makeService = (overrides: Partial<AgentSettings> = {}) => {
+const makeService = (
+  overrides: Partial<AgentSettings> = {},
+  harness: AgentHarnessService = {} as AgentHarnessService,
+) => {
   const findingRepository = {
     create: jest.fn((entity: unknown) => entity),
     save: jest.fn().mockResolvedValue(undefined),
@@ -35,7 +52,6 @@ const makeService = (overrides: Partial<AgentSettings> = {}) => {
   };
   const scanRepository = { update: jest.fn().mockResolvedValue(undefined) };
   const registry = { resolve: jest.fn() };
-  const harness = {} as AgentHarnessService;
   const service = new AgentAuditService(
     findingRepository as never,
     scanRepository as never,
@@ -201,5 +217,157 @@ describe('AgentAuditService.evaluate', () => {
 
     expect(evaluate).not.toHaveBeenCalled();
     expect(findingRepository.save).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The real harness and skills, with the provider either unusable or replaced
+ * by the AI SDK's mock model — no request leaves the process.
+ */
+describe('AgentAuditService.evaluate with the real harness', () => {
+  const pageUrl = 'https://example.com';
+  const imageSkill = new ImageAltTextSkill();
+  const titleSkill = new PageTitleSkill();
+  const headingSkill = new HeadingStructureSkill();
+
+  const imageEvidence = (index: number): ImageEvidence => ({
+    auditId: `mfa-${index}`,
+    selector: `main > img:nth-of-type(${index + 1})`,
+    pageUrl,
+    src: `${pageUrl}/photo-${index}.png`,
+    alt: `Photo ${index}`,
+    width: 200,
+    height: 100,
+  });
+  const titleEvidence: PageTitleEvidence = {
+    pageUrl,
+    title: 'Home',
+    headings: [{ level: 1, text: 'Pricing plans' }],
+    metaDescription: null,
+  };
+  const headingEvidence: HeadingEvidence = {
+    pageUrl,
+    pageTitle: 'Pricing',
+    headings: [
+      { id: 'H1', selector: 'main > h1', level: 1, tag: 'h1', text: 'More' },
+    ],
+    fakeHeadingCandidates: [],
+    unheadedSections: [],
+  };
+
+  const usage = {
+    inputTokens: { total: 50, noCache: 50, cacheRead: 0, cacheWrite: 0 },
+    outputTokens: { total: 10, text: 10, reasoning: 0 },
+  };
+  /** A mock model that answers every request with `value` as JSON text. */
+  const answering = (value: unknown): MockLanguageModelV4 =>
+    new MockLanguageModelV4({
+      doGenerate: () =>
+        Promise.resolve({
+          content: [{ type: 'text', text: JSON.stringify(value) }],
+          finishReason: { unified: 'stop', raw: 'stop' },
+          usage,
+          warnings: [],
+        }),
+    });
+  /** A harness whose every request goes to `model`. */
+  const harnessFor = (model: MockLanguageModelV4): AgentHarnessService =>
+    new AgentHarnessService(
+      {
+        getModel: () => Promise.resolve(model),
+        resolveModelConfig: () => ({
+          provider: 'openai',
+          model: 'mock-model-id',
+          apiKey: 'sk-test',
+          baseUrl: null,
+          reasoningEffort: null,
+        }),
+      } as unknown as ModelProviderFactory,
+      settings(),
+    );
+
+  it('counts every unit as failed and stores nothing when the provider cannot be used', async () => {
+    // No API key: every request fails before it is sent.
+    const noKey: Partial<AgentSettings> = {
+      provider: 'openai',
+      model: 'gpt-test',
+      apiKey: null,
+      skillModels: {},
+    };
+    const harness = new AgentHarnessService(
+      new ModelProviderFactory(settings(noKey)),
+      settings(noKey),
+    );
+    const { service, findingRepository, scanRepository } = makeService(
+      noKey,
+      harness,
+    );
+    const units = [
+      { skill: imageSkill, evidence: imageEvidence(0) },
+      { skill: imageSkill, evidence: imageEvidence(1) },
+      { skill: titleSkill, evidence: titleEvidence },
+      { skill: headingSkill, evidence: headingEvidence },
+    ] as unknown as Parameters<AgentAuditService['evaluate']>[1];
+
+    await service.evaluate({ id: 1 } as Scan, units, () =>
+      Promise.resolve(false),
+    );
+
+    expect(findingRepository.save).not.toHaveBeenCalled();
+    expect(scanRepository.update).toHaveBeenLastCalledWith(1, {
+      aiTasksCompleted: 0,
+      aiTasksFailed: units.length,
+    });
+  });
+
+  it('counts a unit whose model answer does not match the schema as failed', async () => {
+    const model = answering({ verdict: 'looks fine to me' });
+    const { service, findingRepository, scanRepository } = makeService(
+      {},
+      harnessFor(model),
+    );
+
+    await service.evaluate(
+      { id: 1 } as Scan,
+      [{ skill: imageSkill, evidence: imageEvidence(0) }],
+      () => Promise.resolve(false),
+    );
+
+    expect(model.doGenerateCalls).toHaveLength(1);
+    expect(findingRepository.save).not.toHaveBeenCalled();
+    expect(scanRepository.update).toHaveBeenLastCalledWith(1, {
+      aiTasksCompleted: 0,
+      aiTasksFailed: 1,
+    });
+  });
+
+  it('stores the verdict of a valid model answer', async () => {
+    const model = answering({
+      verdict: 'redundant',
+      confidence: 0.9,
+      rationale: 'Repeats the caption.',
+      suggestedAlt: null,
+    });
+    const { service, findingRepository, scanRepository } = makeService(
+      {},
+      harnessFor(model),
+    );
+
+    await service.evaluate(
+      { id: 1 } as Scan,
+      [{ skill: imageSkill, evidence: imageEvidence(0) }],
+      () => Promise.resolve(false),
+    );
+
+    expect(findingRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: 'redundant',
+        model: 'mock-model-id',
+      }),
+    );
+    expect(scanRepository.update).toHaveBeenLastCalledWith(1, {
+      aiTasksCompleted: 1,
+      aiTasksFailed: 0,
+    });
   });
 });

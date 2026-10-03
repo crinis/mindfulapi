@@ -76,11 +76,6 @@ export const linkPurposeSchema = z.object({
     .max(MAX_FINDINGS),
 });
 
-type LinkPurposeResult = z.infer<typeof linkPurposeSchema>;
-
-/** Returned when the model fails to produce a valid verdict. */
-const NO_FINDINGS: LinkPurposeResult = { findings: [] };
-
 /** One link in the page's link inventory. */
 export interface LinkDescriptor {
   /**
@@ -160,7 +155,6 @@ export class LinkPurposeSkill implements AuditSkill<LinkEvidence> {
       prompt: buildLinkPrompt(evidence),
       images: [],
       schema: linkPurposeSchema,
-      fallback: NO_FINDINGS,
       skill: this.id,
     });
 

@@ -15,8 +15,9 @@ import { AgentAuditService } from '../agent/agent-audit.service';
 /**
  * Infrastructure module for the optional LLM-agent audit layer: the model
  * harness, the skill registry + skills, and the audit orchestrator. Exports
- * {@link AgentAuditService} for the scan processor and {@link AgentFinding}
- * repository access for the scan service.
+ * {@link AgentAuditService} for the scan processor, and
+ * {@link ModelProviderFactory} and {@link AgentFinding} repository access for
+ * the scan service.
  */
 @Module({
   imports: [TypeOrmModule.forFeature([Scan, AgentFinding])],
@@ -31,6 +32,6 @@ import { AgentAuditService } from '../agent/agent-audit.service';
     PageTitleSkill,
     AgentAuditService,
   ],
-  exports: [AgentAuditService, TypeOrmModule],
+  exports: [AgentAuditService, ModelProviderFactory, TypeOrmModule],
 })
 export class AgentModule {}

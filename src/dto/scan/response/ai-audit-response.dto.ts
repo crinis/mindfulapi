@@ -6,7 +6,8 @@ import { AgentSkill } from '../../../enums/agent-skill.enum';
  * audit was requested; scans that never requested it omit `aiAudit` entirely.
  * - `pending`: requested but the analyzing phase has not started.
  * - `running`: agent evaluation in progress.
- * - `completed`: agent evaluation finished with at least one work unit.
+ * - `completed`: agent evaluation finished with at least one work unit. Some
+ *   or all units may have failed (`tasksFailed`).
  * - `skipped`: nothing eligible to evaluate, or the scan failed/was canceled
  *   before the audit finished.
  */
@@ -38,10 +39,22 @@ export class AiAuditResponseDto {
   tasksTotal: number;
 
   /** Work units evaluated (including no-issue results). */
-  @ApiProperty({ type: 'integer', example: 12, minimum: 0 })
+  @ApiProperty({
+    type: 'integer',
+    example: 12,
+    minimum: 0,
+    description:
+      'Work units the model evaluated, including those with no problem found.',
+  })
   tasksCompleted: number;
 
-  /** Work units that failed to evaluate. */
-  @ApiProperty({ type: 'integer', example: 0, minimum: 0 })
+  /** Work units that could not be evaluated. */
+  @ApiProperty({
+    type: 'integer',
+    example: 0,
+    minimum: 0,
+    description:
+      'Work units that could not be evaluated: a provider, network or configuration error, a timeout, or a model answer that did not match the expected format. A failed unit produces no findings, so the elements and pages it covers were not checked by its skill. When it equals tasksTotal, no AI check ran.',
+  })
   tasksFailed: number;
 }

@@ -1542,12 +1542,14 @@
           "tasksCompleted": {
             "type": "integer",
             "example": 12,
-            "minimum": 0
+            "minimum": 0,
+            "description": "Work units the model evaluated, including those with no problem found."
           },
           "tasksFailed": {
             "type": "integer",
             "example": 0,
-            "minimum": 0
+            "minimum": 0,
+            "description": "Work units that could not be evaluated: a provider, network or configuration error, a timeout, or a model answer that did not match the expected format. A failed unit produces no findings, so the elements and pages it covers were not checked by its skill. When it equals tasksTotal, no AI check ran."
           }
         },
         "required": [

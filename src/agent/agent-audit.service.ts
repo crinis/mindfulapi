@@ -148,8 +148,9 @@ export class AgentAuditService {
 
   /**
    * Evaluates all collected units: fans out structured requests with a
-   * concurrency cap, persists problem findings, and records task counters.
-   * Stops early when cancellation is observed. Token usage is summed only for
+   * concurrency cap, persists problem findings, and records task counters. A
+   * unit whose request fails counts as failed and stores nothing. Stops early
+   * when cancellation is observed. Token usage is summed only for
    * the log line — the unit caps and per-request output-token cap already bound
    * total spend.
    */
@@ -198,9 +199,10 @@ export class AgentAuditService {
           }
           completed++;
         } catch (error) {
+          // Nothing is stored for the unit: it was not checked.
           failed++;
           this.logger.warn(
-            `Skill ${unit.skill.id} evaluate failed: ${String(error)}`,
+            `Skill ${unit.skill.id} could not evaluate a unit on ${unit.evidence.pageUrl}: ${String(error)}`,
           );
         }
       }

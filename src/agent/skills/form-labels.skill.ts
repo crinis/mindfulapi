@@ -74,11 +74,6 @@ export const formLabelsSchema = z.object({
     .max(MAX_FINDINGS),
 });
 
-type FormLabelsResult = z.infer<typeof formLabelsSchema>;
-
-/** Returned when the model fails to produce a valid verdict. */
-const NO_FINDINGS: FormLabelsResult = { findings: [] };
-
 /** How a control's accessible name was derived. */
 type NameSource =
   | 'label'
@@ -170,7 +165,6 @@ export class FormLabelsSkill implements AuditSkill<FormEvidence> {
       prompt: buildFormPrompt(evidence),
       images: [],
       schema: formLabelsSchema,
-      fallback: NO_FINDINGS,
       skill: this.id,
     });
 

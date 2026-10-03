@@ -15,6 +15,7 @@ import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 import { AgentFinding } from '../entities/agent-finding.entity';
 import { agentConfig } from '../config/configuration';
+import { ModelProviderFactory } from '../agent/harness/model-provider.factory';
 import { AgentSkill } from '../enums/agent-skill.enum';
 import { AiAuditStatus } from '../dto/scan/response/ai-audit-response.dto';
 import { ScanStatus } from '../enums/scan-status.enum';
@@ -178,6 +179,7 @@ describe('ScanService', () => {
             allowedScanModes: [ScanMode.SINGLE_URL],
           },
         },
+        ModelProviderFactory,
       ],
     }).compile();
 
@@ -304,16 +306,158 @@ describe('ScanService', () => {
     });
 
     describe('AI audit gating', () => {
-      const buildService = (agentOverrides: Record<string, unknown>) =>
-        new ScanService(
+      /** A usable provider: OpenAI with a key, models from its profile. */
+      const usableProvider = {
+        provider: 'openai',
+        model: null,
+        apiKey: 'sk-test',
+        baseUrl: null,
+        skillModels: {},
+      };
+      const buildService = (agentOverrides: Record<string, unknown>) => {
+        const settings = { ...agentConfig(), ...agentOverrides };
+        return new ScanService(
           mockRepo as never,
           mockIssueRepo as never,
           mockAgentFindingRepo as never,
           mockQueue as never,
           mockBasicAuthCrypto as never,
           mockUrlPolicy as never,
-          { ...agentConfig(), ...agentOverrides },
+          settings,
+          new ModelProviderFactory(settings),
         );
+      };
+      const singleUrlAudit = (skills: AgentSkill[]) => ({
+        mode: ScanMode.SINGLE_URL as const,
+        url: 'https://example.com',
+        aiAudit: { skills },
+      });
+      /** The rejection of a create request, for message assertions. */
+      const rejectionOf = async (
+        promise: Promise<unknown>,
+      ): Promise<BadRequestException> => {
+        try {
+          await promise;
+        } catch (error) {
+          expect(error).toBeInstanceOf(BadRequestException);
+          return error as BadRequestException;
+        }
+        throw new Error('expected the request to be rejected');
+      };
+
+      describe('when a requested skill cannot reach a model', () => {
+        afterEach(() => {
+          expect(mockRepo.save).not.toHaveBeenCalled();
+          expect(mockQueue.addScanJob).not.toHaveBeenCalled();
+        });
+
+        it('names AGENT_PROVIDER when no provider is configured', async () => {
+          const service = buildService({
+            enabled: true,
+            allowedSkills: ['image_alt_text'],
+            ...usableProvider,
+            provider: null,
+          });
+
+          const error = await rejectionOf(
+            service.create(singleUrlAudit([AgentSkill.IMAGE_ALT_TEXT])),
+          );
+
+          expect(error.message).toMatch(/AGENT_PROVIDER/);
+          expect(error.message).toMatch(/image_alt_text/);
+        });
+
+        it('names an unsupported provider', async () => {
+          const service = buildService({
+            enabled: true,
+            allowedSkills: ['image_alt_text'],
+            ...usableProvider,
+            provider: 'gemini',
+          });
+
+          const error = await rejectionOf(
+            service.create(singleUrlAudit([AgentSkill.IMAGE_ALT_TEXT])),
+          );
+
+          expect(error.message).toMatch(/AGENT_PROVIDER/);
+          expect(error.message).toMatch(/gemini/);
+        });
+
+        it('names AGENT_MODEL when the provider has no model profile', async () => {
+          const service = buildService({
+            enabled: true,
+            allowedSkills: ['page_title'],
+            ...usableProvider,
+            provider: 'anthropic',
+          });
+
+          const error = await rejectionOf(
+            service.create(singleUrlAudit([AgentSkill.PAGE_TITLE])),
+          );
+
+          expect(error.message).toMatch(/AGENT_MODEL/);
+          expect(error.message).toMatch(/AGENT_SKILL_PAGE_TITLE_MODEL/);
+        });
+
+        it('names the API key settings when the provider needs a key', async () => {
+          const service = buildService({
+            enabled: true,
+            allowedSkills: ['image_alt_text'],
+            ...usableProvider,
+            apiKey: null,
+          });
+
+          const error = await rejectionOf(
+            service.create(singleUrlAudit([AgentSkill.IMAGE_ALT_TEXT])),
+          );
+
+          expect(error.message).toMatch(/AGENT_API_KEY/);
+          expect(error.message).toMatch(/AGENT_SKILL_IMAGE_ALT_TEXT_API_KEY/);
+        });
+
+        it('names AGENT_BASE_URL for openai-compatible without echoing the key', async () => {
+          const service = buildService({
+            enabled: true,
+            allowedSkills: ['link_purpose'],
+            ...usableProvider,
+            provider: 'openai-compatible',
+            model: 'llama',
+            apiKey: 'sk-very-secret-value',
+          });
+
+          const error = await rejectionOf(
+            service.create(singleUrlAudit([AgentSkill.LINK_PURPOSE])),
+          );
+
+          expect(error.message).toMatch(/AGENT_BASE_URL/);
+          expect(error.message).not.toContain('sk-very-secret-value');
+        });
+      });
+
+      it('checks only the skills the scan requests', async () => {
+        const service = buildService({
+          enabled: true,
+          allowedSkills: ['image_alt_text', 'page_title'],
+          ...usableProvider,
+          skillModels: {
+            // Broken, but not requested below.
+            image_alt_text: {
+              provider: 'anthropic',
+              model: null,
+              apiKey: null,
+              baseUrl: null,
+              reasoningEffort: null,
+            },
+          },
+        });
+        const saved = makeScan({ aiAuditSkills: [AgentSkill.PAGE_TITLE] });
+        mockRepo.create.mockReturnValue(saved);
+        mockRepo.save.mockResolvedValue(saved);
+
+        await service.create(singleUrlAudit([AgentSkill.PAGE_TITLE]));
+
+        expect(mockQueue.addScanJob).toHaveBeenCalledWith(saved.id);
+      });
 
       it('rejects an AI-audit request when the feature is disabled', async () => {
         // The default agentConfig() has enabled=false.
@@ -379,6 +523,7 @@ describe('ScanService', () => {
           enabled: true,
           allowedSkills: ['image_alt_text'],
           allowedScanModes: [ScanMode.SINGLE_URL, ScanMode.URL_LIST],
+          ...usableProvider,
         });
         const saved = makeScan({
           mode: ScanMode.URL_LIST,
@@ -401,6 +546,7 @@ describe('ScanService', () => {
         const enabled = buildService({
           enabled: true,
           allowedSkills: ['image_alt_text', 'page_title'],
+          ...usableProvider,
         });
         const saved = makeScan({
           aiAuditSkills: [AgentSkill.IMAGE_ALT_TEXT, AgentSkill.PAGE_TITLE],
@@ -426,6 +572,7 @@ describe('ScanService', () => {
         const enabled = buildService({
           enabled: true,
           allowedSkills: ['image_alt_text'],
+          ...usableProvider,
         });
         const saved = makeScan({
           aiAuditSkills: [AgentSkill.IMAGE_ALT_TEXT],

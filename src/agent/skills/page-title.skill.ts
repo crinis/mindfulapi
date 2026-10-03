@@ -70,20 +70,6 @@ export const pageTitleSchema = z.object({
   suggestedTitle: z.string().max(SUGGEST_MAX).nullable(),
 });
 
-type PageTitleResult = z.infer<typeof pageTitleSchema>;
-
-/**
- * Returned when the model fails to produce a valid verdict. A degraded request
- * yields a benign bookkeeping draft, never a false positive — mirrors
- * link-purpose's empty-findings fallback.
- */
-const SAFE_RESULT: PageTitleResult = {
-  verdict: 'appropriate',
-  confidence: 0,
-  rationale: 'unavailable',
-  suggestedTitle: null,
-};
-
 /** A heading captured purely as topic context for judging the title. */
 interface HeadingContext {
   level: number;
@@ -155,7 +141,6 @@ export class PageTitleSkill implements AuditSkill<PageTitleEvidence> {
       prompt: buildTitlePrompt(evidence),
       images: [],
       schema: pageTitleSchema,
-      fallback: SAFE_RESULT,
       skill: this.id,
     });
 

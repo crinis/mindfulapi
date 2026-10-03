@@ -1,5 +1,7 @@
-import { InternalServerErrorException } from '@nestjs/common';
-import { ModelProviderFactory } from './model-provider.factory';
+import {
+  AgentConfigurationError,
+  ModelProviderFactory,
+} from './model-provider.factory';
 import { agentConfig } from '../../config/configuration';
 
 const createOpenAIMock = jest.fn();
@@ -22,7 +24,7 @@ describe('ModelProviderFactory.getModel', () => {
 
   it('throws when the provider is not configured', async () => {
     await expect(makeFactory({ provider: null }).getModel()).rejects.toThrow(
-      InternalServerErrorException,
+      AgentConfigurationError,
     );
   });
 

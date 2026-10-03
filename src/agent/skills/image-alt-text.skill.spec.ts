@@ -30,7 +30,6 @@ const harnessReturning = (verdict: unknown): AgentHarnessService =>
     evaluateStructured: jest.fn().mockResolvedValue({
       data: verdict,
       usage: { inputTokens: 100, outputTokens: 20 },
-      degraded: false,
     }),
   }) as unknown as AgentHarnessService;
 

@@ -33,33 +33,25 @@ export interface StructuredRequest<T> {
   /** Zod schema the model output must satisfy. */
   schema: z.ZodType<T>;
   /**
-   * Value returned when generation or validation fails after the retry — keeps
-   * a single flaky/weak-model request from failing the whole scan. Skills pass
-   * their `insufficient_evidence` verdict here.
-   */
-  fallback: T;
-  /**
    * Skill id, used to select a per-skill model override
    * (`AGENT_SKILL_<ID>_*`); omit to use the global default model.
    */
   skill?: string;
 }
 
-/** Result of a harness call, including usage and a degraded-output flag. */
+/** Result of a harness call, including usage. */
 export interface HarnessResult<T> {
   data: T;
   usage: TokenUsage;
-  /** Resolved model identifier that produced (or would produce) the output. */
+  /** Resolved model identifier that produced the output. */
   model: string;
-  /** True when {@link StructuredRequest.fallback} was returned. */
-  degraded: boolean;
 }
 
 /**
  * Thin, provider-agnostic wrapper over the Vercel AI SDK that centralizes the
  * cross-cutting concerns every skill needs: forced structured output, vision
- * encoding, per-request token/temperature/timeout limits, a single repair
- * retry, graceful fallback, and token-usage accounting.
+ * encoding, per-request token/temperature/timeout limits, one retry of a
+ * retryable API error, and token-usage accounting.
  */
 @Injectable()
 export class AgentHarnessService {
@@ -73,9 +65,14 @@ export class AgentHarnessService {
 
   /**
    * Runs one structured-output request (the low-hallucination path used by
-   * per-unit skills). The model is forced to satisfy `schema`; on failure the
-   * AI SDK retries once and, if still invalid, the caller's `fallback` is
-   * returned with a `degraded` flag rather than throwing.
+   * per-unit skills). The model is forced to satisfy `schema`.
+   *
+   * Every failure rejects: missing or unsupported configuration, a provider
+   * or network error (401, quota, 5xx — the SDK retries only retryable API
+   * errors, once), the request timeout, and an answer that does not match the
+   * schema (`NoObjectGeneratedError`, never retried). Nothing is substituted
+   * for the verdict: the caller counts the unit as failed, so an unanswered
+   * unit can never read as "no problems found".
    */
   async evaluateStructured<T>(
     request: StructuredRequest<T>,
@@ -96,45 +93,32 @@ export class AgentHarnessService {
     }
 
     const resolved = this.providerFactory.resolveModelConfig(request.skill);
-    const modelId = resolved.model;
+    const model = await this.providerFactory.getModel(request.skill);
 
-    try {
-      const { generateObject } = await import('ai');
-      const result = await generateObject({
-        model: await this.providerFactory.getModel(request.skill),
-        schema: request.schema,
-        system: request.system,
-        messages: [{ role: 'user', content }],
-        maxOutputTokens: this.config.maxTokensPerRequest,
-        // Reasoning models (GPT-5 family) take a reasoning effort and reject a
-        // non-default temperature; sampling models take the configured one.
-        ...(resolved.reasoningEffort
-          ? {
-              providerOptions: {
-                openai: { reasoningEffort: resolved.reasoningEffort },
-              },
-            }
-          : { temperature: this.config.temperature }),
-        maxRetries: 1,
-        abortSignal: AbortSignal.timeout(this.config.requestTimeoutMs),
-      });
-      return {
-        data: result.object,
-        usage: this.normalizeUsage(result.usage),
-        model: modelId,
-        degraded: false,
-      };
-    } catch (error) {
-      this.logger.warn(
-        `Structured generation failed; returning fallback: ${String(error)}`,
-      );
-      return {
-        data: request.fallback,
-        usage: { inputTokens: 0, outputTokens: 0 },
-        model: modelId,
-        degraded: true,
-      };
-    }
+    const { generateObject } = await import('ai');
+    const result = await generateObject({
+      model,
+      schema: request.schema,
+      system: request.system,
+      messages: [{ role: 'user', content }],
+      maxOutputTokens: this.config.maxTokensPerRequest,
+      // Reasoning models (GPT-5 family) take a reasoning effort and reject a
+      // non-default temperature; sampling models take the configured one.
+      ...(resolved.reasoningEffort
+        ? {
+            providerOptions: {
+              openai: { reasoningEffort: resolved.reasoningEffort },
+            },
+          }
+        : { temperature: this.config.temperature }),
+      maxRetries: 1,
+      abortSignal: AbortSignal.timeout(this.config.requestTimeoutMs),
+    });
+    return {
+      data: result.object,
+      usage: this.normalizeUsage(result.usage),
+      model: resolved.model,
+    };
   }
 
   /**

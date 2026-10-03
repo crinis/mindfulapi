@@ -54,16 +54,6 @@ export const imageAltVerdictSchema = z.object({
   suggestedAlt: z.string().max(300).nullable(),
 });
 
-type ImageAltVerdictResult = z.infer<typeof imageAltVerdictSchema>;
-
-/** Returned when the model fails to produce a valid verdict. */
-const INSUFFICIENT_EVIDENCE: ImageAltVerdictResult = {
-  verdict: 'insufficient_evidence',
-  confidence: 0,
-  rationale: 'The model did not return a valid structured verdict.',
-  suggestedAlt: null,
-};
-
 /** Descriptor produced in-browser for each candidate image. */
 interface ImageDescriptor {
   auditId: string;
@@ -203,7 +193,6 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
           ]
         : [],
       schema: imageAltVerdictSchema,
-      fallback: INSUFFICIENT_EVIDENCE,
       skill: this.id,
     });
 

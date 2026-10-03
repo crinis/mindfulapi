@@ -89,11 +89,6 @@ export const headingStructureSchema = z.object({
     .max(MAX_FINDINGS),
 });
 
-type HeadingStructureResult = z.infer<typeof headingStructureSchema>;
-
-/** Returned when the model fails to produce a valid verdict. */
-const NO_FINDINGS: HeadingStructureResult = { findings: [] };
-
 /**
  * Short stable id (`H1`, `F1`, `S1`, …) the model echoes back. Models do not
  * reliably reproduce a long CSS path verbatim, so findings are keyed by this
@@ -194,7 +189,6 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
       prompt: buildHeadingPrompt(evidence),
       images: [],
       schema: headingStructureSchema,
-      fallback: NO_FINDINGS,
       skill: this.id,
     });
 

@@ -32,6 +32,10 @@ import { BasicAuthCryptoService } from './basic-auth-crypto.service';
 import { UrlPolicyService } from './url-policy.service';
 import { agentConfig } from '../config/configuration';
 import {
+  AgentConfigurationError,
+  ModelProviderFactory,
+} from '../agent/harness/model-provider.factory';
+import {
   ScanResponseDto,
   ScanSummaryResponseDto,
   IssueCountsDto,
@@ -88,6 +92,7 @@ export class ScanService {
     private readonly urlPolicyService: UrlPolicyService,
     @Inject(agentConfig.KEY)
     private readonly agentSettings: ConfigType<typeof agentConfig>,
+    private readonly modelProviderFactory: ModelProviderFactory,
   ) {}
 
   /**
@@ -163,7 +168,8 @@ export class ScanService {
    * the deduped skill list to persist (or `null` when not requested).
    *
    * @throws BadRequestException When AI audit is disabled server-side, the
-   * scan mode is not allowed, or a requested skill is not whitelisted.
+   * scan mode is not allowed, a requested skill is not whitelisted, or a
+   * requested skill has no usable model configuration.
    */
   private resolveRequestedSkills(
     scanMode: ScanMode,
@@ -205,7 +211,36 @@ export class ScanService {
         `Requested AI audit skills are not enabled on this server: ${rejected.join(', ')}`,
       );
     }
-    return Array.from(new Set(requested));
+    const skills = Array.from(new Set(requested));
+    this.assertModelsConfigured(skills);
+    return skills;
+  }
+
+  /**
+   * Rejects the request when a requested skill cannot reach a model: its
+   * provider, model, API key or base URL is missing, or the provider is not
+   * supported. Such a scan would otherwise run and report every AI task as
+   * failed. Invalid keys and unreachable endpoints still surface per task.
+   *
+   * @throws BadRequestException Naming the settings to fix, never their values.
+   */
+  private assertModelsConfigured(skills: AgentSkill[]): void {
+    const problems: string[] = [];
+    for (const skill of skills) {
+      try {
+        this.modelProviderFactory.resolveUsableModelConfig(skill);
+      } catch (error) {
+        if (!(error instanceof AgentConfigurationError)) {
+          throw error;
+        }
+        problems.push(error.message);
+      }
+    }
+    if (problems.length > 0) {
+      throw new BadRequestException(
+        `AI audit is not configured correctly on this server. ${problems.join(' ')}`,
+      );
+    }
   }
 
   /**

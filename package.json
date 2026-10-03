@@ -85,8 +85,19 @@
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
+      "/node_modules/.+\\.js$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "allowJs": true
+          }
+        }
+      ],
       "^.+\\.(t|j)s$": "ts-jest"
     },
+    "transformIgnorePatterns": [
+      "/node_modules/(?!(ai|@ai-sdk|@standard-schema|@workflow|eventsource-parser)/)"
+    ],
     "collectCoverageFrom": [
       "**/*.(t|j)s"
     ],

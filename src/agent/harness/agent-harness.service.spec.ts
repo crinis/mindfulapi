@@ -11,7 +11,6 @@ jest.mock('ai', () => ({
 }));
 
 const schema = z.object({ verdict: z.string() });
-const fallback = { verdict: 'insufficient_evidence' };
 
 describe('AgentHarnessService.evaluateStructured', () => {
   let service: AgentHarnessService;
@@ -45,27 +44,58 @@ describe('AgentHarnessService.evaluateStructured', () => {
       system: 'sys',
       prompt: 'p',
       schema,
-      fallback,
     });
 
     expect(result.data).toEqual({ verdict: 'appropriate' });
     expect(result.usage).toEqual({ inputTokens: 42, outputTokens: 7 });
-    expect(result.degraded).toBe(false);
   });
 
-  it('returns the fallback (degraded) when generation throws', async () => {
-    generateObjectMock.mockRejectedValue(new Error('bad json'));
+  // A failed request must fail its work unit: a substituted verdict would
+  // report the page as checked and clean although no model ever judged it.
+  it('rejects when the model cannot be built (missing API key)', async () => {
+    providerFactory.getModel.mockRejectedValue(
+      new Error('AGENT_API_KEY is required for the openai provider.'),
+    );
 
-    const result = await service.evaluateStructured({
-      system: 'sys',
-      prompt: 'p',
-      schema,
-      fallback,
-    });
+    await expect(
+      service.evaluateStructured({
+        system: 'sys',
+        prompt: 'p',
+        schema,
+      }),
+    ).rejects.toThrow('AGENT_API_KEY is required');
+    expect(generateObjectMock).not.toHaveBeenCalled();
+  });
 
-    expect(result.data).toBe(fallback);
-    expect(result.degraded).toBe(true);
-    expect(result.usage).toEqual({ inputTokens: 0, outputTokens: 0 });
+  it('rejects when the provider request fails (401, quota, timeout)', async () => {
+    generateObjectMock.mockRejectedValue(
+      new Error('AI_APICallError: Incorrect API key provided'),
+    );
+
+    await expect(
+      service.evaluateStructured({
+        system: 'sys',
+        prompt: 'p',
+        schema,
+      }),
+    ).rejects.toThrow('Incorrect API key provided');
+  });
+
+  it('rejects when the model answered with an object that fails the schema', async () => {
+    generateObjectMock.mockRejectedValue(
+      Object.assign(
+        new Error('No object generated: response did not match schema.'),
+        { name: 'AI_NoObjectGeneratedError' },
+      ),
+    );
+
+    await expect(
+      service.evaluateStructured({
+        system: 'sys',
+        prompt: 'p',
+        schema,
+      }),
+    ).rejects.toThrow('did not match schema');
   });
 
   it('normalizes missing usage counts to zero', async () => {
@@ -78,7 +108,6 @@ describe('AgentHarnessService.evaluateStructured', () => {
       system: 'sys',
       prompt: 'p',
       schema,
-      fallback,
     });
 
     expect(result.usage).toEqual({ inputTokens: 0, outputTokens: 0 });
@@ -94,7 +123,6 @@ describe('AgentHarnessService.evaluateStructured', () => {
       system: 'sys',
       prompt: 'p',
       schema,
-      fallback,
     });
 
     const call = generateObjectMock.mock.calls[0][0] as {
@@ -122,7 +150,6 @@ describe('AgentHarnessService.evaluateStructured', () => {
       system: 'sys',
       prompt: 'p',
       schema,
-      fallback,
     });
 
     const call = generateObjectMock.mock.calls[0][0] as {
@@ -145,7 +172,6 @@ describe('AgentHarnessService.evaluateStructured', () => {
       prompt: 'p',
       images: [{ data: big, mediaType: 'image/png' }],
       schema,
-      fallback,
     });
 
     const call = generateObjectMock.mock.calls[0][0] as {
