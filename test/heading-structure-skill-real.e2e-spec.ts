@@ -208,6 +208,64 @@ describe('HeadingStructureSkill.collect (real browser)', () => {
       }
     });
 
+    it('stores inner paths that resolve to the element in its shadow root', async () => {
+      // A short path inside the shadow root would match an earlier element:
+      // "div > h2" finds Inner before Outer, and a positional chain finds Y
+      // (nested the same way) before Target.
+      const html = doc(`
+        ${component(
+          'x-nested',
+          '<div><div><h2>Inner</h2></div><h2>Outer</h2></div>',
+        )}
+        ${component(
+          'x-repeat',
+          '<div><div><h3>X</h3><h3>Y</h3></div><h3>Target</h3></div>',
+        )}
+        <main>
+          <h1>Store</h1>
+          <x-nested></x-nested>
+          <x-repeat></x-repeat>
+        </main>`);
+      const page = await context.newPage();
+      try {
+        await page.setContent(html);
+        const [evidence] = await skill.collect(page, ctx());
+        const resolved = await page.evaluate(
+          (headings) =>
+            headings.map(({ selector, shadowPath }) => {
+              let el: Element | null = document.querySelector(selector);
+              for (const path of shadowPath ?? []) {
+                el = el?.shadowRoot?.querySelector(path) ?? null;
+              }
+              return el?.textContent ?? null;
+            }),
+          evidence.headings.map(({ selector, shadowPath }) => ({
+            selector,
+            shadowPath,
+          })),
+        );
+
+        expect(evidence.headings.map((heading) => heading.text)).toEqual([
+          'Store',
+          'Inner',
+          'Outer',
+          'X',
+          'Y',
+          'Target',
+        ]);
+        expect(resolved).toEqual([
+          'Store',
+          'Inner',
+          'Outer',
+          'X',
+          'Y',
+          'Target',
+        ]);
+      } finally {
+        await page.close();
+      }
+    });
+
     it('lists headings inside components in reading order', async () => {
       const evidence = await collectFrom(
         doc(`

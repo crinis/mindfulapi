@@ -345,11 +345,28 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
           return parts.join(' > ');
         };
 
+        // A path that fixes every step to its position, from a top-level
+        // element of the element's shadow root down: unique by construction.
+        // `:not(* *)` anchors the first step, since no element in a shadow
+        // tree is above a top-level one (`:scope` does not anchor a
+        // ShadowRoot.querySelector).
+        const positionalPath = (el: Element): string => {
+          const parts: string[] = [];
+          for (let n: Element | null = el; n; n = n.parentElement) {
+            const parent = n.parentElement ?? (n.parentNode as ParentNode);
+            const position = Array.from(parent.children).indexOf(n) + 1;
+            parts.unshift(`${CSS.escape(n.localName)}:nth-child(${position})`);
+          }
+          parts[0] += ':not(* *)';
+          return parts.join(' > ');
+        };
+
         // Where a finding is. A path inside a shadow root means nothing in
         // the document (it may even match another element there), so for an
         // element in a shadow tree the selector locates the outermost shadow
         // host, and `shadowPath` holds the path inside each shadow root from
-        // that host down to the element.
+        // that host down to the element. The short path is kept only when it
+        // finds the element in its shadow root (it is not anchored there).
         const locate = (
           el: Element,
         ): { selector: string; shadowPath?: string[] } => {
@@ -357,7 +374,10 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
           let node = el;
           let tree = node.getRootNode();
           while (tree instanceof ShadowRoot) {
-            shadowPath.unshift(cssPath(node));
+            const short = cssPath(node);
+            shadowPath.unshift(
+              tree.querySelector(short) === node ? short : positionalPath(node),
+            );
             node = tree.host;
             tree = node.getRootNode();
           }
