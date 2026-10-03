@@ -19,6 +19,7 @@ export const INTEGER_SETTINGS = {
   CLEANUP_RETENTION_DAYS: { min: 0, max: 36_500, default: 30 },
   CRAWL_CONCURRENCY: { min: 1, max: 16, default: 4 },
   SCAN_CONCURRENCY: { min: 1, max: 8, default: 1 },
+  SCAN_PAGE_TIMEOUT_MS: { min: 30_000, max: 1_800_000, default: 120_000 },
   AGENT_CONCURRENCY: { min: 1, max: 16, default: 4 },
   AGENT_MAX_UNITS_PER_PAGE: { min: 1, max: 500, default: 30 },
   AGENT_MAX_UNITS_PER_SCAN: { min: 1, max: 10_000, default: 200 },

@@ -184,6 +184,10 @@ export class EnvironmentVariables {
   @IntegerSetting()
   SCAN_CONCURRENCY?: number;
 
+  /** Time one page's browser work may take before the page counts as failed. */
+  @IntegerSetting()
+  SCAN_PAGE_TIMEOUT_MS?: number;
+
   @IsOptional()
   @IsIn(['true', 'false'])
   SCAN_ALLOW_PRIVATE_TARGETS?: string;

@@ -174,6 +174,11 @@ export const scanConfig = registerAs('scan', () => ({
   crawlConcurrency: readIntSetting('CRAWL_CONCURRENCY'),
   /** Concurrent scan jobs processed by the BullMQ worker. */
   scanConcurrency: readIntSetting('SCAN_CONCURRENCY'),
+  /**
+   * Upper bound in milliseconds for one page's browser work (navigation, axe,
+   * AI evidence collection, link extraction); the page fails after it.
+   */
+  pageTimeoutMs: readIntSetting('SCAN_PAGE_TIMEOUT_MS'),
   /** Allows scanning private/internal network targets when true. */
   allowPrivateTargets: process.env.SCAN_ALLOW_PRIVATE_TARGETS === 'true',
   /** Hostnames exempt from the private-target block. */

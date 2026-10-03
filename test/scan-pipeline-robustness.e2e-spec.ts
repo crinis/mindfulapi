@@ -40,7 +40,7 @@ import {
   startFixtureSiteServer,
 } from './helpers/fixture-site-server';
 
-/** Page deadline used here instead of the production two minutes. */
+/** SCAN_PAGE_TIMEOUT_MS used here instead of the default two minutes. */
 const TEST_PAGE_DEADLINE_MS = 3000;
 /** Part of it kept free of AI evidence collection (production: 15 s). */
 const TEST_EVIDENCE_RESERVE_MS = 500;
@@ -119,6 +119,7 @@ describe('Scan pipeline robustness (real browser)', () => {
       // One page at a time, so a busy page cannot starve the others of a
       // renderer and every timing below is attributable.
       crawlConcurrency: 1,
+      pageTimeoutMs: TEST_PAGE_DEADLINE_MS,
     };
     const urlPolicy = new UrlPolicyService(config);
     const processor = new ScanProcessor(
@@ -131,10 +132,7 @@ describe('Scan pipeline robustness (real browser)', () => {
       urlPolicy,
       agentAudit as unknown as AgentAuditService,
     );
-    Object.assign(processor, {
-      pageDeadlineMs: TEST_PAGE_DEADLINE_MS,
-      evidenceReserveMs: TEST_EVIDENCE_RESERVE_MS,
-    });
+    Object.assign(processor, { evidenceReserveMs: TEST_EVIDENCE_RESERVE_MS });
     return processor;
   }
 

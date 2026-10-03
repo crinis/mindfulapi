@@ -15,6 +15,7 @@ function makeService(
   return new UrlPolicyService({
     crawlConcurrency: 4,
     scanConcurrency: 1,
+    pageTimeoutMs: 120_000,
     allowPrivateTargets: false,
     targetAllowHosts: [],
     playwrightWsUrl: null,

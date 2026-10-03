@@ -36,7 +36,6 @@ import { enqueueLinks as crawleeEnqueueLinks } from '@crawlee/core';
 import { In } from 'typeorm';
 import {
   EVIDENCE_RESERVE_MS,
-  PAGE_DEADLINE_MS,
   ScanInterruptedError,
   ScanProcessor,
 } from './scan.processor';
@@ -322,17 +321,24 @@ describe('ScanProcessor', () => {
       evaluate: jest.fn().mockResolvedValue(undefined),
     };
 
-    processor = new ScanProcessor(
+    processor = buildProcessor(scanConfig());
+  });
+
+  /** A processor over the mocks above with the given scan settings. */
+  function buildProcessor(
+    config: ReturnType<typeof scanConfig>,
+  ): ScanProcessor {
+    return new ScanProcessor(
       mockScanRepo as any,
       mockIssueRepo as any,
       mockBrowserService as any,
       mockScanner as any,
       mockBasicAuthCrypto as any,
-      scanConfig(),
+      config,
       mockUrlPolicy as any,
       mockAgentAudit as any,
     );
-  });
+  }
 
   it('ends the job of a deleted scan without a retry', async () => {
     // Deleted counts as canceled: throwing would make BullMQ retry the job
@@ -1116,6 +1122,8 @@ describe('ScanProcessor', () => {
     });
 
     it('never retries a page and lets the page deadline fire before the handler timeout', async () => {
+      const pageTimeoutMs = 600_000;
+      processor = buildProcessor({ ...scanConfig(), pageTimeoutMs });
       let crawlerOptions: any;
       mockCrawlerRunHandler = (options) => {
         crawlerOptions = options;
@@ -1129,7 +1137,7 @@ describe('ScanProcessor', () => {
       // parallel, up to four times.
       expect(crawlerOptions.maxRequestRetries).toBe(0);
       expect(crawlerOptions.requestHandlerTimeoutSecs * 1000).toBeGreaterThan(
-        PAGE_DEADLINE_MS,
+        pageTimeoutMs,
       );
     });
 
@@ -1469,9 +1477,16 @@ describe('ScanProcessor', () => {
   });
 
   describe('per-page deadline', () => {
+    /** SCAN_PAGE_TIMEOUT_MS of these tests, other than the default. */
+    const PAGE_TIMEOUT_MS = 45_000;
+
     beforeEach(() => {
       jest.useFakeTimers({
         doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'],
+      });
+      processor = buildProcessor({
+        ...scanConfig(),
+        pageTimeoutMs: PAGE_TIMEOUT_MS,
       });
     });
 
@@ -1500,7 +1515,7 @@ describe('ScanProcessor', () => {
     /** Runs a job while letting the page deadline elapse. */
     const processPastDeadline = async () => {
       const run = processor.process({ data: { scanId: 1 } } as any);
-      await jest.advanceTimersByTimeAsync(PAGE_DEADLINE_MS);
+      await jest.advanceTimersByTimeAsync(PAGE_TIMEOUT_MS);
       await run;
     };
 
@@ -1551,7 +1566,7 @@ describe('ScanProcessor', () => {
 
         expect(mockAgentAudit.collectForPage).toHaveBeenCalledTimes(1);
         expect(mockAgentAudit.collectForPage.mock.calls[0][5]).toMatchObject({
-          deadline: started + PAGE_DEADLINE_MS - EVIDENCE_RESERVE_MS,
+          deadline: started + PAGE_TIMEOUT_MS - EVIDENCE_RESERVE_MS,
         });
       },
     );
@@ -1649,7 +1664,7 @@ describe('ScanProcessor', () => {
           new Promise((resolve) => {
             setTimeout(
               () => resolve({ finalUrl: 'https://example.com/', issues: [] }),
-              PAGE_DEADLINE_MS - 1000,
+              PAGE_TIMEOUT_MS - 1000,
             );
           }),
       );

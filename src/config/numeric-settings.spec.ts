@@ -84,6 +84,7 @@ describe('config namespaces', () => {
     expect(scanConfig()).toMatchObject({
       crawlConcurrency: 16,
       scanConcurrency: 8,
+      pageTimeoutMs: 1_800_000,
     });
     expect(agentConfig()).toMatchObject({
       concurrency: 16,
@@ -94,6 +95,11 @@ describe('config namespaces', () => {
       maxImageBytes: 20_000_000,
       temperature: 2,
     });
+  });
+
+  it('keep the two-minute page timeout by default', () => {
+    delete process.env.SCAN_PAGE_TIMEOUT_MS;
+    expect(scanConfig().pageTimeoutMs).toBe(120_000);
   });
 
   it('read AGENT_MAX_IMAGE_BYTES=1500000 as 1500000', () => {

@@ -56,29 +56,20 @@ const MAX_SELECTOR_LENGTH = 1000;
 const MAX_CONTEXT_LENGTH = 4000;
 
 /**
- * Upper bound for one page's browser work: navigation, axe analysis, AI
- * evidence collection and link extraction. Only navigation has a timeout of
- * its own; a page whose main thread stays busy after DOMContentLoaded would
- * otherwise block the analysis forever while BullMQ keeps renewing the job's
- * lock, holding a scan slot until the API restarts. On expiry the page is
- * closed, which makes its pending Playwright calls reject, and it counts as
- * failed.
- */
-export const PAGE_DEADLINE_MS = 120_000;
-
-/**
- * Part of the page deadline kept free of AI evidence collection: the policy
- * re-check and, in crawls, link extraction still run after it.
+ * Part of the page deadline (SCAN_PAGE_TIMEOUT_MS) kept free of AI evidence
+ * collection: the policy re-check and, in crawls, link extraction still run
+ * after it.
  */
 export const EVIDENCE_RESERVE_MS = 15_000;
 
 /**
- * Crawlee's request-handler timeout. Crawlee's timeout rejects but never stops
- * the handler, so it must not fire while the page work is still within its
- * deadline; the extra minute covers the policy check, database writes and
- * enqueueing around the page work.
+ * How much longer than the page deadline Crawlee's request-handler timeout
+ * is. Crawlee's timeout rejects but never stops the handler, so it must not
+ * fire while the page work is still within its deadline; the extra minute
+ * covers the policy check, database writes and enqueueing around the page
+ * work.
  */
-const CRAWL_HANDLER_TIMEOUT_SECS = PAGE_DEADLINE_MS / 1000 + 60;
+const CRAWL_HANDLER_TIMEOUT_MARGIN_SECS = 60;
 
 /** A page's browser work outlived the page deadline; the page was closed. */
 export class PageDeadlineError extends Error {
@@ -191,8 +182,16 @@ function resolveScanConcurrency(): number {
 export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
   /** Structured service logger for scan processing lifecycle events. */
   private readonly logger = new Logger(ScanProcessor.name);
-  /** {@link PAGE_DEADLINE_MS}; an instance field so real-browser tests can shorten it. */
-  private readonly pageDeadlineMs: number = PAGE_DEADLINE_MS;
+  /**
+   * Upper bound for one page's browser work (SCAN_PAGE_TIMEOUT_MS):
+   * navigation, axe analysis, AI evidence collection and link extraction.
+   * Only navigation has a timeout of its own; a page whose main thread stays
+   * busy after DOMContentLoaded would otherwise block the analysis forever
+   * while BullMQ keeps renewing the job's lock, holding a scan slot until the
+   * API restarts. On expiry the page is closed, which makes its pending
+   * Playwright calls reject, and it counts as failed.
+   */
+  private readonly pageDeadlineMs: number;
   /** {@link EVIDENCE_RESERVE_MS}; an instance field so real-browser tests can shorten it. */
   private readonly evidenceReserveMs: number = EVIDENCE_RESERVE_MS;
 
@@ -216,6 +215,7 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
     private readonly agentAudit: AgentAuditService,
   ) {
     super();
+    this.pageDeadlineMs = config.pageTimeoutMs;
   }
 
   /**
@@ -517,7 +517,7 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
 
   /**
    * Runs one page's browser work under the page deadline
-   * ({@link PAGE_DEADLINE_MS}). On expiry the page is closed — its pending
+   * ({@link pageDeadlineMs}, SCAN_PAGE_TIMEOUT_MS). On expiry the page is closed — its pending
    * Playwright calls then reject — and a {@link PageDeadlineError} is thrown
    * without waiting for the work. Whatever the abandoned work still returns is
    * discarded, so `work` must not store, buffer or enqueue anything itself.
@@ -899,7 +899,9 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
         // (e.g. a lost browser) would fail the same way again. A retry would
         // also run alongside a timed-out handler, which Crawlee cannot stop.
         maxRequestRetries: 0,
-        requestHandlerTimeoutSecs: CRAWL_HANDLER_TIMEOUT_SECS,
+        requestHandlerTimeoutSecs:
+          Math.ceil(this.pageDeadlineMs / 1000) +
+          CRAWL_HANDLER_TIMEOUT_MARGIN_SECS,
         requestHandler: async ({ request, enqueueLinks }) => {
           // Stop processing further pages once cancelled, or once the browser
           // is gone (the attempt fails after the crawl); drains quietly.

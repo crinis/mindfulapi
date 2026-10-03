@@ -345,6 +345,7 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 | `IGNORE_HTTPS_ERRORS` | `false` | Ignore TLS errors (e.g. self-signed certificates) |
 | `CRAWL_CONCURRENCY` | `4` | Max pages analyzed in parallel **within one scan** (`crawl` and `url_list`; 1–16) |
 | `SCAN_CONCURRENCY` | `1` | Max scan jobs processed in parallel (1–8). In-flight pages ≈ `SCAN_CONCURRENCY × CRAWL_CONCURRENCY`, all sharing one browser |
+| `SCAN_PAGE_TIMEOUT_MS` | `120000` | Time in milliseconds one page may take in every scan mode: navigation, axe analysis, AI evidence collection (which ends 15 seconds earlier) and, in crawls, link extraction. A page that takes longer is closed and counts as failed (30000–1800000). _Unreleased; 0.7.1 has no time limit per page_ |
 | `SCAN_ALLOW_PRIVATE_TARGETS` | `false` | Allow private/reserved network targets (see [Security](#security)) |
 | `SCAN_TARGET_ALLOW_HOSTS` | _(unset)_ | Comma-separated hostnames exempt from the private-target block (exact, case-insensitive; no wildcards) |
 
@@ -446,7 +447,7 @@ Axe-core is deterministic: it can tell that an image _has_ an `alt` attribute, b
 
 On each page, the one-per-page skills get their request first; `image_alt_text` uses the rest of `AGENT_MAX_UNITS_PER_PAGE`. `AGENT_MAX_UNITS_PER_SCAN` is shared by the pages in the order they finish. On the page where it runs out, that page's images are dropped first and its page-level requests last; pages after that get no AI units at all, page-level requests included. _Unreleased; in 0.7.1 images can use the whole page cap before the page-level skills._
 
-Evidence collection ends 15 seconds before the two-minute page limit. Images that never stand still (for example script-driven motion) can take seconds per screenshot; when the time runs out, only the evidence collected so far is judged, and the page keeps its axe results. Images that are not rendered (such as inside `content-visibility: hidden`) are skipped, and CSS animations are frozen for the screenshot. _Unreleased; 0.7.1 has no time limit per page._
+Evidence collection ends 15 seconds before the page time limit (`SCAN_PAGE_TIMEOUT_MS`, two minutes by default). Images that never stand still (for example script-driven motion) can take seconds per screenshot; when the time runs out, only the evidence collected so far is judged, and the page keeps its axe results. Images that are not rendered (such as inside `content-visibility: hidden`) are skipped, and CSS animations are frozen for the screenshot. _Unreleased; 0.7.1 has no time limit per page._
 
 > **Privacy.** When the AI audit runs, the evidence above is sent to the configured LLM provider. Only enable it with a provider you trust, and consider a self-hosted/local model for sensitive sites.
 
@@ -588,7 +589,7 @@ All endpoints are under `/v1` (for example `POST /v1/scans`). Errors follow [RFC
 
 - its navigation ends with HTTP 400 or higher, also after redirects, or without a response;
 - it, or a redirect it follows, reaches an address the [SSRF protection](#security) blocks;
-- it does not finish within two minutes.
+- it does not finish within `SCAN_PAGE_TIMEOUT_MS` (two minutes by default).
 
 A crawl follows the links it finds within the scope of the URL each seed lands on after redirects (`http://example.com/` → `https://www.example.com/`, `http://intranet/` → `http://intranet.corp.local/`). A later page that redirects outside that scope is skipped: it counts neither as discovered nor as failed, and its links are not followed. A page reached through several redirecting URLs is scanned once.
 
