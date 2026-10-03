@@ -52,6 +52,38 @@ describe('ImageAltTextSkill.collect (real browser)', () => {
     }
   };
 
+  /** A 1x1 PNG, rendered at whatever size the markup asks for. */
+  const PNG =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  /** Collects from inline markup instead of the fixture site. */
+  const collectFrom = async (
+    body: string,
+    overrides: Partial<CollectContext> = {},
+  ): Promise<{ evidence: ImageEvidence[]; altAt: (string | null)[] }> => {
+    const page = await context.newPage();
+    try {
+      await page.setContent(`<!doctype html><html><body>${body}</body></html>`);
+      const evidence = await skill.collect(page, ctx(overrides));
+      // What each stored selector points at once the audit attributes are gone.
+      const altAt = await page.evaluate(
+        (selectors) => {
+          document
+            .querySelectorAll('[data-mfa-audit-id]')
+            .forEach((el) => el.removeAttribute('data-mfa-audit-id'));
+          return selectors.map((selector) => {
+            const matches = document.querySelectorAll(selector);
+            return matches.length === 1 ? matches[0].getAttribute('alt') : null;
+          });
+        },
+        evidence.map((item) => item.selector),
+      );
+      return { evidence, altAt };
+    } finally {
+      await page.close();
+    }
+  };
+
   beforeAll(async () => {
     fixtureSite = await startFixtureSiteServer(
       join(__dirname, 'fixtures', 'site'),
@@ -84,6 +116,22 @@ describe('ImageAltTextSkill.collect (real browser)', () => {
       expect(item.screenshot!.byteLength).toBeGreaterThan(0);
       expect(item.pageUrl).toContain('/images.html');
     }
+  });
+
+  it('stores a CSS selector that locates the image in the page', async () => {
+    const { evidence, altAt } = await collectFrom(`
+      <main>
+        <figure><img alt="Sales chart" width="80" height="80" src="${PNG}"></figure>
+        <p><img alt="Company logo" width="80" height="80" src="${PNG}"></p>
+        <p><img alt="Team photo" width="80" height="80" src="${PNG}"></p>
+      </main>`);
+
+    expect(evidence.map((item) => item.alt)).toEqual([
+      'Sales chart',
+      'Company logo',
+      'Team photo',
+    ]);
+    expect(altAt).toEqual(['Sales chart', 'Company logo', 'Team photo']);
   });
 
   it('drops an image already flagged by an axe alt rule', async () => {

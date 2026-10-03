@@ -436,7 +436,7 @@ Every `agentFindings` entry has the **same shape regardless of skill**, so clien
 | `message` | **Human-readable problem description** |
 | `suggestion` | Concrete fix, when offered |
 | `pageUrl`, `selector` | Where the problem is |
-| `details` | Skill-specific extras (e.g. `currentAlt`, `suggestedLevel`) |
+| `details` | Skill-specific extras (e.g. `currentAlt` and `src` for images, `suggestedLevel` for headings) |
 | `model` | Provenance — the model that produced the finding |
 
 ### Choosing an API/gateway and model

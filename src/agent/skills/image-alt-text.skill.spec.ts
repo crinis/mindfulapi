@@ -14,7 +14,7 @@ const baseEvidence = (
   overrides: Partial<ImageEvidence> = {},
 ): ImageEvidence => ({
   auditId: 'mfa-0',
-  selector: 'mfa-0',
+  selector: 'main > figure > img',
   pageUrl: 'https://example.com',
   src: 'https://example.com/hero.png',
   alt: 'A hero image',
@@ -151,6 +151,23 @@ describe('ImageAltTextSkill.evaluate', () => {
     expect(draft?.suggestion).toBe('A dog');
     expect(draft?.wcag).toBe('1.1.1');
     expect(draft?.needsHumanReview).toBe(false);
+  });
+
+  it('locates the finding by CSS selector and records the image source', async () => {
+    const [draft] = await skill.evaluate(
+      baseEvidence(),
+      harnessReturning({
+        verdict: 'redundant',
+        confidence: 0.9,
+        rationale: 'Repeats the caption.',
+        suggestedAlt: null,
+      }),
+    );
+    expect(draft?.selector).toBe('main > figure > img');
+    expect(draft?.details).toMatchObject({
+      src: 'https://example.com/hero.png',
+      currentAlt: 'A hero image',
+    });
   });
 
   it('maps redundant to moderate severity', async () => {

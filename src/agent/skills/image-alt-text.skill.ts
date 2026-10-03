@@ -58,7 +58,12 @@ export const imageAltVerdictSchema = z.object({
 
 /** Descriptor produced in-browser for each candidate image. */
 interface ImageDescriptor {
+  /**
+   * Per-page id written to the element as `data-mfa-audit-id`, used only to
+   * locate it for the screenshot while the page is open.
+   */
   auditId: string;
+  /** CSS selector emitted to the client (the finding's locator). */
   selector: string;
   src?: string;
   role?: string;
@@ -226,6 +231,7 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
         details: {
           verdict: verdict.verdict,
           currentAlt: evidence.alt,
+          src: evidence.src ?? null,
         },
         usage,
         model,
@@ -251,6 +257,32 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
         );
         const out: ImageDescriptor[] = [];
         let counter = 0;
+
+        // A short, unique-ish CSS path so clients can locate the element; the
+        // audit id below exists only in this (closed after the scan) page.
+        const cssPath = (target: Element): string => {
+          const parts: string[] = [];
+          let node: Element | null = target;
+          while (node && node.nodeType === 1 && parts.length < 5) {
+            if (node.id) {
+              parts.unshift(`#${CSS.escape(node.id)}`);
+              break;
+            }
+            let sel = node.tagName.toLowerCase();
+            const parent: Element | null = node.parentElement;
+            if (parent) {
+              const sameTag = Array.from(parent.children).filter(
+                (c) => c.tagName === node!.tagName,
+              );
+              if (sameTag.length > 1) {
+                sel += `:nth-of-type(${sameTag.indexOf(node) + 1})`;
+              }
+            }
+            parts.unshift(sel);
+            node = node.parentElement;
+          }
+          return parts.join(' > ');
+        };
 
         for (const el of candidates) {
           if (out.length >= limit) break;
@@ -316,7 +348,7 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
 
           out.push({
             auditId,
-            selector: auditId,
+            selector: cssPath(el),
             src: src ?? undefined,
             role,
             alt,
