@@ -396,6 +396,74 @@ describe('AgentAuditService.evaluate', () => {
     });
   });
 
+  it("saves each unit's findings in a transaction of its own", async () => {
+    const { service, findingRepository, scanRepository } = makeService({
+      concurrency: 3,
+    });
+    // TypeORM's better-sqlite3 driver has one QueryRunner for the whole
+    // application: a save starts a transaction only when none is active and
+    // otherwise writes into the active one, and only the save that started it
+    // commits or rolls it back. Rows are written one at a time; a row whose
+    // message is 'bad' fails.
+    const committed: string[] = [];
+    let transaction: string[] | null = null;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    findingRepository.save.mockImplementation(
+      async (rows: Array<{ message: string }>) => {
+        maxInFlight = Math.max(maxInFlight, ++inFlight);
+        const started = transaction === null;
+        if (started) transaction = [];
+        try {
+          for (const row of rows) {
+            await new Promise((resolve) => setTimeout(resolve, 1));
+            if (row.message === 'bad') throw new Error('SQLITE_CONSTRAINT');
+            // Outside a transaction a write commits at once.
+            (transaction ?? committed).push(row.message);
+          }
+          if (started) committed.push(...(transaction ?? []));
+          return rows;
+        } finally {
+          if (started) transaction = null; // commit, or roll back on error
+          inFlight--;
+        }
+      },
+    );
+    const unitWith = (...messages: string[]) => ({
+      skill: {
+        id: AgentSkill.IMAGE_ALT_TEXT,
+        evaluate: jest.fn().mockResolvedValue(
+          messages.map((message) => ({
+            ...problemDraft(),
+            message,
+            usage: { inputTokens: 0, outputTokens: 0 },
+          })),
+        ),
+      } as unknown as AuditSkill,
+      evidence,
+    });
+
+    await service.evaluate(
+      { id: 1 } as Scan,
+      [
+        unitWith('u1-a', 'bad'),
+        unitWith('u2-a', 'u2-b'),
+        unitWith('u3-a', 'bad'),
+      ],
+      () => Promise.resolve(false),
+    );
+
+    // Overlapping saves would share the first one's transaction: its rollback
+    // would take u2-a along, and u3-a would commit with the failed unit 3.
+    expect(maxInFlight).toBe(1);
+    expect(committed).toEqual(['u2-a', 'u2-b']);
+    expect(findingRepository.save).toHaveBeenCalledTimes(3);
+    expect(scanRepository.update).toHaveBeenLastCalledWith(1, {
+      aiTasksCompleted: 1,
+      aiTasksFailed: 2,
+    });
+  });
+
   it('is a no-op with no units', async () => {
     const { service, scanRepository } = makeService();
     await service.evaluate({ id: 1 } as Scan, [], () => Promise.resolve(false));

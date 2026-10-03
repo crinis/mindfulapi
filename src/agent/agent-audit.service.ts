@@ -84,6 +84,9 @@ export interface CollectedUnit {
 export class AgentAuditService {
   private readonly logger = new Logger(AgentAuditService.name);
 
+  /** Settles after the last queued finding save (see {@link persist}). */
+  private persistQueue: Promise<void> = Promise.resolve();
+
   constructor(
     @InjectRepository(AgentFinding)
     private readonly findingRepository: Repository<AgentFinding>,
@@ -324,19 +327,29 @@ export class AgentAuditService {
     );
   }
 
-  /** Persists a unit's problem drafts as AgentFinding rows, atomically. */
-  private async persist(
-    scanId: number,
-    drafts: AgentFindingDraft[],
-  ): Promise<void> {
+  /**
+   * Persists a unit's problem drafts as AgentFinding rows, atomically.
+   *
+   * One save is one transaction: a unit's findings are stored all or none,
+   * so a unit counted failed never leaves part of its findings behind. That
+   * holds only while saves do not overlap. TypeORM's better-sqlite3 driver
+   * runs every query on one QueryRunner, and a save that finds a transaction
+   * active writes into it instead of starting its own, so with
+   * AGENT_CONCURRENCY > 1 (or two scans evaluating at once) one unit's failed
+   * save would roll back another unit's rows while its own first rows were
+   * committed by the other. Saves are therefore queued, one at a time.
+   */
+  private persist(scanId: number, drafts: AgentFindingDraft[]): Promise<void> {
     if (drafts.length === 0) {
-      return;
+      return Promise.resolve();
     }
-    // One save is one transaction: a unit's findings are stored all or none,
-    // so a unit counted failed never leaves part of its findings behind.
-    await this.findingRepository.save(
-      drafts.map((draft) => this.toFinding(scanId, draft)),
-    );
+    const rows = drafts.map((draft) => this.toFinding(scanId, draft));
+    const saved = this.persistQueue.then(async () => {
+      await this.findingRepository.save(rows);
+    });
+    // A failed save is its unit's failure; the next save still runs.
+    this.persistQueue = saved.catch(() => undefined);
+    return saved;
   }
 
   /** Builds the AgentFinding row of one finding draft. */
