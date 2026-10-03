@@ -1645,7 +1645,7 @@ describe('ScanProcessor', () => {
 
       expect(mockScanner.scanPage).toHaveBeenCalledTimes(1);
       expect(mockScanRepo.update).not.toHaveBeenCalledWith(
-        1,
+        expect.anything(),
         expect.objectContaining({ status: ScanStatus.COMPLETED }),
       );
     });
@@ -1657,14 +1657,20 @@ describe('ScanProcessor', () => {
       (mockAgentAudit as any).remainingScanUnits = jest
         .fn()
         .mockReturnValue(10);
-      // Deleted while its page was being scanned.
+      // Deleted while its page was being scanned: the row is still there for
+      // the check before the page, gone afterwards.
+      mockScanRepo.findOne.mockResolvedValueOnce({
+        id: 1,
+        status: ScanStatus.RUNNING,
+      });
       mockScanRepo.findOne.mockResolvedValue(null);
 
       await processor.process({ data: { scanId: 1 } } as any);
 
+      expect(mockAgentAudit.collectForPage).toHaveBeenCalledTimes(1);
       expect(mockAgentAudit.evaluate).not.toHaveBeenCalled();
       expect(mockScanRepo.update).not.toHaveBeenCalledWith(
-        1,
+        expect.anything(),
         expect.objectContaining({ status: ScanStatus.ANALYZING }),
       );
     });
