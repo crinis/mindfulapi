@@ -110,8 +110,9 @@ export function resolveProfileEntry(
 /**
  * Reads an optional per-skill model override from
  * `AGENT_SKILL_<ID>_{PROVIDER,MODEL,API_KEY,BASE_URL}` (e.g.
- * `AGENT_SKILL_IMAGE_ALT_TEXT_MODEL`). Any unset field falls back to the global
- * `AGENT_*` default at resolution time.
+ * `AGENT_SKILL_IMAGE_ALT_TEXT_MODEL`). Unset fields fall back to the global
+ * `AGENT_*` default at resolution time, except the key and base URL of an
+ * override that changes the endpoint (see `ModelProviderFactory`).
  */
 function readSkillModelOverride(skill: string): AgentModelConfig | null {
   const prefix = `AGENT_SKILL_${skill.toUpperCase()}`;
@@ -224,9 +225,11 @@ export const agentConfig = registerAs('agent', () => ({
    */
   baseUrl: process.env.AGENT_BASE_URL || null,
   /**
-   * Per-skill model overrides, keyed by skill id. Each field falls back to the
-   * global `AGENT_*` default when unset, so a skill can point at a different
-   * provider/model/gateway without duplicating shared settings.
+   * Per-skill model overrides, keyed by skill id. Unset fields fall back to
+   * the global `AGENT_*` default, so a skill can change its model without
+   * duplicating shared settings. The global key and base URL are not
+   * inherited by an override that sets another provider (and the key not by
+   * one with its own base URL), so they never reach another endpoint.
    */
   skillModels: Object.fromEntries(
     Object.values(AgentSkill)

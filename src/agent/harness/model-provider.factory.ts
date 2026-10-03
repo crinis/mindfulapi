@@ -45,19 +45,50 @@ interface ModelSettingNames {
 }
 
 /**
- * Names the settings to fix: the global variable, plus the skill's own
- * override variable when the problem concerns a skill.
+ * Which global endpoint settings a skill's override inherits. A key and a
+ * base URL belong to the endpoint they were configured for, so an override
+ * that switches the provider inherits neither, and an override with its own
+ * base URL does not inherit the key.
  */
-function settingNames(skill?: string): ModelSettingNames {
-  const either = (field: string): string =>
-    skill
-      ? `AGENT_${field} or AGENT_SKILL_${skill.toUpperCase()}_${field}`
-      : `AGENT_${field}`;
+interface EndpointInheritance {
+  apiKey: boolean;
+  baseUrl: boolean;
+}
+
+function endpointInheritance(
+  override: AgentModelConfig | undefined,
+  globalProvider: string | null,
+): EndpointInheritance {
+  const switchesProvider =
+    !!override?.provider && override.provider !== globalProvider;
+  return {
+    apiKey: !switchesProvider && !override?.baseUrl,
+    baseUrl: !switchesProvider,
+  };
+}
+
+/**
+ * Names the settings to fix: the global variable, plus the skill's own
+ * override variable when the problem concerns a skill. A global key or base
+ * URL the skill does not inherit is not offered as a fix.
+ */
+function settingNames(
+  skill: string | undefined,
+  inherits: EndpointInheritance,
+): ModelSettingNames {
+  const either = (field: string, inherited = true): string => {
+    if (!skill) return `AGENT_${field}`;
+    const own = `AGENT_SKILL_${skill.toUpperCase()}_${field}`;
+    return inherited
+      ? `AGENT_${field} or ${own}`
+      : `${own} (AGENT_${field} does not apply to a skill whose override ` +
+          `sets another provider or its own base URL)`;
+  };
   return {
     provider: either('PROVIDER'),
     model: either('MODEL'),
-    apiKey: either('API_KEY'),
-    baseUrl: either('BASE_URL'),
+    apiKey: either('API_KEY', inherits.apiKey),
+    baseUrl: either('BASE_URL', inherits.baseUrl),
   };
 }
 
@@ -100,14 +131,19 @@ export class ModelProviderFactory {
    * optimized default set — e.g. OpenAI runs the text skills on nano). Passing
    * no skill returns the provider default.
    *
+   * The API key and base URL fall back to `AGENT_API_KEY`/`AGENT_BASE_URL`
+   * only while the override stays on the global endpoint: an override that
+   * sets another provider inherits neither, and one with its own base URL
+   * does not inherit the key, so a key is never sent to an endpoint it was not
+   * configured for.
+   *
    * @throws AgentConfigurationError When the provider is unset or not
    * supported, or no model is configured.
    */
   resolveModelConfig(skill?: string): ResolvedModelConfig {
-    const override: AgentModelConfig | undefined = skill
-      ? this.config.skillModels[skill]
-      : undefined;
-    const names = settingNames(skill);
+    const override = this.overrideFor(skill);
+    const inherits = endpointInheritance(override, this.config.provider);
+    const names = settingNames(skill, inherits);
     const subject = skill ? `skill ${skill}` : 'the AI audit';
 
     const provider = override?.provider ?? this.config.provider;
@@ -142,8 +178,9 @@ export class ModelProviderFactory {
     return {
       provider,
       model,
-      apiKey: override?.apiKey ?? this.config.apiKey,
-      baseUrl: override?.baseUrl ?? this.config.baseUrl,
+      apiKey: override?.apiKey ?? (inherits.apiKey ? this.config.apiKey : null),
+      baseUrl:
+        override?.baseUrl ?? (inherits.baseUrl ? this.config.baseUrl : null),
       reasoningEffort,
     };
   }
@@ -151,15 +188,18 @@ export class ModelProviderFactory {
   /**
    * Resolves a skill's model configuration and checks that a model can be
    * built from it: besides a supported provider and a model, an API key for
-   * providers that require one and a base URL for `openai-compatible`. It cannot tell
-   * whether the key is valid or the endpoint reachable; such failures surface
-   * per request.
+   * providers that require one and a base URL for `openai-compatible`. It
+   * cannot tell whether the key is valid or the endpoint reachable; such
+   * failures surface per request.
    *
    * @throws AgentConfigurationError Naming the settings to fix.
    */
   resolveUsableModelConfig(skill?: string): ResolvedModelConfig {
     const resolved = this.resolveModelConfig(skill);
-    const names = settingNames(skill);
+    const names = settingNames(
+      skill,
+      endpointInheritance(this.overrideFor(skill), this.config.provider),
+    );
     const subject = skill ? `skill ${skill}` : 'the AI audit';
     const { provider } = resolved;
 
@@ -237,5 +277,10 @@ export class ModelProviderFactory {
 
     this.cache.set(cacheKey, built);
     return built;
+  }
+
+  /** The skill's `AGENT_SKILL_<ID>_*` override, if any. */
+  private overrideFor(skill?: string): AgentModelConfig | undefined {
+    return skill ? this.config.skillModels[skill] : undefined;
   }
 }

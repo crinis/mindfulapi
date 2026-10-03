@@ -493,7 +493,12 @@ Set only what you want to change; the profile fills in the rest.
 
 So `AGENT_REASONING_EFFORT` has no effect on skills that use a profile model; use the per-skill variable to change their effort. The effort is sent only to the `openai` provider. `anthropic` and `openai-compatible` ignore it, but setting it still omits `temperature` for that skill.
 
-`AGENT_SKILL_<ID>_{PROVIDER,API_KEY,BASE_URL}` route a single skill to an entirely different gateway. Each field falls back to its `AGENT_*` default independently. `<ID>` is the upper-cased skill id (`image_alt_text` → `IMAGE_ALT_TEXT`).
+`AGENT_SKILL_<ID>_{PROVIDER,API_KEY,BASE_URL}` route a single skill to an entirely different gateway. `<ID>` is the upper-cased skill id (`image_alt_text` → `IMAGE_ALT_TEXT`). Unset fields fall back to their `AGENT_*` default, except that a key and a base URL stay with the endpoint they were configured for:
+
+- An override that sets a **different provider** inherits neither `AGENT_API_KEY` nor `AGENT_BASE_URL`.
+- An override that sets its **own base URL** does not inherit `AGENT_API_KEY`.
+
+So the global key is never sent to another gateway or to a key-less local server. Give such a skill its own `AGENT_SKILL_<ID>_API_KEY` when its endpoint needs one; for `openai` and `anthropic` a scan request is rejected until it has one.
 
 ```bash
 # Zero-config optimized set: pick the provider, leave AGENT_MODEL unset →

@@ -151,6 +151,109 @@ describe('ModelProviderFactory.getModel', () => {
     expect(await factory.getModel('link_purpose')).toBe(link);
   });
 
+  describe('per-skill overrides and the global key and base URL', () => {
+    const LOCAL_ENDPOINT = 'http://127.0.0.1:9/v1';
+
+    it('does not send the global key to an endpoint of another provider', async () => {
+      // A key-less local server for one skill, OpenAI for the rest.
+      const factory = makeFactory({
+        provider: 'openai',
+        model: 'gpt-test',
+        apiKey: 'sk-openai-secret',
+        baseUrl: null,
+        skillModels: {
+          link_purpose: override({
+            provider: 'openai-compatible',
+            model: 'llama3.2',
+            baseUrl: LOCAL_ENDPOINT,
+          }),
+        },
+      });
+
+      expect(factory.resolveModelConfig('link_purpose')).toMatchObject({
+        apiKey: null,
+        baseUrl: LOCAL_ENDPOINT,
+      });
+      const sent = await requestSentBy(await factory.getModel('link_purpose'));
+      expect(sent.url.startsWith(LOCAL_ENDPOINT)).toBe(true);
+      expect(sent.authorization).toBeNull();
+    });
+
+    it('does not send the global key to a skill-specific base URL', async () => {
+      const factory = makeFactory({
+        provider: 'openai-compatible',
+        model: 'anthropic/claude-haiku-4.5',
+        apiKey: 'sk-or-secret',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        skillModels: {
+          page_title: override({ model: 'llama3.2', baseUrl: LOCAL_ENDPOINT }),
+        },
+      });
+
+      expect(factory.resolveModelConfig('page_title').apiKey).toBeNull();
+      const sent = await requestSentBy(await factory.getModel('page_title'));
+      expect(sent.url.startsWith(LOCAL_ENDPOINT)).toBe(true);
+      expect(sent.authorization).toBeNull();
+    });
+
+    it('does not use the global base URL for another provider', () => {
+      const factory = makeFactory({
+        provider: 'openai-compatible',
+        model: 'deepseek-chat',
+        apiKey: 'sk-deepseek',
+        baseUrl: 'https://api.deepseek.com',
+        skillModels: {
+          image_alt_text: override({ provider: 'openai', apiKey: 'sk-openai' }),
+        },
+      });
+
+      expect(factory.resolveModelConfig('image_alt_text')).toMatchObject({
+        provider: 'openai',
+        apiKey: 'sk-openai',
+        baseUrl: null,
+      });
+    });
+
+    it('inherits both when the override keeps the provider and endpoint', () => {
+      const factory = makeFactory({
+        provider: 'openai-compatible',
+        model: 'deepseek-chat',
+        apiKey: 'sk-deepseek',
+        baseUrl: 'https://api.deepseek.com',
+        skillModels: {
+          // Naming the same provider explicitly is not a switch.
+          link_purpose: override({
+            provider: 'openai-compatible',
+            model: 'deepseek-reasoner',
+          }),
+        },
+      });
+
+      expect(factory.resolveModelConfig('link_purpose')).toMatchObject({
+        apiKey: 'sk-deepseek',
+        baseUrl: 'https://api.deepseek.com',
+      });
+    });
+
+    it('names only the per-skill key when the global key is not inherited', () => {
+      const factory = makeFactory({
+        provider: 'openai',
+        model: 'gpt-test',
+        apiKey: 'sk-openai',
+        skillModels: {
+          image_alt_text: override({ provider: 'anthropic', model: 'claude' }),
+        },
+      });
+
+      expect(() => factory.resolveUsableModelConfig('image_alt_text')).toThrow(
+        /AGENT_SKILL_IMAGE_ALT_TEXT_API_KEY/,
+      );
+      expect(() =>
+        factory.resolveUsableModelConfig('image_alt_text'),
+      ).not.toThrow(/set AGENT_API_KEY/);
+    });
+  });
+
   it('applies a per-skill model override merged over the defaults', () => {
     const factory = makeFactory({
       provider: 'openai',
