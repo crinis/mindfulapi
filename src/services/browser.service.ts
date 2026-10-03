@@ -14,11 +14,15 @@ import { scanConfig } from '../config/configuration';
  * Resolution order:
  * 1. Connect to external browser if `PLAYWRIGHT_WS_URL` is set.
  * 2. Otherwise launch local headless Chromium.
+ *
+ * The browser is created lazily and replaced on demand: once it disconnects
+ * (crash, remote Playwright server restart) or a launch/connect attempt fails,
+ * the next {@link getBrowser} call starts a fresh one.
  */
 @Injectable()
 export class BrowserService implements OnApplicationShutdown {
   private readonly logger = new Logger(BrowserService.name);
-  /** Lazily initialized shared browser instance. */
+  /** Lazily initialized shared browser instance; null until connected. */
   private browser: Browser | null = null;
   /** In-flight initialization promise — prevents concurrent launches. */
   private initPromise: Promise<Browser> | null = null;
@@ -42,24 +46,52 @@ export class BrowserService implements OnApplicationShutdown {
   }
 
   /**
-   * Returns the shared browser instance, creating it on first access.
-   * Concurrent callers await the same initialization promise.
+   * Returns the shared browser instance, creating it on first access and
+   * replacing it once it has disconnected. Concurrent callers await the same
+   * initialization promise.
    */
   async getBrowser(): Promise<Browser> {
-    if (this.browser) return this.browser;
+    if (this.browser?.isConnected()) return this.browser;
+    if (this.browser) {
+      // Disconnected, but the `disconnected` event has not been handled yet.
+      this.forget(this.browser);
+    }
     this.initPromise ??= this.initBrowser();
     return this.initPromise;
   }
 
   /**
    * Initializes the browser by connecting externally or launching locally.
+   * A failed attempt is not cached, so the next call tries again.
    */
   private async initBrowser(): Promise<Browser> {
     const playwrightUrl = this.config.playwrightWsUrl;
-    this.browser = playwrightUrl
-      ? await this.connectToExternalPlaywright(playwrightUrl)
-      : await this.launchLocalBrowser();
-    return this.browser;
+    let browser: Browser;
+    try {
+      browser = playwrightUrl
+        ? await this.connectToExternalPlaywright(playwrightUrl)
+        : await this.launchLocalBrowser();
+    } catch (error) {
+      this.initPromise = null;
+      throw error;
+    }
+    browser.on('disconnected', () => {
+      if (this.browser !== browser) return;
+      this.logger.warn(
+        'Browser disconnected; the next scan starts a new browser connection',
+      );
+      this.forget(browser);
+    });
+    this.browser = browser;
+    return browser;
+  }
+
+  /** Drops a browser that is no longer usable so the next call replaces it. */
+  private forget(browser: Browser): void {
+    if (this.browser !== browser) return;
+    this.browser = null;
+    this.initPromise = null;
+    this.connectionType = null;
   }
 
   /**
@@ -113,23 +145,23 @@ export class BrowserService implements OnApplicationShutdown {
    * @param signal Optional shutdown signal reason.
    */
   async onApplicationShutdown(signal?: string): Promise<void> {
-    if (!this.browser) return;
+    const browser = this.browser;
+    if (!browser) return;
 
     const mode = this.connectionType || 'unknown';
     this.logger.log(
       `Shutting down ${mode} browser connection due to ${signal || 'application shutdown'}`,
     );
 
-    await this.browser.close();
+    // Forget it first: the `disconnected` event of an intentional close is
+    // not a crash.
+    this.forget(browser);
+    await browser.close();
 
     if (mode === 'external') {
       this.logger.log('Disconnected from external Playwright instance');
     } else {
       this.logger.log('Local browser instance closed');
     }
-
-    this.browser = null;
-    this.initPromise = null;
-    this.connectionType = null;
   }
 }
