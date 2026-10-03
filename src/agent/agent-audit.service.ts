@@ -16,11 +16,11 @@ import type {
   AuditSkill,
   Evidence,
 } from './skills/audit-skill.interface';
+import { MAX_SELECTOR_LENGTH } from './skills/audit-skill.interface';
 
 /** Length caps for persisted finding fields. */
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_SUGGESTION_LENGTH = 1000;
-const MAX_SELECTOR_LENGTH = 1000;
 
 /**
  * How much earlier than the collection deadline the skills are told to be
@@ -357,7 +357,12 @@ export class AgentAuditService {
       scan: { id: scanId } as Scan,
       skill: draft.skill,
       pageUrl: draft.pageUrl,
-      selector: truncate(draft.selector, MAX_SELECTOR_LENGTH),
+      // A cut selector would be invalid or locate another element: a finding
+      // whose selector is too long is stored without one.
+      selector:
+        draft.selector && draft.selector.length <= MAX_SELECTOR_LENGTH
+          ? draft.selector
+          : undefined,
       category: draft.category,
       wcag: draft.wcag ?? undefined,
       severity: draft.severity,

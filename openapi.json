@@ -1604,7 +1604,8 @@
           "selector": {
             "type": "string",
             "nullable": true,
-            "example": "img.hero"
+            "example": "img.hero",
+            "description": "CSS selector of the evaluated element. Null for page-level findings, and when the selector would be longer than 1000 characters: it is left out rather than cut."
           },
           "message": {
             "type": "string",

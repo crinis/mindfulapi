@@ -483,7 +483,7 @@ Every `agentFindings` entry has the **same shape regardless of skill**, so clien
 | `needsHumanReview` | `true` when low-confidence/unjudgeable — triage flag |
 | `message` | **Human-readable problem description** |
 | `suggestion` | Concrete fix, when offered |
-| `pageUrl`, `selector` | Where the problem is |
+| `pageUrl`, `selector` | Where the problem is. `selector` is `null` for page-level findings, and when the selector would be longer than 1000 characters (for example for an image deep in a large page that only a long path tells apart from others): it is left out rather than cut |
 | `details` | Skill-specific extras (e.g. `currentAlt` and `src` for images, `suggestedLevel` for headings; `src` is _unreleased_) |
 | `model` | Provenance — the model that produced the finding |
 

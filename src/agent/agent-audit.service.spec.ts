@@ -3,6 +3,7 @@ import {
   AgentAuditService,
   SKILL_DEADLINE_LEAD_MS,
 } from './agent-audit.service';
+import { MAX_SELECTOR_LENGTH } from './skills/audit-skill.interface';
 import { agentConfig } from '../config/configuration';
 import { AgentSkill } from '../enums/agent-skill.enum';
 import { IssueImpact } from '../enums/issue-impact.enum';
@@ -465,6 +466,41 @@ describe('AgentAuditService.evaluate', () => {
       aiTasksCompleted: 1,
       aiTasksFailed: 2,
     });
+  });
+
+  it('stores no selector rather than a cut one', async () => {
+    // A cut selector would be invalid CSS or match the wrong element.
+    const { service, findingRepository } = makeService();
+    const longest = `#${'a'.repeat(MAX_SELECTOR_LENGTH - 1)}`;
+    const skill = {
+      id: AgentSkill.IMAGE_ALT_TEXT,
+      evaluate: jest.fn((unit: { selector: string }) =>
+        Promise.resolve([
+          {
+            ...problemDraft(),
+            selector: unit.selector,
+            usage: { inputTokens: 0, outputTokens: 0 },
+          },
+        ]),
+      ),
+    } as unknown as AuditSkill;
+
+    await service.evaluate(
+      { id: 1 } as Scan,
+      [
+        { skill, evidence: { ...evidence, selector: longest } },
+        { skill, evidence: { ...evidence, selector: `${longest}b` } },
+      ],
+      () => Promise.resolve(false),
+    );
+
+    const stored = findingRepository.save.mock.calls.map(
+      ([rows]: [Array<{ selector?: string }>]) => rows[0].selector,
+    );
+    // Units run concurrently, so the saves may come in either order.
+    expect(stored).toHaveLength(2);
+    expect(stored).toContain(longest);
+    expect(stored).toContain(undefined);
   });
 
   it('saves findings through the shared write queue', async () => {

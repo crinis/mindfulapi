@@ -72,11 +72,12 @@ describe('ImageAltTextSkill.collect (real browser)', () => {
             .querySelectorAll('[data-mfa-audit-id]')
             .forEach((el) => el.removeAttribute('data-mfa-audit-id'));
           return selectors.map((selector) => {
+            if (selector === null) return null;
             const matches = document.querySelectorAll(selector);
             return matches.length === 1 ? matches[0].getAttribute('alt') : null;
           });
         },
-        evidence.map((item) => item.selector),
+        evidence.map((item) => item.selector ?? null),
       );
       return { evidence, altAt };
     } finally {
@@ -153,6 +154,38 @@ describe('ImageAltTextSkill.collect (real browser)', () => {
       <div id="card"><img alt="Second" width="80" height="80" src="${PNG}"></div>`);
 
     expect(altAt).toEqual(['First', 'Second']);
+  });
+
+  it('grows a selector one step at a time until it matches only its image', async () => {
+    // Deep in the page, under 250 nested divs: the full path to the root is
+    // far longer than a stored selector may be, and six steps suffice.
+    const card = (alt: string): string => `
+      <li><div><div><a href="#"><picture>
+        <img alt="${alt}" width="80" height="80" src="${PNG}">
+      </picture></a></div></div></li>`;
+    const { evidence, altAt } = await collectFrom(
+      `${'<div>'.repeat(250)}<ul>${card('Red shoe')}${card('Blue shoe')}</ul>${'</div>'.repeat(250)}`,
+    );
+
+    expect(altAt).toEqual(['Red shoe', 'Blue shoe']);
+    expect(evidence.map((item) => item.selector)).toEqual([
+      'li:nth-of-type(1) > div > div > a > picture > img',
+      'li:nth-of-type(2) > div > div > a > picture > img',
+    ]);
+  });
+
+  it('stores no selector when only a path longer than the stored cap is unique', async () => {
+    // Two identical branches 300 divs deep: only the step where they part
+    // tells the images apart, more than 1000 characters up.
+    const branch = (alt: string): string =>
+      `<section>${'<div>'.repeat(300)}<img alt="${alt}" width="80" height="80" src="${PNG}">${'</div>'.repeat(300)}</section>`;
+    const { evidence } = await collectFrom(branch('Left') + branch('Right'));
+
+    expect(evidence.map((item) => item.alt)).toEqual(['Left', 'Right']);
+    expect(evidence.map((item) => item.selector)).toEqual([
+      undefined,
+      undefined,
+    ]);
   });
 
   it('caps the page-controlled text sent to the model and stored', async () => {

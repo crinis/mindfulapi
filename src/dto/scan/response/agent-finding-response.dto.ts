@@ -50,7 +50,13 @@ export class AgentFindingResponseDto {
   pageUrl: string | null;
 
   /** CSS selector for the evaluated element, when applicable. */
-  @ApiProperty({ type: 'string', nullable: true, example: 'img.hero' })
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    example: 'img.hero',
+    description:
+      'CSS selector of the evaluated element. Null for page-level findings, and when the selector would be longer than 1000 characters: it is left out rather than cut.',
+  })
   selector: string | null;
 
   /** Human-readable description of the problem (present on every finding). */

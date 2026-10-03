@@ -11,6 +11,7 @@ import type {
   CollectContext,
   Evidence,
 } from './audit-skill.interface';
+import { MAX_SELECTOR_LENGTH } from './audit-skill.interface';
 
 /** Minimum rendered dimension (px) for an image to be worth reviewing. */
 const MIN_RENDERED_PX = 24;
@@ -78,8 +79,12 @@ interface ImageDescriptor {
    * locate it for the screenshot while the page is open.
    */
   auditId: string;
-  /** CSS selector emitted to the client (the finding's locator). */
-  selector: string;
+  /**
+   * CSS selector emitted to the client (the finding's locator): it matches
+   * only this image. Absent when every such selector is longer than
+   * {@link MAX_SELECTOR_LENGTH}.
+   */
+  selector?: string;
   src?: string;
   role?: string;
   alt: string | null;
@@ -95,7 +100,7 @@ interface ImageDescriptor {
 /** Image evidence, including a cropped element screenshot. */
 export interface ImageEvidence extends Evidence, ImageDescriptor {
   pageUrl: string;
-  selector: string;
+  selector?: string;
   screenshot?: Buffer;
   screenshotMediaType?: string;
 }
@@ -195,7 +200,7 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
           .screenshot({ type: 'png', timeout, animations: 'disabled' });
         if (screenshot.byteLength > ctx.maxImageBytes) {
           this.logger.warn(
-            `Dropping oversized screenshot for ${descriptor.selector} on ${ctx.pageUrl}.`,
+            `Dropping oversized screenshot for ${descriptor.selector ?? 'an image'} on ${ctx.pageUrl}.`,
           );
           screenshot = undefined;
         }
@@ -205,7 +210,7 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
           break;
         }
         this.logger.debug(
-          `Screenshot failed for ${descriptor.selector} on ${ctx.pageUrl}: ${String(error)}`,
+          `Screenshot failed for ${descriptor.selector ?? 'an image'} on ${ctx.pageUrl}: ${String(error)}`,
         );
       }
       evidence.push({
@@ -289,7 +294,7 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
     rootElement: string | undefined,
   ): Promise<ImageDescriptor[]> {
     return page.evaluate(
-      ({ limit, minPx, nameMax, srcMax, rootElement }) => {
+      ({ limit, minPx, nameMax, srcMax, selectorMax, rootElement }) => {
         // The scan's root element, scoped like axe's include: every match,
         // nested matches once, the matches themselves included. Without a
         // root element, the whole document.
@@ -340,23 +345,27 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
           }
           return parts.join(' > ');
         };
-        // A path that fixes every step to its position, from the root
-        // element down: unique by construction. `:not(* *)` anchors the first
-        // step, as in the heading skill's positionalPath (page.evaluate
-        // cannot share code between skills).
-        const positionalPath = (target: Element): string => {
+        // A path of at most `maxSteps` steps that fixes every step to its
+        // position. Reaching the root element, it is unique by construction:
+        // `:not(* *)` anchors its first step there, as in the heading skill's
+        // positionalPath (page.evaluate cannot share code between skills).
+        const positionalPath = (target: Element, maxSteps: number): string => {
           const parts: string[] = [];
-          for (let n: Element | null = target; n; n = n.parentElement) {
+          let n: Element | null = target;
+          for (; n && parts.length < maxSteps; n = n.parentElement) {
             const parent = n.parentElement ?? (n.parentNode as ParentNode);
             const position = Array.from(parent.children).indexOf(n) + 1;
             parts.unshift(`${CSS.escape(n.localName)}:nth-child(${position})`);
           }
-          parts[0] += ':not(* *)';
+          if (!n) parts[0] += ':not(* *)';
           return parts.join(' > ');
         };
-        // The stored selector must find this image and nothing else: the
-        // short path, else the path up to the root (or an id), else the
-        // positional path (a duplicate id defeats the other two).
+        // The stored selector must find this image and nothing else, and fit
+        // the stored length (a cut one would be invalid): the CSS path,
+        // grown one step at a time from five steps up to the root (or an
+        // id), else the positional path grown the same way from one step (a
+        // duplicate id defeats the CSS path). None when every unique path is
+        // too long.
         const findsOnly = (path: string, target: Element): boolean => {
           try {
             const matches = document.querySelectorAll(path);
@@ -366,10 +375,22 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
             return false;
           }
         };
-        const uniquePath = (target: Element): string =>
-          [cssPath(target, 5), cssPath(target, Infinity)].find((path) =>
-            findsOnly(path, target),
-          ) ?? positionalPath(target);
+        const grow = (
+          target: Element,
+          build: (target: Element, maxSteps: number) => string,
+          firstSteps: number,
+        ): string | undefined => {
+          let previous: string | undefined;
+          for (let steps = firstSteps; ; steps++) {
+            const path = build(target, steps);
+            // It reached the root (or an id), or grew past the stored length.
+            if (path === previous || path.length > selectorMax) return;
+            if (findsOnly(path, target)) return path;
+            previous = path;
+          }
+        };
+        const uniquePath = (target: Element): string | undefined =>
+          grow(target, cssPath, 5) ?? grow(target, positionalPath, 1);
 
         // Caps page-controlled text; a cut value ends in an ellipsis.
         const clip = (value: string, max: number): string =>
@@ -478,6 +499,7 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
         minPx: MIN_RENDERED_PX,
         nameMax: NAME_MAX,
         srcMax: SRC_MAX,
+        selectorMax: MAX_SELECTOR_LENGTH,
         rootElement: rootElement ?? null,
       },
     );

@@ -8,6 +8,12 @@ import type {
 } from '../harness/agent-harness.service';
 
 /**
+ * Longest selector a finding stores. A longer one is not stored at all: cut,
+ * it would be invalid or match another element.
+ */
+export const MAX_SELECTOR_LENGTH = 1000;
+
+/**
  * Minimal evidence a skill extracts from a live page. Concrete skills extend
  * this with their own fields (e.g. image attributes + screenshot).
  */
