@@ -1,4 +1,21 @@
-import { AxeAccessibilityScanner } from './axe-accessibility-scanner.service';
+const mockAxeBuilder = {
+  include: jest.fn().mockReturnThis(),
+  withRules: jest.fn().mockReturnThis(),
+  analyze: jest.fn().mockResolvedValue({ violations: [] }),
+};
+const mockAxeBuilderCtor = jest.fn(() => mockAxeBuilder);
+
+jest.mock('@axe-core/playwright', () => ({
+  __esModule: true,
+  default: function AxeBuilder(...args: unknown[]) {
+    return (mockAxeBuilderCtor as (...a: unknown[]) => unknown)(...args);
+  },
+}));
+
+import {
+  AxeAccessibilityScanner,
+  PageNavigationError,
+} from './axe-accessibility-scanner.service';
 import type { UrlPolicyService } from './url-policy.service';
 
 /** Minimal Playwright Route stub capturing continue/abort outcomes. */
@@ -101,5 +118,66 @@ describe('AxeAccessibilityScanner target-policy guard', () => {
 
     // Same host → resolved once, then served from the per-context cache.
     expect(urlPolicy.isAllowedTarget).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('AxeAccessibilityScanner navigation outcome', () => {
+  let scanner: AxeAccessibilityScanner;
+
+  /** Page stub whose goto() resolves with the given navigation response. */
+  const makePage = (
+    response: { status: () => number } | null,
+    finalUrl = 'https://example.com/',
+  ) => ({
+    goto: jest.fn().mockResolvedValue(response),
+    url: jest.fn().mockReturnValue(finalUrl),
+    context: jest.fn().mockReturnValue({}),
+  });
+  const respond = (status: number) => ({ status: () => status });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockAxeBuilder.analyze.mockResolvedValue({ violations: [] });
+    scanner = new AxeAccessibilityScanner(
+      { ignoreHttpsErrors: false, allowPrivateTargets: true } as any,
+      { isAllowedTarget: jest.fn() } as unknown as UrlPolicyService,
+    );
+  });
+
+  it.each([401, 403, 404, 410, 500, 503])(
+    'rejects a navigation ending with HTTP %i without analysing the error page',
+    async (status) => {
+      const page = makePage(respond(status));
+
+      const scan = scanner.scanPage(page as any, 'https://example.com/');
+
+      await expect(scan).rejects.toThrow(PageNavigationError);
+      await expect(scan).rejects.toThrow(`HTTP ${status}`);
+      expect(mockAxeBuilderCtor).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects a navigation that produced no response', async () => {
+    const page = makePage(null);
+
+    await expect(
+      scanner.scanPage(page as any, 'https://example.com/'),
+    ).rejects.toThrow(PageNavigationError);
+    expect(mockAxeBuilderCtor).not.toHaveBeenCalled();
+  });
+
+  it('analyses a 2xx page and reports the post-redirect URL', async () => {
+    const page = makePage(respond(200), 'https://www.example.com/');
+
+    const result = await scanner.scanPage(page as any, 'https://example.com/');
+
+    expect(page.goto).toHaveBeenCalledWith('https://example.com/', {
+      waitUntil: 'domcontentloaded',
+    });
+    expect(mockAxeBuilder.analyze).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      finalUrl: 'https://www.example.com/',
+      issues: [],
+    });
   });
 });

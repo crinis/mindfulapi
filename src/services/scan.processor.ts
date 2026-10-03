@@ -21,6 +21,7 @@ import { BrowserService } from './browser.service';
 import {
   AxeAccessibilityScanner,
   BasicAuth,
+  PageRejectedError,
   ScanOptions,
   ScannedIssue,
 } from './axe-accessibility-scanner.service';
@@ -459,6 +460,7 @@ export class ScanProcessor extends WorkerHost {
           const page = await context.newPage();
           try {
             // Scan phase — failures here count as page failures.
+            let discoverLinks = true;
             try {
               const { issues } = await this.scanner.scanPage(
                 page,
@@ -470,13 +472,16 @@ export class ScanProcessor extends WorkerHost {
               await this.collectAgentEvidence(agent, page, page.url(), issues);
             } catch (error) {
               progress.pagesFailed += 1;
+              // A rejected page (e.g. an HTTP error page) is not site
+              // content, so its links are not followed either.
+              discoverLinks = !(error instanceof PageRejectedError);
               this.logger.warn(
                 `Failed page ${request.url} in scan ${scan.id}: ${String(error)}`,
               );
             }
 
             // Link discovery phase — non-fatal; failures do not affect counters.
-            if (depth < maxDepth && seen.size < maxPages) {
+            if (discoverLinks && depth < maxDepth && seen.size < maxPages) {
               let hrefs: string[] = [];
               try {
                 hrefs = await page.evaluate(() =>

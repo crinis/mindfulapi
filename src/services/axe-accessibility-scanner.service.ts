@@ -56,6 +56,21 @@ export interface ScanPageResult {
 }
 
 /**
+ * A page whose content must not be analysed or stored — it is not content of
+ * the scanned site. Callers count it as a failed page and must not mine it for
+ * links or AI-audit evidence.
+ */
+export class PageRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = new.target.name;
+  }
+}
+
+/** The navigation ended on an HTTP error page (status >= 400) or without a response. */
+export class PageNavigationError extends PageRejectedError {}
+
+/**
  * Axe-core accessibility scanner using @axe-core/playwright.
  */
 @Injectable()
@@ -162,6 +177,7 @@ export class AxeAccessibilityScanner {
    * @param page Playwright page instance.
    * @param url Target URL to navigate/analyze.
    * @param options Optional scan configuration.
+   * @throws PageRejectedError When the page must not be analysed (see {@link openPage}).
    */
   async scanPage(
     page: Page,
@@ -170,8 +186,40 @@ export class AxeAccessibilityScanner {
   ): Promise<ScanPageResult> {
     this.logger.log(`Starting axe scan for URL: ${url}`);
 
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
-    return this.analyzeLoadedPage(page, options, page.url());
+    const { finalUrl } = await this.openPage(page, url);
+    return this.analyzeLoadedPage(page, options, finalUrl);
+  }
+
+  /**
+   * Navigates to a URL and verifies the navigation produced a page worth
+   * analysing.
+   *
+   * @param page Playwright page instance.
+   * @param url Target URL to navigate to.
+   * @returns The final URL (after redirects) and its HTTP status.
+   * @throws PageNavigationError When the final response is an HTTP error
+   * (status >= 400) or the navigation produced no response — an error page is
+   * not content of the scanned site.
+   */
+  async openPage(
+    page: Page,
+    url: string,
+  ): Promise<{ finalUrl: string; status: number }> {
+    const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
+
+    if (!response) {
+      throw new PageNavigationError(
+        `Navigation to ${url} produced no response`,
+      );
+    }
+    const status = response.status();
+    const finalUrl = page.url();
+    if (status >= 400) {
+      throw new PageNavigationError(
+        `Navigation to ${url} ended with HTTP ${status}${finalUrl !== url ? ` at ${finalUrl}` : ''}`,
+      );
+    }
+    return { finalUrl, status };
   }
 
   /**

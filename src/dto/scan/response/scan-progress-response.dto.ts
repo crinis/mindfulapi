@@ -27,7 +27,8 @@ export class ScanProgressResponseDto {
     type: 'integer',
     example: 3,
     minimum: 0,
-    description: 'Number of pages that failed during processing.',
+    description:
+      'Number of pages that failed during processing. Includes pages whose navigation ended with an HTTP error status (400 or higher); such error pages are not analysed and contribute no issues.',
   })
   pagesFailed: number;
 }

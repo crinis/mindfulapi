@@ -37,6 +37,7 @@ jest.mock('@crawlee/memory-storage', () => ({
 
 import { ScanProcessor } from './scan.processor';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
+import { PageNavigationError } from './axe-accessibility-scanner.service';
 import { scanConfig } from '../config/configuration';
 import { Scan } from '../entities/scan.entity';
 import { ScanMode } from '../enums/scan-mode.enum';
@@ -481,6 +482,79 @@ describe('ScanProcessor', () => {
       pagesDiscovered: 1,
       pagesScanned: 1,
       pagesFailed: 0,
+    });
+  });
+
+  it('never stores, audits or mines links from a rejected crawl page', async () => {
+    mockScanQb.getOne.mockResolvedValue(
+      makeScan({ mode: ScanMode.CRAWL, targets: ['https://example.com'] }),
+    );
+    mockAgentAudit.resolveSkills.mockReturnValue([{ id: 'page_title' }]);
+    const page = {
+      url: jest.fn().mockReturnValue('https://example.com/'),
+      evaluate: jest.fn().mockResolvedValue(['https://example.com/about']),
+      close: jest.fn().mockResolvedValue(undefined),
+    };
+    mockContext.newPage.mockResolvedValue(page);
+    mockScanner.scanPage.mockRejectedValue(
+      new PageNavigationError(
+        'Navigation to https://example.com/ ended with HTTP 404',
+      ),
+    );
+    const enqueueLinks = jest.fn();
+
+    mockCrawlerRunHandler = async ({ requestHandler }) => {
+      await requestHandler({
+        request: {
+          url: 'https://example.com/',
+          uniqueKey: 'https://example.com/',
+          userData: { depth: 0 },
+        },
+        enqueueLinks,
+      });
+    };
+
+    await processor.process({ data: { scanId: 1 } } as any);
+
+    expect(mockIssueRepo.save).not.toHaveBeenCalled();
+    expect(mockAgentAudit.collectForPage).not.toHaveBeenCalled();
+    expect(page.evaluate).not.toHaveBeenCalled();
+    expect(enqueueLinks).not.toHaveBeenCalled();
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      status: ScanStatus.COMPLETED,
+      pagesDiscovered: 1,
+      pagesScanned: 0,
+      pagesFailed: 1,
+    });
+  });
+
+  it('counts an HTTP error page in a url_list as failed and stores nothing', async () => {
+    mockScanQb.getOne.mockResolvedValue(
+      makeScan({
+        mode: ScanMode.URL_LIST,
+        targets: ['https://example.com/a', 'https://example.com/missing'],
+      }),
+    );
+    mockAgentAudit.resolveSkills.mockReturnValue([{ id: 'page_title' }]);
+    mockScanner.scanPage.mockImplementation((_page: unknown, url: string) =>
+      url.endsWith('/missing')
+        ? Promise.reject(
+            new PageNavigationError(`Navigation to ${url} ended with HTTP 404`),
+          )
+        : Promise.resolve({ finalUrl: url, issues: [] }),
+    );
+
+    await processor.process({ data: { scanId: 1 } } as any);
+
+    expect(mockAgentAudit.collectForPage).toHaveBeenCalledTimes(1);
+    expect(mockAgentAudit.collectForPage.mock.calls[0][2]).toBe(
+      'https://example.com/',
+    );
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      status: ScanStatus.COMPLETED,
+      pagesDiscovered: 2,
+      pagesScanned: 1,
+      pagesFailed: 1,
     });
   });
 
