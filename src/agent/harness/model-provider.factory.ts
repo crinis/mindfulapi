@@ -48,7 +48,7 @@ interface ModelSettingNames {
  * Which global endpoint settings a skill's override inherits. A key and a
  * base URL belong to the endpoint they were configured for, so an override
  * that switches the provider inherits neither, and an override with its own
- * base URL does not inherit the key.
+ * base URL does not inherit the key, unless that base URL is the global one.
  */
 interface EndpointInheritance {
   apiKey: boolean;
@@ -57,14 +57,38 @@ interface EndpointInheritance {
 
 function endpointInheritance(
   override: AgentModelConfig | undefined,
-  globalProvider: string | null,
+  global: { provider: string | null; baseUrl: string | null },
 ): EndpointInheritance {
   const switchesProvider =
-    !!override?.provider && override.provider !== globalProvider;
+    !!override?.provider && override.provider !== global.provider;
+  const ownEndpoint =
+    !!override?.baseUrl && !sameEndpoint(override.baseUrl, global.baseUrl);
   return {
-    apiKey: !switchesProvider && !override?.baseUrl,
+    apiKey: !switchesProvider && !ownEndpoint,
     baseUrl: !switchesProvider,
   };
+}
+
+/**
+ * Whether two base URLs name the same endpoint: equal once the scheme and
+ * host are lower-cased, a default port is dropped and trailing slashes are
+ * removed from the path. Everything else must match exactly (paths are
+ * case-sensitive), and a value that is not a URL matches only itself.
+ */
+function sameEndpoint(a: string, b: string | null): boolean {
+  if (b === null) return false;
+  if (a === b) return true;
+  const normalize = (value: string): string | null => {
+    try {
+      const url = new URL(value);
+      url.pathname = url.pathname.replace(/\/+$/, '');
+      return url.href;
+    } catch {
+      return null;
+    }
+  };
+  const normalized = normalize(a);
+  return normalized !== null && normalized === normalize(b);
 }
 
 /**
@@ -82,7 +106,7 @@ function settingNames(
     return inherited
       ? `AGENT_${field} or ${own}`
       : `${own} (AGENT_${field} does not apply to a skill whose override ` +
-          `sets another provider or its own base URL)`;
+          `sets another provider or another base URL)`;
   };
   return {
     provider: either('PROVIDER'),
@@ -133,16 +157,18 @@ export class ModelProviderFactory {
    *
    * The API key and base URL fall back to `AGENT_API_KEY`/`AGENT_BASE_URL`
    * only while the override stays on the global endpoint: an override that
-   * sets another provider inherits neither, and one with its own base URL
-   * does not inherit the key, so a key is never sent to an endpoint it was not
-   * configured for.
+   * sets another provider inherits neither, and one with a base URL other
+   * than `AGENT_BASE_URL` does not inherit the key, so a key is never sent to
+   * an endpoint it was not configured for. A base URL that differs from
+   * `AGENT_BASE_URL` only in a trailing slash or the case of its scheme or
+   * host is the same endpoint.
    *
    * @throws AgentConfigurationError When the provider is unset or not
    * supported, or no model is configured.
    */
   resolveModelConfig(skill?: string): ResolvedModelConfig {
     const override = this.overrideFor(skill);
-    const inherits = endpointInheritance(override, this.config.provider);
+    const inherits = endpointInheritance(override, this.config);
     const names = settingNames(skill, inherits);
     const subject = skill ? `skill ${skill}` : 'the AI audit';
 
@@ -198,7 +224,7 @@ export class ModelProviderFactory {
     const resolved = this.resolveModelConfig(skill);
     const names = settingNames(
       skill,
-      endpointInheritance(this.overrideFor(skill), this.config.provider),
+      endpointInheritance(this.overrideFor(skill), this.config),
     );
     const subject = skill ? `skill ${skill}` : 'the AI audit';
     const { provider } = resolved;

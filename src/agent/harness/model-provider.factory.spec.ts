@@ -196,6 +196,80 @@ describe('ModelProviderFactory.getModel', () => {
       expect(sent.authorization).toBeNull();
     });
 
+    it('sends the global key to an override base URL that is the global endpoint', async () => {
+      // The same endpoint written with a trailing slash and an upper-case
+      // scheme and host, as operators copy it between variables.
+      for (const sameEndpoint of [
+        `${LOCAL_ENDPOINT}/`,
+        'HTTP://127.0.0.1:9/v1',
+        'http://127.0.0.1:9/v1//',
+      ]) {
+        const factory = makeFactory({
+          provider: 'openai-compatible',
+          model: 'llama3.2',
+          apiKey: 'sk-gateway',
+          baseUrl: LOCAL_ENDPOINT,
+          skillModels: {
+            page_title: override({ model: 'small', baseUrl: sameEndpoint }),
+          },
+        });
+
+        expect(factory.resolveModelConfig('page_title').apiKey).toBe(
+          'sk-gateway',
+        );
+        const sent = await requestSentBy(await factory.getModel('page_title'));
+        expect(sent.url.startsWith(LOCAL_ENDPOINT)).toBe(true);
+        expect(sent.authorization).toBe('Bearer sk-gateway');
+      }
+    });
+
+    it('does not send the global key to a base URL that only resembles the global one', () => {
+      for (const otherEndpoint of [
+        'http://127.0.0.1:9/V1', // paths are case-sensitive
+        'http://127.0.0.1:9/v1/chat',
+        'http://127.0.0.1:9/v2',
+        'http://127.0.0.1:10/v1',
+        'https://127.0.0.1:9/v1',
+        'http://localhost:9/v1',
+        'http://127.0.0.1:9@attacker.example/v1',
+        'http://127.0.0.1:9/v1?key=1',
+        'not a url',
+      ]) {
+        const factory = makeFactory({
+          provider: 'openai-compatible',
+          model: 'llama3.2',
+          apiKey: 'sk-gateway',
+          baseUrl: LOCAL_ENDPOINT,
+          skillModels: {
+            page_title: override({ model: 'small', baseUrl: otherEndpoint }),
+          },
+        });
+
+        expect(factory.resolveModelConfig('page_title')).toMatchObject({
+          apiKey: null,
+          baseUrl: otherEndpoint,
+        });
+      }
+    });
+
+    it('does not send the global key to the same base URL under another provider', () => {
+      const factory = makeFactory({
+        provider: 'openai',
+        model: 'gpt-test',
+        apiKey: 'sk-openai-secret',
+        baseUrl: LOCAL_ENDPOINT,
+        skillModels: {
+          link_purpose: override({
+            provider: 'openai-compatible',
+            model: 'llama3.2',
+            baseUrl: LOCAL_ENDPOINT,
+          }),
+        },
+      });
+
+      expect(factory.resolveModelConfig('link_purpose').apiKey).toBeNull();
+    });
+
     it('does not use the global base URL for another provider', () => {
       const factory = makeFactory({
         provider: 'openai-compatible',
