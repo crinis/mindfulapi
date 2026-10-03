@@ -33,7 +33,7 @@ jest.mock('@crawlee/memory-storage', () => ({
 }));
 
 import { enqueueLinks as crawleeEnqueueLinks } from '@crawlee/core';
-import { ScanProcessor } from './scan.processor';
+import { PAGE_DEADLINE_MS, ScanProcessor } from './scan.processor';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
 import {
   PageNavigationError,
@@ -1066,6 +1066,182 @@ describe('ScanProcessor', () => {
 
     expect(page.evaluate).not.toHaveBeenCalled();
     expect(enqueueLinks).not.toHaveBeenCalled();
+  });
+
+  describe('per-page deadline', () => {
+    beforeEach(() => {
+      jest.useFakeTimers({
+        doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'],
+      });
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    /** A page whose `closed` promise settles once the page is closed. */
+    const closablePage = (url = 'https://example.com/') => {
+      let markClosed!: () => void;
+      const page = {
+        url: jest.fn().mockReturnValue(url),
+        evaluate: jest.fn().mockResolvedValue(['https://example.com/next']),
+        close: jest.fn(() => {
+          markClosed();
+          return Promise.resolve();
+        }),
+        closed: new Promise<void>((resolve) => {
+          markClosed = resolve;
+        }),
+      };
+      return page;
+    };
+    type ClosablePage = ReturnType<typeof closablePage>;
+
+    /** Runs a job while letting the page deadline elapse. */
+    const processPastDeadline = async () => {
+      const run = processor.process({ data: { scanId: 1 } } as any);
+      await jest.advanceTimersByTimeAsync(PAGE_DEADLINE_MS);
+      await run;
+    };
+
+    it('fails a page whose analysis never settles, closes it and scans the rest', async () => {
+      mockScanQb.getOne.mockResolvedValue(
+        makeScan({
+          mode: ScanMode.URL_LIST,
+          targets: ['https://example.com/busy', 'https://example.com/fine'],
+        }),
+      );
+      const pages: ClosablePage[] = [];
+      mockContext.newPage.mockImplementation(() => {
+        const page = closablePage();
+        pages.push(page);
+        return Promise.resolve(page);
+      });
+      mockScanner.scanPage.mockImplementation((_page: unknown, url: string) =>
+        url.endsWith('/busy')
+          ? new Promise(() => undefined)
+          : Promise.resolve({ finalUrl: url, issues: [] }),
+      );
+
+      await processPastDeadline();
+
+      expect(pages[0].close).toHaveBeenCalled();
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+        status: ScanStatus.COMPLETED,
+        pagesDiscovered: 2,
+        pagesScanned: 1,
+        pagesFailed: 1,
+      });
+    });
+
+    it('discards what a page produces after its deadline expired', async () => {
+      mockScanQb.getOne.mockResolvedValue(makeScan());
+      mockAgentAudit.resolveSkills.mockReturnValue([{ id: 'image_alt_text' }]);
+      (mockAgentAudit as any).remainingScanUnits = jest
+        .fn()
+        .mockReturnValue(10);
+      const page = closablePage();
+      mockContext.newPage.mockResolvedValue(page);
+      mockScanner.scanPage.mockResolvedValue({
+        finalUrl: 'https://example.com/',
+        issues: [
+          {
+            ruleId: 'image-alt',
+            description: 'Images must have alternative text',
+            impact: IssueImpact.CRITICAL,
+            pageUrl: 'https://example.com/',
+          },
+        ],
+      });
+      // Screenshots of a page whose main thread is busy hang until the page
+      // closes; the collection then finishes with what it had.
+      mockAgentAudit.collectForPage.mockImplementation(() =>
+        page.closed.then(() => [{ id: 'late-unit' }]),
+      );
+
+      await processPastDeadline();
+
+      expect(page.close).toHaveBeenCalled();
+      expect(mockIssueRepo.save).not.toHaveBeenCalled();
+      expect(mockAgentAudit.evaluate).not.toHaveBeenCalled();
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+        status: ScanStatus.COMPLETED,
+        pagesDiscovered: 1,
+        pagesScanned: 0,
+        pagesFailed: 1,
+      });
+    });
+
+    it('fails a crawl page that hangs during analysis without mining its links', async () => {
+      mockScanQb.getOne.mockResolvedValue(
+        makeScan({ mode: ScanMode.CRAWL, targets: ['https://example.com'] }),
+      );
+      const page = closablePage();
+      mockContext.newPage.mockResolvedValue(page);
+      mockScanner.analyzeLoadedPage.mockReturnValue(
+        new Promise(() => undefined),
+      );
+      const crawl = simulateCrawl(['https://example.com/']);
+      mockCrawlerRunHandler = crawl.run;
+
+      await processPastDeadline();
+
+      expect(page.close).toHaveBeenCalled();
+      expect(page.evaluate).not.toHaveBeenCalled();
+      expect(crawl.enqueueCalls).toEqual([]);
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+        status: ScanStatus.COMPLETED,
+        pagesDiscovered: 1,
+        pagesScanned: 0,
+        pagesFailed: 1,
+      });
+    });
+
+    it('covers link extraction too', async () => {
+      mockScanQb.getOne.mockResolvedValue(
+        makeScan({ mode: ScanMode.CRAWL, targets: ['https://example.com'] }),
+      );
+      const page = closablePage();
+      page.evaluate.mockReturnValue(new Promise(() => undefined));
+      mockContext.newPage.mockResolvedValue(page);
+      const crawl = simulateCrawl(['https://example.com/']);
+      mockCrawlerRunHandler = crawl.run;
+
+      await processPastDeadline();
+
+      expect(page.close).toHaveBeenCalled();
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+        status: ScanStatus.COMPLETED,
+        pagesDiscovered: 1,
+        pagesScanned: 0,
+        pagesFailed: 1,
+      });
+    });
+
+    it('leaves a page that finishes in time alone', async () => {
+      mockScanQb.getOne.mockResolvedValue(makeScan());
+      const page = closablePage();
+      mockContext.newPage.mockResolvedValue(page);
+      mockScanner.scanPage.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            setTimeout(
+              () => resolve({ finalUrl: 'https://example.com/', issues: [] }),
+              PAGE_DEADLINE_MS - 1000,
+            );
+          }),
+      );
+
+      await processPastDeadline();
+
+      expect(page.close).toHaveBeenCalledTimes(1);
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+        status: ScanStatus.COMPLETED,
+        pagesDiscovered: 1,
+        pagesScanned: 1,
+        pagesFailed: 0,
+      });
+    });
   });
 
   it('counts policy-blocked pages as failed without opening a page', async () => {

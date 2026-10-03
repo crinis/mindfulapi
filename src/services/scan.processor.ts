@@ -6,6 +6,7 @@ import { Not, Repository } from 'typeorm';
 import { Job } from 'bullmq';
 import {
   BasicCrawler,
+  type BasicCrawlingContext,
   Configuration,
   EnqueueStrategy,
   RequestQueue,
@@ -56,6 +57,25 @@ const MAX_DESCRIPTION_LENGTH = 1000;
 const MAX_SELECTOR_LENGTH = 1000;
 const MAX_CONTEXT_LENGTH = 4000;
 
+/**
+ * Upper bound for one page's browser work: navigation, axe analysis, AI
+ * evidence collection and link extraction. Only navigation has a timeout of
+ * its own; a page whose main thread stays busy after DOMContentLoaded would
+ * otherwise block the analysis forever while BullMQ keeps renewing the job's
+ * lock, holding a scan slot until the API restarts. On expiry the page is
+ * closed, which makes its pending Playwright calls reject, and it counts as
+ * failed.
+ */
+export const PAGE_DEADLINE_MS = 120_000;
+
+/** A page's browser work outlived the page deadline; the page was closed. */
+export class PageDeadlineError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = new.target.name;
+  }
+}
+
 /** Progress rows are rewritten at most every N ms / every N pages per scan. */
 const PROGRESS_WRITE_INTERVAL_MS = 2000;
 const PROGRESS_WRITE_PAGE_BATCH = 10;
@@ -67,6 +87,23 @@ interface PageTask {
   /** URL that should be analyzed. */
   url: string;
 }
+
+/**
+ * What a crawled page's browser work produced. Nothing is stored or enqueued
+ * until the work finished within the page deadline.
+ */
+type CrawlPageOutcome =
+  | {
+      kind: 'scanned';
+      issues: ScannedIssue[];
+      units: CollectedUnit[];
+      /** Link targets to follow, scoped by `scopeUrl`. */
+      links: string[];
+      scopeUrl: string;
+    }
+  | { kind: 'failed'; reason: string; links: string[]; scopeUrl: string }
+  /** Not a page of this crawl (redirect alias or off-scope redirect). */
+  | { kind: 'skipped'; reason: string };
 
 /**
  * Per-scan LLM-agent audit state threaded through the page loop: the active
@@ -118,6 +155,8 @@ function resolveScanConcurrency(): number {
 export class ScanProcessor extends WorkerHost {
   /** Structured service logger for scan processing lifecycle events. */
   private readonly logger = new Logger(ScanProcessor.name);
+  /** {@link PAGE_DEADLINE_MS}; an instance field so real-browser tests can shorten it. */
+  private readonly pageDeadlineMs: number = PAGE_DEADLINE_MS;
 
   /**
    * @param scanRepository Scan repository used for lifecycle/progress updates.
@@ -328,25 +367,95 @@ export class ScanProcessor extends WorkerHost {
   }
 
   /**
-   * Persists an analysed page: collects its AI-audit evidence while the page
-   * is still live, re-verifies the target policy (collection can make the page
-   * load more, e.g. lazy images), and only then stores the issues and buffers
-   * the evidence.
+   * Finishes the browser work on an analysed page: collects its AI-audit
+   * evidence while the page is still live, then re-verifies the target policy
+   * (collection can make the page load more, e.g. lazy images).
    *
    * @throws TargetPolicyViolationError When the page reached a blocked
-   * target; nothing from it is stored or buffered.
+   * target; nothing from it may be stored or buffered.
    */
-  private async commitScannedPage(
-    scanId: number,
+  private async collectVerifiedEvidence(
     agent: AgentRun | undefined,
     page: Page,
     pageUrl: string,
     issues: ScannedIssue[],
-  ): Promise<void> {
+  ): Promise<CollectedUnit[]> {
     const units = await this.collectAgentEvidence(agent, page, pageUrl, issues);
     await this.scanner.assertPageAllowed(page);
+    return units;
+  }
+
+  /**
+   * Stores the issues and buffers the evidence of a page that passed every
+   * check within its deadline.
+   */
+  private async commitPageResults(
+    scanId: number,
+    agent: AgentRun | undefined,
+    issues: ScannedIssue[],
+    units: CollectedUnit[],
+  ): Promise<void> {
     await this.saveIssues(scanId, issues);
     this.bufferAgentEvidence(agent, units);
+  }
+
+  /**
+   * Runs one page's browser work under the page deadline
+   * ({@link PAGE_DEADLINE_MS}). On expiry the page is closed — its pending
+   * Playwright calls then reject — and a {@link PageDeadlineError} is thrown
+   * without waiting for the work. Whatever the abandoned work still returns is
+   * discarded, so `work` must not store, buffer or enqueue anything itself.
+   */
+  private async withPageDeadline<T>(
+    page: Page,
+    url: string,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const running = work();
+    let timer: NodeJS.Timeout | undefined;
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        void page.close().catch(() => undefined);
+        reject(
+          new PageDeadlineError(
+            `${url} did not finish within the ${this.pageDeadlineMs / 1000} s page deadline`,
+          ),
+        );
+      }, this.pageDeadlineMs);
+    });
+    try {
+      return await Promise.race([running, expired]);
+    } finally {
+      clearTimeout(timer);
+      // An abandoned run rejects once its page is closed; nobody awaits it.
+      running.catch(() => undefined);
+    }
+  }
+
+  /**
+   * Reads the link targets of a crawled page. Non-fatal: returns none when the
+   * page cannot be mined.
+   */
+  private async extractLinks(
+    page: Page,
+    url: string,
+    scanId: number,
+  ): Promise<string[]> {
+    try {
+      // The page may have reached a blocked target since its scan (timers,
+      // late subresources); never mine such a page.
+      await this.scanner.assertPageAllowed(page);
+      return await page.evaluate(() =>
+        Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]')).map(
+          (a) => a.href,
+        ),
+      );
+    } catch (error) {
+      this.logger.debug(
+        `Skipped link discovery for ${url} in scan ${scanId}: ${String(error)}`,
+      );
+      return [];
+    }
   }
 
   /**
@@ -394,18 +503,25 @@ export class ScanProcessor extends WorkerHost {
           }
           const page = await context.newPage();
           try {
-            const { finalUrl, issues } = await this.scanner.scanPage(
+            const { issues, units } = await this.withPageDeadline(
               page,
               task.url,
-              scanOptions,
+              async () => {
+                const { finalUrl, issues } = await this.scanner.scanPage(
+                  page,
+                  task.url,
+                  scanOptions,
+                );
+                const units = await this.collectVerifiedEvidence(
+                  agent,
+                  page,
+                  finalUrl,
+                  issues,
+                );
+                return { issues, units };
+              },
             );
-            await this.commitScannedPage(
-              scan.id,
-              agent,
-              page,
-              finalUrl,
-              issues,
-            );
+            await this.commitPageResults(scan.id, agent, issues, units);
             progress.pagesScanned += 1;
           } catch (error) {
             progress.pagesFailed += 1;
@@ -485,6 +601,118 @@ export class ScanProcessor extends WorkerHost {
     const browser = await this.browserService.getBrowser();
     const context = await this.scanner.createContext(browser, scanOptions);
 
+    /** Links of a page at `depth`, or none when they could not be followed. */
+    const mineLinks = (page: Page, url: string, depth: number) =>
+      // Every queued URL counts towards maxPages, so a full queue has no room
+      // for more links.
+      depth < maxDepth && queuedUrls.size < maxPages
+        ? this.extractLinks(page, url, scan.id)
+        : Promise.resolve([]);
+
+    /**
+     * A crawled page's browser work, run under the page deadline: navigation,
+     * the crawl-scope checks, axe analysis, AI evidence collection and link
+     * extraction. Stores and enqueues nothing.
+     *
+     * Links are scoped by the crawl's seed, never by wherever a page
+     * redirected to; children inherit the scope through userData.
+     */
+    const inspectCrawlPage = async (
+      page: Page,
+      url: string,
+      depth: number,
+      inheritedScope: string,
+    ): Promise<CrawlPageOutcome> => {
+      let scopeUrl = inheritedScope;
+      try {
+        const { finalUrl } = await this.scanner.openPage(page, url);
+        if (depth === 0) {
+          // apex → www or http → https keeps the crawl on the seed's site; a
+          // redirect to another site does not move it there.
+          scopeUrl = resolveSeedScope(url, finalUrl);
+        }
+        if (!isWithinCrawlScope(finalUrl, scopeUrl, crawlStrategy)) {
+          const reason = `redirected outside the crawl scope to ${finalUrl}`;
+          // A seed doing so is most likely a wrong seed URL — surface it as a
+          // failure. Any other page is like a link the strategy filters out.
+          return depth === 0
+            ? { kind: 'failed', reason, links: [], scopeUrl }
+            : { kind: 'skipped', reason };
+        }
+        const finalKey = normalizeHttpUrl(finalUrl) ?? finalUrl;
+        if (scannedFinalUrls.has(finalKey)) {
+          // Another URL already redirected to this page.
+          return { kind: 'skipped', reason: `already scanned as ${finalKey}` };
+        }
+        scannedFinalUrls.add(finalKey);
+        const { issues } = await this.scanner.analyzeLoadedPage(
+          page,
+          scanOptions,
+          finalUrl,
+        );
+        const units = await this.collectVerifiedEvidence(
+          agent,
+          page,
+          finalUrl,
+          issues,
+        );
+        const links = await mineLinks(page, url, depth);
+        return { kind: 'scanned', issues, units, links, scopeUrl };
+      } catch (error) {
+        // A rejected page (an HTTP error page, or one that reached a blocked
+        // target) is not site content: its links are not followed either.
+        const links =
+          error instanceof PageRejectedError
+            ? []
+            : await mineLinks(page, url, depth);
+        return { kind: 'failed', reason: String(error), links, scopeUrl };
+      }
+    };
+
+    /** Hands a page's links to Crawlee, each URL at most once per crawl. */
+    const enqueueNewLinks = async (
+      enqueueLinks: BasicCrawlingContext['enqueueLinks'],
+      hrefs: string[],
+      scopeUrl: string,
+      depth: number,
+    ): Promise<void> => {
+      // Offer each link once: Crawlee adds already-queued URLs in batches
+      // sized to the remaining page budget and sleeps a second between
+      // batches, so re-offering a site's navigation on every page would stall
+      // a nearly full crawl.
+      const links = normalizeAndDedupeHttpUrls(hrefs).filter(
+        (link) => !queuedUrls.has(link),
+      );
+      if (links.length === 0) {
+        return;
+      }
+      // Crawlee filters by strategy and globs after this transform and caps
+      // the additions at the remaining maxRequestsPerCrawl budget, so the
+      // transform must not spend any budget itself.
+      const { processedRequests } = await enqueueLinks({
+        urls: links,
+        baseUrl: scopeUrl,
+        userData: { scopeUrl },
+        strategy,
+        globs: globs.length ? globs : undefined,
+        exclude: excludeGlobs.length ? excludeGlobs : undefined,
+        transformRequestFunction: (nextRequest) => {
+          const normalized = normalizeHttpUrl(nextRequest.url);
+          if (!normalized) return false;
+          nextRequest.url = normalized;
+          nextRequest.uniqueKey = normalized;
+          nextRequest.userData = {
+            ...(nextRequest.userData ?? {}),
+            depth: depth + 1,
+          };
+          return nextRequest;
+        },
+      });
+      for (const { uniqueKey } of processedRequests) {
+        queuedUrls.add(uniqueKey);
+      }
+    };
+
     const crawler = new BasicCrawler(
       {
         requestQueue,
@@ -510,135 +738,58 @@ export class ScanProcessor extends WorkerHost {
             await progressWriter.maybePersist(progress);
             return;
           }
-          const page = await context.newPage();
-          // Links are scoped by the crawl's seed, never by wherever a page
-          // redirected to; children inherit the scope through userData.
-          let scopeUrl =
+          const inheritedScope =
             typeof request.userData.scopeUrl === 'string'
               ? request.userData.scopeUrl
               : request.url;
+          const page = await context.newPage();
           try {
-            // Scan phase — failures here count as page failures.
-            let discoverLinks = false;
-            try {
-              const { finalUrl } = await this.scanner.openPage(
-                page,
-                request.url,
-              );
-              if (depth === 0) {
-                // apex → www or http → https keeps the crawl on the seed's
-                // site; a redirect to another site does not move it there.
-                scopeUrl = resolveSeedScope(request.url, finalUrl);
-              }
-              const finalKey = normalizeHttpUrl(finalUrl) ?? finalUrl;
+            const outcome = await this.withPageDeadline(page, request.url, () =>
+              inspectCrawlPage(page, request.url, depth, inheritedScope),
+            ).catch(
+              (error: unknown): CrawlPageOutcome => ({
+                kind: 'failed',
+                reason: String(error),
+                links: [],
+                scopeUrl: inheritedScope,
+              }),
+            );
 
-              if (!isWithinCrawlScope(finalUrl, scopeUrl, crawlStrategy)) {
-                if (depth === 0) {
-                  // Most likely a wrong seed URL — surface it as a failure.
-                  progress.pagesFailed += 1;
-                  this.logger.warn(
-                    `Seed ${request.url} in scan ${scan.id} redirected outside the crawl scope to ${finalUrl}`,
-                  );
-                } else {
-                  // Like a link the strategy filters out: not a crawl page.
-                  progress.pagesDiscovered -= 1;
-                  this.logger.debug(
-                    `Skipped ${request.url} in scan ${scan.id}: redirected outside the crawl scope to ${finalUrl}`,
-                  );
-                }
-              } else if (scannedFinalUrls.has(finalKey)) {
-                // Another URL already redirected to this page.
-                progress.pagesDiscovered -= 1;
-                this.logger.debug(
-                  `Skipped ${request.url} in scan ${scan.id}: already scanned as ${finalKey}`,
-                );
-              } else {
-                scannedFinalUrls.add(finalKey);
-                const { issues } = await this.scanner.analyzeLoadedPage(
-                  page,
-                  scanOptions,
-                  finalUrl,
-                );
-                await this.commitScannedPage(
+            if (outcome.kind === 'skipped') {
+              progress.pagesDiscovered -= 1;
+              this.logger.debug(
+                `Skipped ${request.url} in scan ${scan.id}: ${outcome.reason}`,
+              );
+              return;
+            }
+            if (outcome.kind === 'scanned') {
+              try {
+                await this.commitPageResults(
                   scan.id,
                   agent,
-                  page,
-                  finalUrl,
-                  issues,
+                  outcome.issues,
+                  outcome.units,
                 );
                 progress.pagesScanned += 1;
-                discoverLinks = true;
-              }
-            } catch (error) {
-              progress.pagesFailed += 1;
-              // A rejected page (an HTTP error page, or one that reached a
-              // blocked target) is not site content: its links are not
-              // followed either.
-              discoverLinks = !(error instanceof PageRejectedError);
-              this.logger.warn(
-                `Failed page ${request.url} in scan ${scan.id}: ${String(error)}`,
-              );
-            }
-
-            // Link discovery phase — non-fatal; failures do not affect counters.
-            // Every queued URL counts towards maxPages, so a full queue has no
-            // room for more links.
-            if (
-              discoverLinks &&
-              depth < maxDepth &&
-              queuedUrls.size < maxPages
-            ) {
-              let hrefs: string[] = [];
-              try {
-                // The page may have reached a blocked target since its scan
-                // (timers, late subresources); never mine such a page.
-                await this.scanner.assertPageAllowed(page);
-                hrefs = await page.evaluate(() =>
-                  Array.from(
-                    document.querySelectorAll<HTMLAnchorElement>('a[href]'),
-                  ).map((a) => a.href),
-                );
               } catch (error) {
-                this.logger.debug(
-                  `Skipped link discovery for ${request.url} in scan ${scan.id}: ${String(error)}`,
+                progress.pagesFailed += 1;
+                this.logger.warn(
+                  `Failed page ${request.url} in scan ${scan.id}: ${String(error)}`,
                 );
               }
-
-              // Offer each link once: Crawlee adds already-queued URLs in
-              // batches sized to the remaining page budget and sleeps a second
-              // between batches, so re-offering a site's navigation on every
-              // page would stall a nearly full crawl.
-              const links = normalizeAndDedupeHttpUrls(hrefs).filter(
-                (link) => !queuedUrls.has(link),
+            } else {
+              progress.pagesFailed += 1;
+              this.logger.warn(
+                `Failed page ${request.url} in scan ${scan.id}: ${outcome.reason}`,
               );
-              if (links.length > 0) {
-                // Crawlee filters by strategy and globs after this transform
-                // and caps the additions at the remaining maxRequestsPerCrawl
-                // budget, so the transform must not spend any budget itself.
-                const { processedRequests } = await enqueueLinks({
-                  urls: links,
-                  baseUrl: scopeUrl,
-                  userData: { scopeUrl },
-                  strategy,
-                  globs: globs.length ? globs : undefined,
-                  exclude: excludeGlobs.length ? excludeGlobs : undefined,
-                  transformRequestFunction: (nextRequest) => {
-                    const normalized = normalizeHttpUrl(nextRequest.url);
-                    if (!normalized) return false;
-                    nextRequest.url = normalized;
-                    nextRequest.uniqueKey = normalized;
-                    nextRequest.userData = {
-                      ...(nextRequest.userData ?? {}),
-                      depth: depth + 1,
-                    };
-                    return nextRequest;
-                  },
-                });
-                for (const { uniqueKey } of processedRequests) {
-                  queuedUrls.add(uniqueKey);
-                }
-              }
             }
+
+            await enqueueNewLinks(
+              enqueueLinks,
+              outcome.links,
+              outcome.scopeUrl,
+              depth,
+            );
           } finally {
             await page.close();
             await progressWriter.maybePersist(progress);

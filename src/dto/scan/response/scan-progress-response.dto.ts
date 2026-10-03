@@ -28,7 +28,7 @@ export class ScanProgressResponseDto {
     example: 3,
     minimum: 0,
     description:
-      'Number of pages that failed during processing. Includes pages whose navigation ended with an HTTP error status (400 or higher) and pages that reached an address blocked by the target policy (for example through a redirect); such pages are not analysed and contribute no issues.',
+      'Number of pages that failed during processing. Includes pages whose navigation ended with an HTTP error status (400 or higher), pages that reached an address blocked by the target policy (for example through a redirect), and pages whose processing did not finish within the two-minute per-page time limit; such pages contribute no issues.',
   })
   pagesFailed: number;
 }
