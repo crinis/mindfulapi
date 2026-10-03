@@ -272,12 +272,13 @@ Change `.env` **before** running any `docker compose` command (`pull` and `down`
 
 - **Add `PLAYWRIGHT_WS_PATH`** with the output of `openssl rand -hex 16`. Compose now starts the browser server on that secret path and connects the API to it (see [Security](#security)). The error *"required variable PLAYWRIGHT_WS_PATH is missing a value"* means it is still missing.
 - **The API port is published on `127.0.0.1` only.** Clients on other hosts that connected to port 3000 directly need a reverse proxy, or `BIND_ADDRESS=0.0.0.0` plus a firewall that filters Docker traffic (see [Deploying](#deploying-to-a-linux-server)). A TYPO3 instance in the DDEV network is unaffected: it uses `http://mindfulapi:3000`.
+- **Keep these variables in `./.env`:** `ENCRYPTION_KEY`, `AGENT_PROVIDER`, `AGENT_MODEL`, `AGENT_API_KEY`, `AGENT_BASE_URL` and `AGENT_SKILLS`. `docker-compose.yml` used to copy them from the shell or from the file given with `--env-file`; now they reach the API only through `env_file: .env`, the `.env` next to `docker-compose.yml`. If you exported them in the shell or kept them in another env file, move them there. Otherwise stored Basic Auth credentials can no longer be decrypted (`ENCRYPTION_KEY`) and the AI audit loses its provider, model, key and skill settings.
 
 **When you move to the `dev` image or the next release.** These changes are unreleased:
 
 - **Replace a placeholder `AUTH_TOKEN`.** If `.env` still contains `AUTH_TOKEN=your-secure-api-token-here` from an older `.env.example`, the API refuses to start. Set a token from `openssl rand -hex 32` and give it to your clients (e.g. the TYPO3 extension). Do this on 0.7.1 too: the placeholder is public.
 - **Configuration is validated strictly.** Numbers must be plain decimals within the ranges in [Configuration](#configuration); values 0.7.1 clamps (for example `THROTTLE_TTL` above `86400`) stop the API at startup, and `CLEANUP_INTERVAL` must be a valid cron expression. An empty value counts as unset instead of failing validation.
-- **Requests with a wrong token count against the rate limit.** Behind a reverse proxy, set `TRUST_PROXY=1` so each client gets its own limit.
+- **Requests with a wrong token count against the rate limit.** Behind a reverse proxy, set `TRUST_PROXY=1` when you upgrade. Without it, every client has the proxy's address and shares one limit per endpoint, and now unauthenticated requests drain it too: anyone who can reach the proxy can send wrong tokens until your real clients (e.g. the TYPO3 extension) get `429`.
 - **Per-skill AI overrides** that set another provider or their own base URL no longer inherit `AGENT_API_KEY` (see [Per-skill model selection](#per-skill-model-selection)).
 
 #### Upgrading from an image that ran as root
