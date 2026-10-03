@@ -823,7 +823,7 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
     };
 
     /** Hands a page's links to Crawlee, each URL at most once per crawl. */
-    const enqueueNewLinks = async (
+    const enqueueLinksOnce = async (
       enqueueLinks: BasicCrawlingContext['enqueueLinks'],
       hrefs: string[],
       scopeUrl: string,
@@ -864,6 +864,20 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
       for (const { uniqueKey } of processedRequests) {
         queuedUrls.add(uniqueKey);
       }
+    };
+
+    /**
+     * Enqueue runs one at a time: concurrent page handlers would otherwise
+     * filter their links against `queuedUrls` before an earlier run recorded
+     * what it queued, and offer the same links again.
+     */
+    let enqueueChain: Promise<void> = Promise.resolve();
+    const enqueueNewLinks = (
+      ...args: Parameters<typeof enqueueLinksOnce>
+    ): Promise<void> => {
+      const run = enqueueChain.then(() => enqueueLinksOnce(...args));
+      enqueueChain = run.catch(() => undefined);
+      return run;
     };
 
     const crawler = new BasicCrawler(

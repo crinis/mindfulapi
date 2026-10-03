@@ -931,6 +931,45 @@ describe('ScanProcessor', () => {
       ]);
     });
 
+    it('offers a link once when pages linking to it finish at the same time', async () => {
+      mockScanQb.getOne.mockResolvedValue(
+        makeScan({
+          mode: ScanMode.CRAWL,
+          targets: ['https://example.com/a', 'https://example.com/b'],
+          crawlMaxPages: 10,
+          crawlMaxDepth: 3,
+        }),
+      );
+      serveLinks({
+        'https://example.com/a': ['https://example.com/shared'],
+        'https://example.com/b': ['https://example.com/shared'],
+      });
+      const offered: string[][] = [];
+      // Two handler runs overlap, as with crawl concurrency; Crawlee takes a
+      // moment to add each batch.
+      mockCrawlerRunHandler = async ({ requestHandler }) => {
+        const enqueueLinks = async ({ urls }: { urls: string[] }) => {
+          offered.push(urls);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return {
+            processedRequests: urls.map((url) => ({ uniqueKey: url })),
+          };
+        };
+        await Promise.all(
+          ['https://example.com/a', 'https://example.com/b'].map((url) =>
+            requestHandler({
+              request: { url, uniqueKey: url, userData: { depth: 0 } },
+              enqueueLinks,
+            }),
+          ),
+        );
+      };
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(offered).toEqual([['https://example.com/shared']]);
+    });
+
     it('stops at maxPages and passes each in-scope link to the queue once', async () => {
       mockScanQb.getOne.mockResolvedValue(
         makeScan({
