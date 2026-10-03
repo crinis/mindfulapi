@@ -44,6 +44,17 @@ describe('AuthTokenGuard', () => {
       process.env.AUTH_DISABLED = 'true';
       expect(() => makeGuard().onApplicationBootstrap()).not.toThrow();
     });
+
+    it.each([undefined, 'true'])(
+      'refuses the placeholder token published in older .env.example files (AUTH_DISABLED=%p)',
+      (authDisabled) => {
+        process.env.AUTH_TOKEN = 'your-secure-api-token-here';
+        if (authDisabled) process.env.AUTH_DISABLED = authDisabled;
+        expect(() => makeGuard().onApplicationBootstrap()).toThrow(
+          /AUTH_TOKEN still has the example value .*openssl rand -hex 32/,
+        );
+      },
+    );
   });
 
   describe('when AUTH_TOKEN is not set', () => {

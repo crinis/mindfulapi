@@ -59,7 +59,7 @@ The stack consists of three containers:
 cp .env.example .env
 ```
 
-Set `AUTH_TOKEN` in `.env` to a strong random value, for example the output of `openssl rand -hex 32`. `docker compose` refuses to start while `AUTH_TOKEN` is undefined. See [Configuration](#configuration) for all other variables.
+Set `AUTH_TOKEN` in `.env` to a strong random value, for example the output of `openssl rand -hex 32`. `.env.example` ships it empty, and the API refuses to start until it is set: the `mindfulapi` container exits with *"AUTH_TOKEN is not set"*. `docker compose` itself refuses to start when the `AUTH_TOKEN` line is missing from `.env`. The placeholder `your-secure-api-token-here` that older versions of `.env.example` contained is refused as well. See [Configuration](#configuration) for all other variables.
 
 **2. Start all services in the background:**
 
@@ -286,7 +286,7 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 |----------|---------|-------------|
 | `NODE_ENV` | `development` | Any value other than `production` enables SQL query logging |
 | `PORT` | `3000` | HTTP server port |
-| `AUTH_TOKEN` | _(unset)_ | Bearer token for API auth. **The server refuses to start when unset** unless `AUTH_DISABLED=true` |
+| `AUTH_TOKEN` | _(unset)_ | Bearer token for API auth. **The server refuses to start when unset** unless `AUTH_DISABLED=true`, and always refuses the old `.env.example` placeholder `your-secure-api-token-here` |
 | `AUTH_DISABLED` | `false` | `true` runs without authentication (only when `AUTH_TOKEN` is unset). **Not recommended** |
 | `CORS_ORIGINS` | _(unset)_ | Comma-separated allowed CORS origins; unset disables CORS |
 | `THROTTLE_TTL` | `60` | Rate-limit window in seconds |
@@ -345,7 +345,7 @@ All configuration uses environment variables; [`.env.example`](.env.example) lis
 
 ## Security
 
-- **Authentication is required by default.** The server does not start unless `AUTH_TOKEN` is set (or `AUTH_DISABLED=true` explicitly). Tokens are compared in constant time.
+- **Authentication is required by default.** The server does not start unless `AUTH_TOKEN` is set (or `AUTH_DISABLED=true` explicitly), and never with the placeholder token that older versions of `.env.example` shipped. Tokens are compared in constant time.
 - **SSRF protection.** Hosts that resolve to private or reserved ranges (loopback, RFC 1918, link-local/cloud-metadata `169.254.169.254`, CGNAT, ULA, etc., including IPv6 addresses that embed such an IPv4 address: IPv4-mapped, IPv4-compatible, NAT64 `64:ff9b::/96`) are blocked. In the browser:
   - **Nearly every request a page starts** (navigation, iframe, image, script, stylesheet, fetch/XHR, worker and service-worker requests) is checked before it is sent, and aborted when blocked. The exception is speculative navigation — speculation-rules prefetch and prerender (`<script type="speculationrules">`) — which Chromium runs in a pipeline Playwright does not route: it can issue a blind GET to a blocked host. The prefetched response is partitioned by Chromium and is not exposed to the scanner or to page script, so it is a blind request like a redirect hop, not a content read (see Limitations).
   - **Redirect hops** are checked as they start. Playwright cannot stop a hop in flight, so the redirected request is still sent and its response reaches the browser. The page is then closed and counted as failed, and the scanner never analyses, stores, crawls or sends to the AI provider anything the page loaded. A malicious page's own JavaScript can still read a CORS-readable response from the blocked host and exfiltrate it to an allowed host in the short window before the page closes; fully closing this needs an egress proxy (see below).

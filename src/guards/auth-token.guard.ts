@@ -14,6 +14,9 @@ import { Request } from 'express';
 import { securityConfig } from '../config/configuration';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
+/** Placeholder token that `.env.example` shipped uncommented up to 0.7.1. */
+const EXAMPLE_AUTH_TOKEN = 'your-secure-api-token-here';
+
 /**
  * Global guard enforcing a static bearer token when `AUTH_TOKEN` is configured.
  *
@@ -36,9 +39,15 @@ export class AuthTokenGuard implements CanActivate, OnApplicationBootstrap {
 
   /**
    * Fails fast at startup when no token is configured and open access was
-   * not explicitly requested.
+   * not explicitly requested, or when the token is the placeholder that
+   * `.env.example` shipped (public in the repository, so no protection).
    */
   onApplicationBootstrap(): void {
+    if (this.security.authToken === EXAMPLE_AUTH_TOKEN) {
+      throw new Error(
+        `AUTH_TOKEN still has the example value "${EXAMPLE_AUTH_TOKEN}" from .env.example, which is public. Set it to a strong random value, e.g. the output of \`openssl rand -hex 32\`.`,
+      );
+    }
     if (this.security.authToken) {
       return;
     }
