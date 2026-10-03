@@ -29,6 +29,7 @@ import type {
   CollectContext,
 } from './skills/audit-skill.interface';
 import { ScanMode } from '../enums/scan-mode.enum';
+import { WriteQueue } from '../services/write-queue.service';
 
 type AgentSettings = ReturnType<typeof agentConfig>;
 
@@ -44,6 +45,7 @@ const settings = (overrides: Partial<AgentSettings> = {}): AgentSettings => ({
 const makeService = (
   overrides: Partial<AgentSettings> = {},
   harness: AgentHarnessService = {} as AgentHarnessService,
+  writeQueue = new WriteQueue(),
 ) => {
   const findingRepository = {
     create: jest.fn((entity: unknown) => entity),
@@ -63,6 +65,7 @@ const makeService = (
     registry as unknown as SkillRegistry,
     harness,
     settings(overrides),
+    writeQueue,
   );
   return { service, findingRepository, scanRepository, registry, harness };
 };
@@ -462,6 +465,46 @@ describe('AgentAuditService.evaluate', () => {
       aiTasksCompleted: 1,
       aiTasksFailed: 2,
     });
+  });
+
+  it('saves findings through the shared write queue', async () => {
+    // The scan processor's issue saves use the same queue, so a failed
+    // finding save cannot roll back another scan's issue rows.
+    const writeQueue = new WriteQueue();
+    const { service, findingRepository } = makeService(
+      {},
+      undefined,
+      writeQueue,
+    );
+    let release!: () => void;
+    void writeQueue.run(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const evaluate = jest
+      .fn()
+      .mockResolvedValue([
+        { ...problemDraft(), usage: { inputTokens: 0, outputTokens: 0 } },
+      ]);
+    const skill = {
+      id: AgentSkill.IMAGE_ALT_TEXT,
+      evaluate,
+    } as unknown as AuditSkill;
+
+    const evaluation = service.evaluate(
+      { id: 1 } as Scan,
+      [{ skill, evidence }],
+      () => Promise.resolve(false),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(evaluate).toHaveBeenCalled();
+    expect(findingRepository.save).not.toHaveBeenCalled();
+
+    release();
+    await evaluation;
+    expect(findingRepository.save).toHaveBeenCalledTimes(1);
   });
 
   it('is a no-op with no units', async () => {

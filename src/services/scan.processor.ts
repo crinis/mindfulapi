@@ -28,6 +28,7 @@ import {
 } from './axe-accessibility-scanner.service';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
 import { UrlPolicyService } from './url-policy.service';
+import { WriteQueue } from './write-queue.service';
 import {
   normalizeAndDedupeHttpUrls,
   normalizeHttpUrl,
@@ -213,6 +214,7 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
     private readonly config: ConfigType<typeof scanConfig>,
     private readonly urlPolicyService: UrlPolicyService,
     private readonly agentAudit: AgentAuditService,
+    private readonly writeQueue: WriteQueue,
   ) {
     super();
     this.pageDeadlineMs = config.pageTimeoutMs;
@@ -1127,7 +1129,10 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
   }
 
   /**
-   * Persists discovered issues for a scan run in bulk.
+   * Persists discovered issues for a scan run in bulk. The multi-row save
+   * opens a transaction on the shared SQLite connection, so it goes through
+   * the process-wide {@link WriteQueue} with the AI-finding saves: a failed
+   * save of another scan can then not roll back these rows.
    */
   private async saveIssues(
     scanId: number,
@@ -1151,7 +1156,7 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
       }),
     );
 
-    await this.issueRepository.save(entities);
+    await this.writeQueue.run(() => this.issueRepository.save(entities));
   }
 
   /**

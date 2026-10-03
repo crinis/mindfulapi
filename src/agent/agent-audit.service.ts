@@ -7,6 +7,7 @@ import { Scan } from '../entities/scan.entity';
 import { AgentFinding } from '../entities/agent-finding.entity';
 import { agentConfig } from '../config/configuration';
 import { truncate } from '../utils/truncate.util';
+import { WriteQueue } from '../services/write-queue.service';
 import type { ScannedIssue } from '../services/axe-accessibility-scanner.service';
 import { AgentHarnessService } from './harness/agent-harness.service';
 import { SkillRegistry } from './skills/skill-registry';
@@ -84,9 +85,6 @@ export interface CollectedUnit {
 export class AgentAuditService {
   private readonly logger = new Logger(AgentAuditService.name);
 
-  /** Settles after the last queued finding save (see {@link persist}). */
-  private persistQueue: Promise<void> = Promise.resolve();
-
   constructor(
     @InjectRepository(AgentFinding)
     private readonly findingRepository: Repository<AgentFinding>,
@@ -96,6 +94,7 @@ export class AgentAuditService {
     private readonly harness: AgentHarnessService,
     @Inject(agentConfig.KEY)
     private readonly config: ConfigType<typeof agentConfig>,
+    private readonly writeQueue: WriteQueue,
   ) {}
 
   /** Whether the AI audit capability is enabled server-side. */
@@ -335,21 +334,21 @@ export class AgentAuditService {
    * holds only while saves do not overlap. TypeORM's better-sqlite3 driver
    * runs every query on one QueryRunner, and a save that finds a transaction
    * active writes into it instead of starting its own, so with
-   * AGENT_CONCURRENCY > 1 (or two scans evaluating at once) one unit's failed
-   * save would roll back another unit's rows while its own first rows were
-   * committed by the other. Saves are therefore queued, one at a time.
+   * AGENT_CONCURRENCY > 1, two scans evaluating at once, or a scan saving
+   * page issues meanwhile, one failed save would roll back the other's rows.
+   * Saves therefore go through the process-wide {@link WriteQueue}, which the
+   * scan processor's issue saves share. A failed save is its unit's failure;
+   * the next save still runs.
    */
-  private persist(scanId: number, drafts: AgentFindingDraft[]): Promise<void> {
+  private async persist(
+    scanId: number,
+    drafts: AgentFindingDraft[],
+  ): Promise<void> {
     if (drafts.length === 0) {
-      return Promise.resolve();
+      return;
     }
     const rows = drafts.map((draft) => this.toFinding(scanId, draft));
-    const saved = this.persistQueue.then(async () => {
-      await this.findingRepository.save(rows);
-    });
-    // A failed save is its unit's failure; the next save still runs.
-    this.persistQueue = saved.catch(() => undefined);
-    return saved;
+    await this.writeQueue.run(() => this.findingRepository.save(rows));
   }
 
   /** Builds the AgentFinding row of one finding draft. */

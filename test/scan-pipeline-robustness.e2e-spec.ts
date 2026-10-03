@@ -25,6 +25,7 @@ import {
 import { BasicAuthCryptoService } from '../src/services/basic-auth-crypto.service';
 import { scanConfig } from '../src/config/configuration';
 import { UrlPolicyService } from '../src/services/url-policy.service';
+import { WriteQueue } from '../src/services/write-queue.service';
 import { agentConfig } from '../src/config/configuration';
 import { AgentAuditService } from '../src/agent/agent-audit.service';
 import type { AgentHarnessService } from '../src/agent/harness/agent-harness.service';
@@ -62,6 +63,8 @@ function page(title: string, extra = '') {
 }
 
 describe('Scan pipeline robustness (real browser)', () => {
+  /** The process-wide queue the AI audit and the processor share. */
+  const writeQueue = new WriteQueue();
   jest.setTimeout(60000);
 
   let site: FixtureSiteServer;
@@ -99,6 +102,7 @@ describe('Scan pipeline robustness (real browser)', () => {
       ),
       harness,
       settings,
+      writeQueue,
     );
   }
 
@@ -131,6 +135,7 @@ describe('Scan pipeline robustness (real browser)', () => {
       config,
       urlPolicy,
       agentAudit as unknown as AgentAuditService,
+      writeQueue,
     );
     Object.assign(processor, { evidenceReserveMs: TEST_EVIDENCE_RESERVE_MS });
     return processor;

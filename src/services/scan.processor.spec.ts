@@ -40,6 +40,7 @@ import {
   ScanProcessor,
 } from './scan.processor';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
+import { WriteQueue } from './write-queue.service';
 import {
   PageNavigationError,
   TargetPolicyViolationError,
@@ -327,6 +328,7 @@ describe('ScanProcessor', () => {
   /** A processor over the mocks above with the given scan settings. */
   function buildProcessor(
     config: ReturnType<typeof scanConfig>,
+    writeQueue = new WriteQueue(),
   ): ScanProcessor {
     return new ScanProcessor(
       mockScanRepo as any,
@@ -337,6 +339,7 @@ describe('ScanProcessor', () => {
       config,
       mockUrlPolicy as any,
       mockAgentAudit as any,
+      writeQueue,
     );
   }
 
@@ -521,6 +524,41 @@ describe('ScanProcessor', () => {
       pagesFailed: 0,
     });
     expect(mockContext.close).toHaveBeenCalled();
+  });
+
+  it('saves issues through the shared write queue', async () => {
+    // AI-finding saves use the same queue, so a failed finding save cannot
+    // roll back this scan's issue rows on the shared SQLite connection.
+    const writeQueue = new WriteQueue();
+    processor = buildProcessor(scanConfig(), writeQueue);
+    mockScanQb.getOne.mockResolvedValue(makeScan());
+    mockScanner.analyzeLoadedPage.mockResolvedValue({
+      finalUrl: 'https://example.com/',
+      issues: [
+        {
+          ruleId: 'image-alt',
+          description: 'Images must have alternative text',
+          impact: IssueImpact.CRITICAL,
+          pageUrl: 'https://example.com/',
+        },
+      ],
+    });
+    let release!: () => void;
+    void writeQueue.run(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const run = processor.process({ data: { scanId: 1 } } as any);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(mockScanner.analyzeLoadedPage).toHaveBeenCalled();
+    expect(mockIssueRepo.save).not.toHaveBeenCalled();
+
+    release();
+    await run;
+    expect(mockIssueRepo.save).toHaveBeenCalledTimes(1);
   });
 
   it('tracks page failures for url_list runs and still completes', async () => {
@@ -1728,16 +1766,7 @@ describe('ScanProcessor', () => {
           ],
         }),
       );
-      processor = new ScanProcessor(
-        mockScanRepo as any,
-        mockIssueRepo as any,
-        mockBrowserService as any,
-        mockScanner as any,
-        mockBasicAuthCrypto as any,
-        { ...scanConfig(), crawlConcurrency: 1 },
-        mockUrlPolicy as any,
-        mockAgentAudit as any,
-      );
+      processor = buildProcessor({ ...scanConfig(), crawlConcurrency: 1 });
       // The row exists for the first page and is deleted while it loads.
       mockScanRepo.findOne.mockResolvedValueOnce({
         id: 1,
@@ -1834,17 +1863,7 @@ describe('ScanProcessor', () => {
           ],
         }),
       );
-      const config = { ...scanConfig(), crawlConcurrency: 1 };
-      processor = new ScanProcessor(
-        mockScanRepo as any,
-        mockIssueRepo as any,
-        mockBrowserService as any,
-        mockScanner as any,
-        mockBasicAuthCrypto as any,
-        config,
-        mockUrlPolicy as any,
-        mockAgentAudit as any,
-      );
+      processor = buildProcessor({ ...scanConfig(), crawlConcurrency: 1 });
       loseBrowserDuring(mockScanner.scanPage, 'https://example.com/a');
 
       await expect(processor.process(firstAttempt as any)).rejects.toThrow(

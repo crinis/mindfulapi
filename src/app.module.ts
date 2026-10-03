@@ -8,6 +8,7 @@ import { ScanModule } from './modules/scan.module';
 import { QueueModule } from './modules/queue.module';
 import { CleanupModule } from './modules/cleanup.module';
 import { HealthModule } from './modules/health.module';
+import { WriteQueueModule } from './modules/write-queue.module';
 import { authProvider } from './guards/auth-provider';
 import { createDatabaseConfig } from './config/database.config';
 import { validate } from './config/env.validation';
@@ -58,6 +59,7 @@ import {
         ],
       }),
     }),
+    WriteQueueModule, // One queue for the transactional writes (global)
     QueueModule, // Background job processing for accessibility scans
     ScanModule, // Core scan management functionality
     CleanupModule, // Automated cleanup of old scan data

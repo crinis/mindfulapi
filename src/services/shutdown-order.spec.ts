@@ -16,6 +16,7 @@ import { AxeAccessibilityScanner } from './axe-accessibility-scanner.service';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
 import { UrlPolicyService } from './url-policy.service';
 import { AgentAuditService } from '../agent/agent-audit.service';
+import { WriteQueue } from './write-queue.service';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 import { scanConfig } from '../config/configuration';
@@ -52,6 +53,7 @@ describe('Shutdown order', () => {
         { provide: BasicAuthCryptoService, useValue: {} },
         { provide: UrlPolicyService, useValue: {} },
         { provide: AgentAuditService, useValue: {} },
+        { provide: WriteQueue, useValue: {} },
         {
           provide: scanConfig.KEY,
           useValue: { ...scanConfig(), playwrightWsUrl: null },

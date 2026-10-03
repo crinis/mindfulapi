@@ -13,6 +13,7 @@ import { ScanProcessor } from '../src/services/scan.processor';
 import { BasicAuthCryptoService } from '../src/services/basic-auth-crypto.service';
 import { scanConfig } from '../src/config/configuration';
 import { UrlPolicyService } from '../src/services/url-policy.service';
+import { WriteQueue } from '../src/services/write-queue.service';
 import type { AgentAuditService } from '../src/agent/agent-audit.service';
 import {
   FixtureSiteServer,
@@ -20,6 +21,8 @@ import {
 } from './helpers/fixture-site-server';
 
 describe('ScanProcessor real URL integration', () => {
+  /** The process-wide queue the AI audit and the processor share. */
+  const writeQueue = new WriteQueue();
   jest.setTimeout(120000);
 
   let fixtureSite: FixtureSiteServer;
@@ -74,6 +77,7 @@ describe('ScanProcessor real URL integration', () => {
       scanConfig(),
       urlPolicy,
       agentAudit as unknown as AgentAuditService,
+      writeQueue,
     );
   });
 
