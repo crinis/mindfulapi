@@ -324,12 +324,52 @@ describe('AgentAuditService.evaluate', () => {
       Promise.resolve(false),
     );
 
-    // Two problem drafts persisted, the appropriate one skipped; the unit
-    // counts as a single completed task despite yielding multiple findings.
-    expect(findingRepository.save).toHaveBeenCalledTimes(2);
+    // Two problem drafts persisted in one save (one transaction), the
+    // appropriate one skipped; the unit counts as a single completed task
+    // despite yielding multiple findings.
+    expect(findingRepository.save).toHaveBeenCalledTimes(1);
+    expect(findingRepository.save).toHaveBeenCalledWith([
+      expect.objectContaining({ category: 'inaccurate' }),
+      expect.objectContaining({ category: 'vague_or_generic' }),
+    ]);
     expect(scanRepository.update).toHaveBeenLastCalledWith(1, {
       aiTasksCompleted: 1,
       aiTasksFailed: 0,
+    });
+  });
+
+  it("stores none of a unit's findings when saving them fails", async () => {
+    const { service, findingRepository, scanRepository } = makeService();
+    // A database that takes one more row, then fails; a save of several
+    // rows is one transaction and rolls back as a whole.
+    const stored: unknown[] = [];
+    findingRepository.save.mockImplementation((rows: unknown) => {
+      const batch = Array.isArray(rows) ? rows : [rows];
+      if (stored.length + batch.length > 1) {
+        return Promise.reject(new Error('SQLITE_FULL'));
+      }
+      stored.push(...batch);
+      return Promise.resolve(rows);
+    });
+    const skill = {
+      id: AgentSkill.IMAGE_ALT_TEXT,
+      evaluate: jest
+        .fn()
+        .mockResolvedValue([
+          problemDraft(),
+          { ...problemDraft(), usage: { inputTokens: 0, outputTokens: 0 } },
+        ]),
+    } as unknown as AuditSkill;
+
+    await service.evaluate({ id: 1 } as Scan, [{ skill, evidence }], () =>
+      Promise.resolve(false),
+    );
+
+    // A failure leaves no part of the unit stored while it counts as failed.
+    expect(stored).toEqual([]);
+    expect(scanRepository.update).toHaveBeenLastCalledWith(1, {
+      aiTasksCompleted: 0,
+      aiTasksFailed: 1,
     });
   });
 
@@ -536,12 +576,12 @@ describe('AgentAuditService.evaluate with the real harness', () => {
       () => Promise.resolve(false),
     );
 
-    expect(findingRepository.save).toHaveBeenCalledWith(
+    expect(findingRepository.save).toHaveBeenCalledWith([
       expect.objectContaining({
         category: 'redundant',
         model: 'mock-model-id',
       }),
-    );
+    ]);
     expect(scanRepository.update).toHaveBeenLastCalledWith(1, {
       aiTasksCompleted: 1,
       aiTasksFailed: 0,
@@ -581,10 +621,12 @@ describe('AgentAuditService.evaluate with the real harness', () => {
       () => Promise.resolve(false),
     );
 
-    expect(findingRepository.save).toHaveBeenCalledTimes(30);
-    expect(findingRepository.save).toHaveBeenCalledWith(
-      expect.objectContaining({ message: 'x'.repeat(500) }),
-    );
+    expect(findingRepository.save).toHaveBeenCalledTimes(1);
+    const saved = findingRepository.save.mock.calls[0][0] as Array<{
+      message: string;
+    }>;
+    expect(saved).toHaveLength(30);
+    expect(saved[0].message).toBe('x'.repeat(500));
     expect(scanRepository.update).toHaveBeenLastCalledWith(1, {
       aiTasksCompleted: 1,
       aiTasksFailed: 0,

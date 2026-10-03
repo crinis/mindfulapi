@@ -257,10 +257,11 @@ export class AgentAuditService {
           // Usage is attributed to one draft per request (see AuditSkill),
           // so summing across the array counts each request's tokens once.
           tokensSpent += draft.usage.inputTokens + draft.usage.outputTokens;
-          if (draft.category !== 'appropriate') {
-            await this.persist(scan.id, draft);
-          }
         }
+        await this.persist(
+          scan.id,
+          drafts.filter((draft) => draft.category !== 'appropriate'),
+        );
         completed++;
       } catch (error) {
         // Nothing is stored for the unit: it was not checked.
@@ -309,12 +310,24 @@ export class AgentAuditService {
     );
   }
 
-  /** Persists one finding draft as an AgentFinding row. */
+  /** Persists a unit's problem drafts as AgentFinding rows, atomically. */
   private async persist(
     scanId: number,
-    draft: AgentFindingDraft,
+    drafts: AgentFindingDraft[],
   ): Promise<void> {
-    const finding = this.findingRepository.create({
+    if (drafts.length === 0) {
+      return;
+    }
+    // One save is one transaction: a unit's findings are stored all or none,
+    // so a unit counted failed never leaves part of its findings behind.
+    await this.findingRepository.save(
+      drafts.map((draft) => this.toFinding(scanId, draft)),
+    );
+  }
+
+  /** Builds the AgentFinding row of one finding draft. */
+  private toFinding(scanId: number, draft: AgentFindingDraft): AgentFinding {
+    return this.findingRepository.create({
       scan: { id: scanId } as Scan,
       skill: draft.skill,
       pageUrl: draft.pageUrl,
@@ -331,6 +344,5 @@ export class AgentAuditService {
       inputTokens: draft.usage.inputTokens,
       outputTokens: draft.usage.outputTokens,
     });
-    await this.findingRepository.save(finding);
   }
 }
