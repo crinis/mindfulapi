@@ -140,6 +140,14 @@ export class Scan {
   @Column({ type: 'integer', default: 0 })
   aiTasksFailed: number;
 
+  /**
+   * How often reconciliation re-enqueued this scan after its job was lost (a
+   * crashed worker, a failed enqueue). Internal: caps the re-enqueues of a
+   * scan that keeps crashing its worker.
+   */
+  @Column({ type: 'integer', default: 0 })
+  reconcileAttempts: number;
+
   /** Related LLM-agent findings produced during the AI-audit phase. */
   @OneToMany(() => AgentFinding, (finding) => finding.scan, { cascade: true })
   agentFindings: AgentFinding[];

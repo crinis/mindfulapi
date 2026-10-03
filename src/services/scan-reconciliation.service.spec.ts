@@ -68,6 +68,64 @@ describe('ScanReconciliationService', () => {
     expect(mockQueue.addScanJob).not.toHaveBeenCalled();
   });
 
+  it('also recovers ANALYZING scans whose job died during the AI audit', async () => {
+    mockScanRepo.find.mockResolvedValue([
+      { id: 5, status: ScanStatus.ANALYZING, reconcileAttempts: 0 },
+    ]);
+    mockQueue.getScanJobState.mockResolvedValue(null);
+
+    await service.reconcile();
+
+    const where = mockScanRepo.find.mock.calls[0][0].where as Array<{
+      status: ScanStatus;
+      updatedAt: { value: Date };
+    }>;
+    const analyzing = where.find(
+      (clause) => clause.status === ScanStatus.ANALYZING,
+    );
+    const running = where.find(
+      (clause) => clause.status === ScanStatus.RUNNING,
+    );
+    // Same staleness as RUNNING; an active job (a long evaluation) is skipped.
+    expect(analyzing?.updatedAt.value).toEqual(running?.updatedAt.value);
+    expect(mockScanRepo.update).toHaveBeenCalledWith(
+      { id: 5, status: ScanStatus.ANALYZING },
+      { status: ScanStatus.PENDING, reconcileAttempts: 1 },
+    );
+    expect(mockQueue.addScanJob).toHaveBeenCalledWith(5);
+  });
+
+  it('counts each re-enqueue of a scan', async () => {
+    mockScanRepo.find.mockResolvedValue([
+      { id: 9, status: ScanStatus.RUNNING, reconcileAttempts: 2 },
+    ]);
+
+    await service.reconcile();
+
+    expect(mockScanRepo.update).toHaveBeenCalledWith(
+      { id: 9, status: ScanStatus.RUNNING },
+      { status: ScanStatus.PENDING, reconcileAttempts: 3 },
+    );
+    expect(mockQueue.addScanJob).toHaveBeenCalledWith(9);
+  });
+
+  it('fails a scan instead of re-enqueueing it a fourth time', async () => {
+    mockScanRepo.find.mockResolvedValue([
+      { id: 9, status: ScanStatus.RUNNING, reconcileAttempts: 3 },
+    ]);
+    mockQueue.getScanJobState.mockResolvedValue('failed');
+
+    await service.reconcile();
+
+    expect(mockScanRepo.update).toHaveBeenCalledWith(
+      { id: 9, status: ScanStatus.RUNNING },
+      { status: ScanStatus.FAILED },
+    );
+    expect(mockQueue.addScanJob).not.toHaveBeenCalled();
+    // The lingering failed job is cleared along with it.
+    expect(mockQueue.cancelScanJob).toHaveBeenCalledWith(9);
+  });
+
   it('re-enqueues a stale RUNNING scan whose job has failed', async () => {
     mockScanRepo.find.mockResolvedValue([
       { id: 9, status: ScanStatus.RUNNING },
