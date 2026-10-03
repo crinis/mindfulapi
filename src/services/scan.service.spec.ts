@@ -6,6 +6,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { In, Not } from 'typeorm';
 import { ScanService } from './scan.service';
 import { ScanQueueService } from './scan-queue.service';
 import { BasicAuthCryptoService } from './basic-auth-crypto.service';
@@ -713,15 +714,36 @@ describe('ScanService', () => {
       mockRepo.findOne.mockResolvedValueOnce(
         makeScan({ status: ScanStatus.CANCELED }),
       );
-      mockRepo.update = jest.fn().mockResolvedValue(undefined);
+      mockRepo.update = jest.fn().mockResolvedValue({ affected: 1 });
 
       const result = await service.cancel(1);
 
       expect(mockQueue.cancelScanJob).toHaveBeenCalledWith(1);
-      expect(mockRepo.update).toHaveBeenCalledWith(1, {
-        status: ScanStatus.CANCELED,
-      });
+      expect(mockRepo.update).toHaveBeenCalledWith(
+        {
+          id: 1,
+          status: Not(
+            In([ScanStatus.COMPLETED, ScanStatus.FAILED, ScanStatus.CANCELED]),
+          ),
+        },
+        { status: ScanStatus.CANCELED },
+      );
       expect(result.status).toBe(ScanStatus.CANCELED);
+    });
+
+    it('throws ConflictException when the scan finished while being canceled', async () => {
+      mockRepo.findOne.mockResolvedValueOnce(
+        makeScan({ status: ScanStatus.RUNNING }),
+      );
+      mockRepo.findOne.mockResolvedValueOnce(
+        makeScan({ status: ScanStatus.COMPLETED }),
+      );
+      mockRepo.update = jest.fn().mockResolvedValue({ affected: 0 });
+
+      await expect(service.cancel(1)).rejects.toThrow(
+        'Scan 1 is already completed and cannot be canceled.',
+      );
+      expect(mockQueue.cancelScanJob).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException for an unknown scan', async () => {

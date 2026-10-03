@@ -33,6 +33,7 @@ jest.mock('@crawlee/memory-storage', () => ({
 }));
 
 import { enqueueLinks as crawleeEnqueueLinks } from '@crawlee/core';
+import { In } from 'typeorm';
 import {
   PAGE_DEADLINE_MS,
   ScanInterruptedError,
@@ -85,6 +86,18 @@ const makeScan = (overrides: Partial<Scan> = {}): Scan => ({
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   ...overrides,
 });
+
+/** Criteria of the processor's guarded COMPLETED write for scan 1. */
+const COMPLETION_GUARD = {
+  id: 1,
+  status: In([ScanStatus.RUNNING, ScanStatus.ANALYZING]),
+};
+
+/** Criteria of the processor's guarded PENDING/FAILED write for scan 1. */
+const RETRY_GUARD = {
+  id: 1,
+  status: In([ScanStatus.PENDING, ScanStatus.RUNNING, ScanStatus.ANALYZING]),
+};
 
 /** A request the simulated crawler handed to the processor. */
 interface SimulatedRequest {
@@ -340,6 +353,110 @@ describe('ScanProcessor', () => {
     expect(mockScanner.scanPage).not.toHaveBeenCalled();
     // Only the reset attempt ran; no COMPLETED transition followed.
     expect(mockScanRepo.update).toHaveBeenCalledTimes(1);
+    // The partial results a canceled scan keeps are not wiped.
+    expect(mockIssueRepo.createQueryBuilder).not.toHaveBeenCalled();
+    expect(mockAgentAudit.reset).not.toHaveBeenCalled();
+  });
+
+  describe('status transitions racing a cancellation', () => {
+    /** Answers guarded updates as if the row had been CANCELED meanwhile. */
+    const cancelBefore = (status: ScanStatus) => {
+      mockScanRepo.update.mockImplementation(
+        (criteria: unknown, values: { status?: ScanStatus }) =>
+          Promise.resolve({
+            affected:
+              typeof criteria === 'object' && values.status === status ? 0 : 1,
+          }),
+      );
+    };
+
+    it('does not start the AI audit when the scan was canceled before ANALYZING', async () => {
+      mockScanQb.getOne.mockResolvedValue(makeScan());
+      mockAgentAudit.resolveSkills.mockReturnValue([{ id: 'image_alt_text' }]);
+      mockAgentAudit.collectForPage.mockResolvedValue([{ id: 'unit-1' }]);
+      (mockAgentAudit as any).remainingScanUnits = jest
+        .fn()
+        .mockReturnValue(10);
+      cancelBefore(ScanStatus.ANALYZING);
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(mockScanRepo.update).toHaveBeenCalledWith(
+        { id: 1, status: ScanStatus.RUNNING },
+        { status: ScanStatus.ANALYZING },
+      );
+      expect(mockAgentAudit.evaluate).not.toHaveBeenCalled();
+      expect(mockScanRepo.update).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ status: ScanStatus.COMPLETED }),
+      );
+    });
+
+    it('completes only a scan that is still running or analyzing', async () => {
+      mockScanQb.getOne.mockResolvedValue(makeScan());
+
+      await processor.process({ data: { scanId: 1 } } as any);
+
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(
+        { id: 1, status: In([ScanStatus.RUNNING, ScanStatus.ANALYZING]) },
+        {
+          status: ScanStatus.COMPLETED,
+          pagesDiscovered: 1,
+          pagesScanned: 1,
+          pagesFailed: 0,
+        },
+      );
+    });
+
+    it('neither retries nor revives a canceled scan whose attempt failed', async () => {
+      mockScanQb.getOne.mockResolvedValue(makeScan());
+      mockBrowserService.getBrowser.mockRejectedValue(
+        new Error('browser unavailable'),
+      );
+      mockScanRepo.findOne.mockResolvedValue({
+        id: 1,
+        status: ScanStatus.CANCELED,
+      });
+
+      await expect(
+        processor.process({
+          data: { scanId: 1 },
+          attemptsMade: 0,
+          opts: { attempts: 3 },
+        } as any),
+      ).resolves.toBeUndefined();
+
+      expect(mockScanRepo.update).not.toHaveBeenCalledWith(expect.anything(), {
+        status: ScanStatus.PENDING,
+      });
+    });
+
+    it('writes PENDING after a failed attempt only over an active status', async () => {
+      mockScanQb.getOne.mockResolvedValue(makeScan());
+      mockBrowserService.getBrowser.mockRejectedValue(
+        new Error('browser unavailable'),
+      );
+
+      await expect(
+        processor.process({
+          data: { scanId: 1 },
+          attemptsMade: 0,
+          opts: { attempts: 3 },
+        } as any),
+      ).rejects.toThrow('browser unavailable');
+
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(
+        {
+          id: 1,
+          status: In([
+            ScanStatus.PENDING,
+            ScanStatus.RUNNING,
+            ScanStatus.ANALYZING,
+          ]),
+        },
+        { status: ScanStatus.PENDING },
+      );
+    });
   });
 
   it('processes single_url runs and stores issues', async () => {
@@ -385,7 +502,7 @@ describe('ScanProcessor', () => {
         }),
       ]),
     );
-    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
       status: ScanStatus.COMPLETED,
       pagesDiscovered: 1,
       pagesScanned: 1,
@@ -414,7 +531,7 @@ describe('ScanProcessor', () => {
     await processor.process({ data: { scanId: 1 } } as any);
 
     expect(mockScanner.scanPage).toHaveBeenCalledTimes(2);
-    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
       status: ScanStatus.COMPLETED,
       pagesDiscovered: 2,
       pagesScanned: 1,
@@ -489,7 +606,7 @@ describe('ScanProcessor', () => {
     );
     expect(mockContext.close).toHaveBeenCalled();
     expect(mockQueueDrop).toHaveBeenCalled();
-    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
       status: ScanStatus.COMPLETED,
       pagesDiscovered: 2,
       pagesScanned: 2,
@@ -580,7 +697,7 @@ describe('ScanProcessor', () => {
         { baseUrl: 'https://example.com/', urls: ['https://example.com/out'] },
       ]);
       // The redirect alias is not a page of this crawl.
-      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
         status: ScanStatus.COMPLETED,
         pagesDiscovered: 1,
         pagesScanned: 1,
@@ -634,7 +751,7 @@ describe('ScanProcessor', () => {
       expect(mockScanner.analyzeLoadedPage).not.toHaveBeenCalled();
       expect(mockIssueRepo.save).not.toHaveBeenCalled();
       expect(crawl.enqueueCalls).toEqual([]);
-      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
         status: ScanStatus.COMPLETED,
         pagesDiscovered: 1,
         pagesScanned: 0,
@@ -665,7 +782,7 @@ describe('ScanProcessor', () => {
         'https://example.com/',
         'https://example.com/target',
       ]);
-      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
         status: ScanStatus.COMPLETED,
         pagesDiscovered: 2,
         pagesScanned: 2,
@@ -743,7 +860,7 @@ describe('ScanProcessor', () => {
         'https://example.com/',
         ...internal,
       ]);
-      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
         status: ScanStatus.COMPLETED,
         pagesDiscovered: 6,
         pagesScanned: 6,
@@ -874,7 +991,7 @@ describe('ScanProcessor', () => {
 
     await processor.process({ data: { scanId: 1 } } as any);
 
-    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
       status: ScanStatus.COMPLETED,
       pagesDiscovered: 1,
       pagesScanned: 0,
@@ -952,7 +1069,7 @@ describe('ScanProcessor', () => {
       await processor.process({ data: { scanId: 1 } } as any);
 
       expect(mockIssueRepo.save).not.toHaveBeenCalled();
-      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
         status: ScanStatus.COMPLETED,
         pagesDiscovered: 1,
         pagesScanned: 0,
@@ -973,7 +1090,7 @@ describe('ScanProcessor', () => {
       await processor.process({ data: { scanId: 1 } } as any);
 
       expect(mockIssueRepo.save).toHaveBeenCalledTimes(1);
-      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
         status: ScanStatus.COMPLETED,
         pagesDiscovered: 1,
         pagesScanned: 1,
@@ -1007,7 +1124,7 @@ describe('ScanProcessor', () => {
     await processor.process({ data: { scanId: 1 } } as any);
 
     expect(mockScanner.analyzeLoadedPage).toHaveBeenCalledTimes(1);
-    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
       status: ScanStatus.COMPLETED,
       pagesDiscovered: 1,
       pagesScanned: 1,
@@ -1050,7 +1167,7 @@ describe('ScanProcessor', () => {
     expect(mockAgentAudit.collectForPage).not.toHaveBeenCalled();
     expect(page.evaluate).not.toHaveBeenCalled();
     expect(enqueueLinks).not.toHaveBeenCalled();
-    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
       status: ScanStatus.COMPLETED,
       pagesDiscovered: 1,
       pagesScanned: 0,
@@ -1080,7 +1197,7 @@ describe('ScanProcessor', () => {
     expect(mockAgentAudit.collectForPage.mock.calls[0][2]).toBe(
       'https://example.com/a',
     );
-    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
       status: ScanStatus.COMPLETED,
       pagesDiscovered: 2,
       pagesScanned: 1,
@@ -1121,7 +1238,7 @@ describe('ScanProcessor', () => {
     expect(mockIssueRepo.save).not.toHaveBeenCalled();
     // Nothing was buffered, so the AI phase never starts.
     expect(mockAgentAudit.evaluate).not.toHaveBeenCalled();
-    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
       status: ScanStatus.COMPLETED,
       pagesDiscovered: 1,
       pagesScanned: 0,
@@ -1244,7 +1361,7 @@ describe('ScanProcessor', () => {
       await processPastDeadline();
 
       expect(pages[0].close).toHaveBeenCalled();
-      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
         status: ScanStatus.COMPLETED,
         pagesDiscovered: 2,
         pagesScanned: 1,
@@ -1282,7 +1399,7 @@ describe('ScanProcessor', () => {
       expect(page.close).toHaveBeenCalled();
       expect(mockIssueRepo.save).not.toHaveBeenCalled();
       expect(mockAgentAudit.evaluate).not.toHaveBeenCalled();
-      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
         status: ScanStatus.COMPLETED,
         pagesDiscovered: 1,
         pagesScanned: 0,
@@ -1307,7 +1424,7 @@ describe('ScanProcessor', () => {
       expect(page.close).toHaveBeenCalled();
       expect(page.evaluate).not.toHaveBeenCalled();
       expect(crawl.enqueueCalls).toEqual([]);
-      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
         status: ScanStatus.COMPLETED,
         pagesDiscovered: 1,
         pagesScanned: 0,
@@ -1328,7 +1445,7 @@ describe('ScanProcessor', () => {
       await processPastDeadline();
 
       expect(page.close).toHaveBeenCalled();
-      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
         status: ScanStatus.COMPLETED,
         pagesDiscovered: 1,
         pagesScanned: 0,
@@ -1353,7 +1470,7 @@ describe('ScanProcessor', () => {
       await processPastDeadline();
 
       expect(page.close).toHaveBeenCalledTimes(1);
-      expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+      expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
         status: ScanStatus.COMPLETED,
         pagesDiscovered: 1,
         pagesScanned: 1,
@@ -1385,7 +1502,7 @@ describe('ScanProcessor', () => {
 
     expect(mockScanner.scanPage).toHaveBeenCalledTimes(1);
     expect(mockContext.newPage).toHaveBeenCalledTimes(1);
-    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(COMPLETION_GUARD, {
       status: ScanStatus.COMPLETED,
       pagesDiscovered: 2,
       pagesScanned: 1,
@@ -1558,7 +1675,7 @@ describe('ScanProcessor', () => {
       } as any),
     ).rejects.toThrow('browser unavailable');
 
-    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(RETRY_GUARD, {
       status: ScanStatus.PENDING,
     });
   });
@@ -1577,7 +1694,7 @@ describe('ScanProcessor', () => {
       } as any),
     ).rejects.toThrow('browser unavailable');
 
-    expect(mockScanRepo.update).toHaveBeenLastCalledWith(1, {
+    expect(mockScanRepo.update).toHaveBeenLastCalledWith(RETRY_GUARD, {
       status: ScanStatus.FAILED,
     });
   });

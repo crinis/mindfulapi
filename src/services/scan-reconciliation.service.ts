@@ -75,11 +75,20 @@ export class ScanReconciliationService implements OnApplicationBootstrap {
       );
       try {
         // Clear any lingering terminal job so the deterministic id is free,
-        // reset to PENDING, then re-enqueue (processing is idempotent).
+        // reset to PENDING, then re-enqueue (processing is idempotent). The
+        // write is guarded by the status read above: a scan canceled or
+        // picked up since then is left alone.
         await this.scanQueueService.cancelScanJob(scan.id);
-        await this.scanRepository.update(scan.id, {
-          status: ScanStatus.PENDING,
-        });
+        const result = await this.scanRepository.update(
+          { id: scan.id, status: scan.status },
+          { status: ScanStatus.PENDING },
+        );
+        if (!result.affected) {
+          this.logger.log(
+            `Scan ${scan.id} changed status during reconciliation; not re-enqueued`,
+          );
+          continue;
+        }
         await this.scanQueueService.addScanJob(scan.id);
       } catch (error) {
         this.logger.error(

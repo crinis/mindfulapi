@@ -13,7 +13,7 @@ describe('ScanReconciliationService', () => {
   beforeEach(() => {
     mockScanRepo = {
       find: jest.fn().mockResolvedValue([]),
-      update: jest.fn().mockResolvedValue(undefined),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     mockQueue = {
       getScanJobState: jest.fn().mockResolvedValue(null),
@@ -34,10 +34,27 @@ describe('ScanReconciliationService', () => {
 
     await service.reconcile();
 
-    expect(mockScanRepo.update).toHaveBeenCalledWith(7, {
-      status: ScanStatus.PENDING,
-    });
+    expect(mockScanRepo.update).toHaveBeenCalledWith(
+      { id: 7, status: ScanStatus.PENDING },
+      expect.objectContaining({ status: ScanStatus.PENDING }),
+    );
     expect(mockQueue.addScanJob).toHaveBeenCalledWith(7);
+  });
+
+  it('does not re-enqueue a scan whose status changed since it was read', async () => {
+    mockScanRepo.find.mockResolvedValue([
+      { id: 9, status: ScanStatus.RUNNING },
+    ]);
+    // Canceled (or picked up) between the sweep's read and its write.
+    mockScanRepo.update.mockResolvedValue({ affected: 0 });
+
+    await service.reconcile();
+
+    expect(mockScanRepo.update).toHaveBeenCalledWith(
+      { id: 9, status: ScanStatus.RUNNING },
+      expect.objectContaining({ status: ScanStatus.PENDING }),
+    );
+    expect(mockQueue.addScanJob).not.toHaveBeenCalled();
   });
 
   it('skips scans whose job is still waiting', async () => {

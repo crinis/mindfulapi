@@ -2,7 +2,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Not, Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import { Job } from 'bullmq';
 import {
   BasicCrawler,
@@ -96,6 +96,17 @@ export class ScanInterruptedError extends Error {
     this.name = new.target.name;
   }
 }
+
+/**
+ * Statuses a scan job may still move on from. Every status write of the
+ * processor is guarded by them, so a cancellation that lands between a check
+ * and the write is never overwritten.
+ */
+const ACTIVE_STATUSES = [
+  ScanStatus.PENDING,
+  ScanStatus.RUNNING,
+  ScanStatus.ANALYZING,
+];
 
 /** Progress rows are rewritten at most every N ms / every N pages per scan. */
 const PROGRESS_WRITE_INTERVAL_MS = 2000;
@@ -283,9 +294,15 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
       // Agentic phase: evidence was collected while pages were live; evaluate
       // it now, off the browser, before marking the scan complete.
       if (agent && agent.buffer.length > 0) {
-        await this.scanRepository.update(scanId, {
-          status: ScanStatus.ANALYZING,
-        });
+        const analyzing = await this.scanRepository.update(
+          { id: scanId, status: ScanStatus.RUNNING },
+          { status: ScanStatus.ANALYZING },
+        );
+        if (!analyzing.affected) {
+          await this.persistFinalCounters(scanId, progress);
+          this.logger.log(`Scan ${scanId} was canceled before its AI audit`);
+          return;
+        }
         await this.agentAudit.evaluate(scan, agent.buffer, () =>
           this.isCanceled(scanId),
         );
@@ -296,15 +313,34 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
         }
       }
 
-      await this.scanRepository.update(scanId, {
-        status: ScanStatus.COMPLETED,
-        pagesDiscovered: progress.pagesDiscovered,
-        pagesScanned: progress.pagesScanned,
-        pagesFailed: progress.pagesFailed,
-      });
+      const completed = await this.scanRepository.update(
+        {
+          id: scanId,
+          status: In([ScanStatus.RUNNING, ScanStatus.ANALYZING]),
+        },
+        {
+          status: ScanStatus.COMPLETED,
+          pagesDiscovered: progress.pagesDiscovered,
+          pagesScanned: progress.pagesScanned,
+          pagesFailed: progress.pagesFailed,
+        },
+      );
+      if (!completed.affected) {
+        await this.persistFinalCounters(scanId, progress);
+        this.logger.log(`Scan ${scanId} was canceled`);
+        return;
+      }
 
       this.logger.log(`Completed scan ${scanId}`);
     } catch (error) {
+      // A canceled (or deleted) scan stays canceled: its job ends here
+      // instead of being retried, and no PENDING/FAILED status replaces it.
+      if (await this.isCanceled(scanId).catch(() => false)) {
+        this.logger.log(
+          `Scan ${scanId} was canceled; its failed attempt is not retried: ${String(error)}`,
+        );
+        return;
+      }
       // BullMQ increments attemptsMade only after an attempt finishes, so the
       // attempt currently running is attemptsMade + 1. Marking FAILED before
       // the final attempt would flap FAILED -> RUNNING for polling clients.
@@ -314,31 +350,24 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
         `Failed scan ${scanId} (attempt ${job.attemptsMade + 1}/${configuredAttempts}):`,
         error,
       );
-      await this.scanRepository.update(scanId, {
-        status: isFinalAttempt ? ScanStatus.FAILED : ScanStatus.PENDING,
-      });
+      await this.scanRepository.update(
+        { id: scanId, status: In(ACTIVE_STATUSES) },
+        { status: isFinalAttempt ? ScanStatus.FAILED : ScanStatus.PENDING },
+      );
       throw error;
     }
   }
 
   /**
-   * Clears previous results and marks a scan as running before processing
+   * Marks a scan as running and clears previous results before processing
    * starts. The status transition is guarded so a cancellation racing this
-   * reset is not clobbered back to RUNNING.
+   * reset is not clobbered back to RUNNING, and runs first: a canceled scan
+   * keeps the partial results it is documented to retain.
    *
    * @returns `true` when the scan was moved to RUNNING; `false` when it was
    * already CANCELED (or gone) and processing should stop.
    */
   private async resetScanResults(scanId: number): Promise<boolean> {
-    await this.issueRepository
-      .createQueryBuilder()
-      .delete()
-      .from(Issue)
-      .where('scanId = :scanId', { scanId })
-      .execute();
-
-    await this.agentAudit.reset(scanId);
-
     const result = await this.scanRepository.update(
       { id: scanId, status: Not(ScanStatus.CANCELED) },
       {
@@ -348,7 +377,18 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
         pagesFailed: 0,
       },
     );
-    return (result.affected ?? 0) > 0;
+    if (!result.affected) {
+      return false;
+    }
+
+    await this.issueRepository
+      .createQueryBuilder()
+      .delete()
+      .from(Issue)
+      .where('scanId = :scanId', { scanId })
+      .execute();
+    await this.agentAudit.reset(scanId);
+    return true;
   }
 
   /** Persists page counters without changing the current status. */

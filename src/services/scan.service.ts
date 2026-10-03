@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import { Scan } from '../entities/scan.entity';
 import { Issue } from '../entities/issue.entity';
 import { AgentFinding } from '../entities/agent-finding.entity';
@@ -227,8 +227,21 @@ export class ScanService {
       );
     }
 
+    // Guarded: a scan that finished after the check above stays finished.
+    const result = await this.scanRepository.update(
+      { id, status: Not(In(terminal)) },
+      { status: ScanStatus.CANCELED },
+    );
+    if (!result.affected) {
+      const current = await this.scanRepository.findOne({ where: { id } });
+      if (!current) {
+        throw new NotFoundException(`Scan with ID ${id} not found`);
+      }
+      throw new ConflictException(
+        `Scan ${id} is already ${current.status} and cannot be canceled.`,
+      );
+    }
     await this.scanQueueService.cancelScanJob(id);
-    await this.scanRepository.update(id, { status: ScanStatus.CANCELED });
 
     return this.findOne(id);
   }
