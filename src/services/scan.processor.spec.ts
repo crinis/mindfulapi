@@ -35,6 +35,7 @@ jest.mock('@crawlee/memory-storage', () => ({
 import { enqueueLinks as crawleeEnqueueLinks } from '@crawlee/core';
 import { In } from 'typeorm';
 import {
+  EVIDENCE_RESERVE_MS,
   PAGE_DEADLINE_MS,
   ScanInterruptedError,
   ScanProcessor,
@@ -1220,7 +1221,7 @@ describe('ScanProcessor', () => {
       await processor.process({ data: { scanId: 1 } } as any);
 
       expect(mockAgentAudit.collectForPage).toHaveBeenCalledTimes(1);
-      expect(mockAgentAudit.collectForPage.mock.calls[0][5]).toEqual({
+      expect(mockAgentAudit.collectForPage.mock.calls[0][5]).toMatchObject({
         rootElement: 'main',
       });
     },
@@ -1437,6 +1438,28 @@ describe('ScanProcessor', () => {
         pagesFailed: 1,
       });
     });
+
+    it.each([ScanMode.SINGLE_URL, ScanMode.CRAWL])(
+      'gives the AI evidence of a %s page a budget that ends before the page deadline',
+      async (mode) => {
+        mockScanQb.getOne.mockResolvedValue(
+          makeScan({ mode, crawlMaxDepth: 0 }),
+        );
+        mockAgentAudit.resolveSkills.mockReturnValue([{ id: 'page_title' }]);
+        if (mode === ScanMode.CRAWL) {
+          mockCrawlerRunHandler = simulateCrawl(['https://example.com/']).run;
+        }
+        // Fake time stands still while the job runs without timers.
+        const started = Date.now();
+
+        await processor.process({ data: { scanId: 1 } } as any);
+
+        expect(mockAgentAudit.collectForPage).toHaveBeenCalledTimes(1);
+        expect(mockAgentAudit.collectForPage.mock.calls[0][5]).toMatchObject({
+          deadline: started + PAGE_DEADLINE_MS - EVIDENCE_RESERVE_MS,
+        });
+      },
+    );
 
     it('discards what a page produces after its deadline expired', async () => {
       mockScanQb.getOne.mockResolvedValue(makeScan());

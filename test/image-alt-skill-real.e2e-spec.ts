@@ -162,6 +162,22 @@ describe('ImageAltTextSkill.collect (real browser)', () => {
     expect(image.src?.length).toBe(500);
   });
 
+  it('skips hidden images and captures animated ones without waiting', async () => {
+    const started = Date.now();
+    const { evidence } = await collectFrom(`
+      <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+      <div style="content-visibility: hidden">
+        <img alt="Collapsed" width="80" height="80" src="${PNG}">
+      </div>
+      <img alt="Spinner" width="80" height="80" src="${PNG}"
+        style="animation: spin 1s linear infinite">`);
+
+    expect(evidence.map((item) => item.alt)).toEqual(['Spinner']);
+    expect(evidence[0].screenshot).toBeInstanceOf(Buffer);
+    // Either image used to cost the full 5 s screenshot timeout.
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+
   it('drops an image already flagged by an axe alt rule', async () => {
     // First discover the good image's src, then feed a matching axe violation.
     const [first] = await collect();

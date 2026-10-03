@@ -69,6 +69,12 @@ const MAX_CONTEXT_LENGTH = 4000;
 export const PAGE_DEADLINE_MS = 120_000;
 
 /**
+ * Part of the page deadline kept free of AI evidence collection: the policy
+ * re-check and, in crawls, link extraction still run after it.
+ */
+export const EVIDENCE_RESERVE_MS = 15_000;
+
+/**
  * Crawlee's request-handler timeout. Crawlee's timeout rejects but never stops
  * the handler, so it must not fire while the page work is still within its
  * deadline; the extra minute covers the policy check, database writes and
@@ -191,6 +197,8 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
   private readonly logger = new Logger(ScanProcessor.name);
   /** {@link PAGE_DEADLINE_MS}; an instance field so real-browser tests can shorten it. */
   private readonly pageDeadlineMs: number = PAGE_DEADLINE_MS;
+  /** {@link EVIDENCE_RESERVE_MS}; an instance field so real-browser tests can shorten it. */
+  private readonly evidenceReserveMs: number = EVIDENCE_RESERVE_MS;
 
   /**
    * @param scanRepository Scan repository used for lifecycle/progress updates.
@@ -415,12 +423,18 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
    *
    * The evidence (and so every finding) carries the normalized page URL, the
    * form issues are stored under and page-URL filters match against.
+   *
+   * Collection ends {@link EVIDENCE_RESERVE_MS} before the page deadline with
+   * whatever it has by then (screenshots of moving or never-settling images
+   * can take seconds each), so a slow collection cannot cost the page its axe
+   * issues, its policy re-check or its links.
    */
   private async collectAgentEvidence(
     agent: AgentRun | undefined,
     page: Page,
     pageUrl: string,
     issues: ScannedIssue[],
+    pageDeadline: number,
   ): Promise<CollectedUnit[]> {
     if (!agent || agent.skills.length === 0) {
       return [];
@@ -432,7 +446,10 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
         normalizeHttpUrl(pageUrl) ?? pageUrl,
         issues,
         agent.buffer.length,
-        { rootElement: agent.rootElement },
+        {
+          rootElement: agent.rootElement,
+          deadline: pageDeadline - this.evidenceReserveMs,
+        },
       );
     } catch (error) {
       this.logger.warn(
@@ -472,8 +489,15 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
     page: Page,
     pageUrl: string,
     issues: ScannedIssue[],
+    pageDeadline: number,
   ): Promise<CollectedUnit[]> {
-    const units = await this.collectAgentEvidence(agent, page, pageUrl, issues);
+    const units = await this.collectAgentEvidence(
+      agent,
+      page,
+      pageUrl,
+      issues,
+      pageDeadline,
+    );
     await this.scanner.assertPageAllowed(page);
     return units;
   }
@@ -498,13 +522,14 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
    * Playwright calls then reject — and a {@link PageDeadlineError} is thrown
    * without waiting for the work. Whatever the abandoned work still returns is
    * discarded, so `work` must not store, buffer or enqueue anything itself.
+   * `work` receives the deadline (epoch ms) to budget its own steps.
    */
   private async withPageDeadline<T>(
     page: Page,
     url: string,
-    work: () => Promise<T>,
+    work: (deadline: number) => Promise<T>,
   ): Promise<T> {
-    const running = work();
+    const running = work(Date.now() + this.pageDeadlineMs);
     let timer: NodeJS.Timeout | undefined;
     const expired = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
@@ -600,7 +625,7 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
             const { issues, units } = await this.withPageDeadline(
               page,
               task.url,
-              async () => {
+              async (deadline) => {
                 const { finalUrl, issues } = await this.scanner.scanPage(
                   page,
                   task.url,
@@ -611,6 +636,7 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
                   page,
                   finalUrl,
                   issues,
+                  deadline,
                 );
                 return { issues, units };
               },
@@ -744,6 +770,7 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
       url: string,
       depth: number,
       inheritedScope: string,
+      deadline: number,
     ): Promise<CrawlPageOutcome> => {
       let scopeUrl = inheritedScope;
       try {
@@ -777,6 +804,7 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
           page,
           finalUrl,
           issues,
+          deadline,
         );
         const links = await mineLinks(page, url, depth);
         return { kind: 'scanned', issues, units, links, scopeUrl };
@@ -873,8 +901,17 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
               : request.url;
           const page = await context.newPage();
           try {
-            const outcome = await this.withPageDeadline(page, request.url, () =>
-              inspectCrawlPage(page, request.url, depth, inheritedScope),
+            const outcome = await this.withPageDeadline(
+              page,
+              request.url,
+              (deadline) =>
+                inspectCrawlPage(
+                  page,
+                  request.url,
+                  depth,
+                  inheritedScope,
+                  deadline,
+                ),
             ).catch(
               (error: unknown): CrawlPageOutcome => ({
                 kind: 'failed',

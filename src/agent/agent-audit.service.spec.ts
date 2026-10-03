@@ -189,6 +189,48 @@ describe('AgentAuditService.collectForPage', () => {
     );
   });
 
+  it('keeps the units collected before the evidence deadline when a skill hangs', async () => {
+    const { service } = makeService({ maxUnitsPerPage: 30 });
+    const quick = pageSkill(AgentSkill.HEADING_STRUCTURE, 20);
+    const hanging = {
+      ...pageSkill(AgentSkill.LINK_PURPOSE, 30),
+      // A page.evaluate on a page whose main thread never yields.
+      collect: jest.fn(() => new Promise<never>(() => undefined)),
+    } as unknown as AuditSkill;
+    const image = elementSkill();
+    const imageCollect = jest.spyOn(image, 'collect');
+    const started = Date.now();
+
+    const units = await service.collectForPage(
+      [image, quick, hanging],
+      page,
+      pageUrl,
+      [],
+      0,
+      { deadline: started + 100 },
+    );
+
+    expect(units.map((unit) => unit.skill.id)).toEqual([
+      AgentSkill.HEADING_STRUCTURE,
+    ]);
+    expect(imageCollect).not.toHaveBeenCalled();
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('passes the evidence deadline to the skills', async () => {
+    const { service } = makeService({ maxUnitsPerPage: 30 });
+    const image = elementSkill();
+    const imageCollect = jest.spyOn(image, 'collect');
+    const deadline = Date.now() + 60_000;
+
+    await service.collectForPage([image], page, pageUrl, [], 0, { deadline });
+
+    expect(imageCollect).toHaveBeenCalledWith(
+      page,
+      expect.objectContaining({ deadline }),
+    );
+  });
+
   it('gives page skills the scan-wide remainder first', async () => {
     const { service } = makeService({
       maxUnitsPerPage: 30,

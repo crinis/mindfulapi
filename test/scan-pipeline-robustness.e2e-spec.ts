@@ -25,7 +25,16 @@ import {
 import { BasicAuthCryptoService } from '../src/services/basic-auth-crypto.service';
 import { scanConfig } from '../src/config/configuration';
 import { UrlPolicyService } from '../src/services/url-policy.service';
-import type { AgentAuditService } from '../src/agent/agent-audit.service';
+import { agentConfig } from '../src/config/configuration';
+import { AgentAuditService } from '../src/agent/agent-audit.service';
+import type { AgentHarnessService } from '../src/agent/harness/agent-harness.service';
+import { SkillRegistry } from '../src/agent/skills/skill-registry';
+import { ImageAltTextSkill } from '../src/agent/skills/image-alt-text.skill';
+import { HeadingStructureSkill } from '../src/agent/skills/heading-structure.skill';
+import { LinkPurposeSkill } from '../src/agent/skills/link-purpose.skill';
+import { FormLabelsSkill } from '../src/agent/skills/form-labels.skill';
+import { PageTitleSkill } from '../src/agent/skills/page-title.skill';
+import { AgentSkill } from '../src/enums/agent-skill.enum';
 import {
   FixtureSiteServer,
   startFixtureSiteServer,
@@ -33,6 +42,12 @@ import {
 
 /** Page deadline used here instead of the production two minutes. */
 const TEST_PAGE_DEADLINE_MS = 3000;
+/** Part of it kept free of AI evidence collection (production: 15 s). */
+const TEST_EVIDENCE_RESERVE_MS = 500;
+
+/** A 1x1 PNG, rendered at whatever size the markup asks for. */
+const PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 /** An HTML page with an axe violation (image without alt) and `extra` markup. */
 function page(title: string, extra = '') {
@@ -57,7 +72,47 @@ describe('Scan pipeline robustness (real browser)', () => {
 
   const siteUrl = (path: string): string => `${site.baseUrl}${path}`;
 
-  function buildProcessor(): ScanProcessor {
+  /**
+   * The real AI-audit collection with the image skill. Its harness has no
+   * model: an evaluation would fail its units, never reach a provider.
+   */
+  function realAgentAudit(): AgentAuditService {
+    const settings = {
+      ...agentConfig(),
+      enabled: true,
+      allowedSkills: [AgentSkill.IMAGE_ALT_TEXT],
+      allowedScanModes: [ScanMode.SINGLE_URL],
+    };
+    const harness = {
+      evaluateStructured: () =>
+        Promise.reject(new Error('No model in this test')),
+    } as unknown as AgentHarnessService;
+    return new AgentAuditService(
+      dataSource.getRepository(AgentFinding),
+      scanRepository,
+      new SkillRegistry(
+        new ImageAltTextSkill(),
+        new HeadingStructureSkill(),
+        new LinkPurposeSkill(),
+        new FormLabelsSkill(),
+        new PageTitleSkill(),
+      ),
+      harness,
+      settings,
+    );
+  }
+
+  function buildProcessor(
+    agentAudit: Pick<
+      AgentAuditService,
+      'resolveSkills' | 'reset' | 'collectForPage' | 'evaluate'
+    > = {
+      resolveSkills: () => [],
+      reset: () => Promise.resolve(undefined),
+      collectForPage: () => Promise.resolve([]),
+      evaluate: () => Promise.resolve(undefined),
+    },
+  ): ScanProcessor {
     const config = {
       ...scanConfig(),
       allowPrivateTargets: true,
@@ -66,12 +121,6 @@ describe('Scan pipeline robustness (real browser)', () => {
       crawlConcurrency: 1,
     };
     const urlPolicy = new UrlPolicyService(config);
-    const agentAudit = {
-      resolveSkills: () => [],
-      reset: () => Promise.resolve(undefined),
-      collectForPage: () => Promise.resolve([]),
-      evaluate: () => Promise.resolve(undefined),
-    };
     const processor = new ScanProcessor(
       scanRepository,
       issueRepository,
@@ -82,7 +131,10 @@ describe('Scan pipeline robustness (real browser)', () => {
       urlPolicy,
       agentAudit as unknown as AgentAuditService,
     );
-    Object.assign(processor, { pageDeadlineMs: TEST_PAGE_DEADLINE_MS });
+    Object.assign(processor, {
+      pageDeadlineMs: TEST_PAGE_DEADLINE_MS,
+      evidenceReserveMs: TEST_EVIDENCE_RESERVE_MS,
+    });
     return processor;
   }
 
@@ -101,9 +153,12 @@ describe('Scan pipeline robustness (real browser)', () => {
     );
   }
 
-  async function runScan(overrides: Partial<Scan>): Promise<Scan> {
+  async function runScan(
+    overrides: Partial<Scan>,
+    processor: ScanProcessor = buildProcessor(),
+  ): Promise<Scan> {
     const scan = await createPendingScan(overrides);
-    await buildProcessor().process(jobFor(scan.id));
+    await processor.process(jobFor(scan.id));
     const finished = await scanRepository.findOne({
       where: { id: scan.id },
       relations: { issues: true },
@@ -123,6 +178,19 @@ describe('Scan pipeline robustness (real browser)', () => {
             ' setTimeout(() => { for (;;) {} }, 0));</script>',
         ),
         '/fine': page('Fine page'),
+        // Images that script keeps moving: a screenshot waits for each to
+        // stand still until its timeout (5 s), longer than the page deadline.
+        '/moving-images': page(
+          'Moving images',
+          Array.from(
+            { length: 5 },
+            (_, i) =>
+              `<img class="moving" alt="Product ${i}" width="80" height="80" src="${PNG}">`,
+          ).join('') +
+            '<script>let x = 0; setInterval(() => { x = (x + 1) % 40;' +
+            ' document.querySelectorAll(".moving").forEach((img) =>' +
+            ' { img.style.marginLeft = x + "px"; }); }, 16);</script>',
+        ),
         // Answers after two seconds, keeping the navigation in flight.
         '/slow': (req, res) => {
           setTimeout(() => page('Slow page')(req, res), 2000);
@@ -173,6 +241,21 @@ describe('Scan pipeline robustness (real browser)', () => {
     );
     // The busy page was given up at its deadline, not at a browser timeout.
     expect(Date.now() - startedAt).toBeLessThan(TEST_PAGE_DEADLINE_MS + 10000);
+  });
+
+  it('keeps the axe issues of a page whose AI evidence runs out of time', async () => {
+    const scan = await runScan(
+      {
+        targets: [siteUrl('/moving-images')],
+        aiAuditSkills: [AgentSkill.IMAGE_ALT_TEXT],
+      },
+      buildProcessor(realAgentAudit()),
+    );
+
+    expect(scan.status).toBe(ScanStatus.COMPLETED);
+    expect(scan.pagesScanned).toBe(1);
+    expect(scan.pagesFailed).toBe(0);
+    expect(scan.issues.map((issue) => issue.ruleId)).toContain('image-alt');
   });
 
   describe('browser lost mid-scan', () => {

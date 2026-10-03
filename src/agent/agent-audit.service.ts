@@ -25,6 +25,34 @@ const MAX_SELECTOR_LENGTH = 1000;
 export interface CollectOptions {
   /** CSS selector the scan is limited to (`scanOptions.rootElement`). */
   rootElement?: string;
+  /**
+   * Time (epoch ms) by which collection must be done; the units collected by
+   * then are returned. Absent: no time limit.
+   */
+  deadline?: number;
+}
+
+/**
+ * Resolves with the result of `work`, or with `undefined` once `ms` passed
+ * first. An abandoned `work` may still reject later; that is ignored.
+ */
+async function withinTime<T>(
+  work: Promise<T>,
+  ms: number,
+): Promise<T | undefined> {
+  if (!Number.isFinite(ms)) {
+    return work;
+  }
+  work.catch(() => undefined);
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), Math.max(0, ms));
+  });
+  try {
+    return await Promise.race([work, expired]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** A collected work unit paired with the skill that produced it. */
@@ -116,6 +144,10 @@ export class AgentAuditService {
    * result; element skills share what is left. Otherwise a page with more
    * images than the cap would leave no room for the page skills, and the
    * scan-wide clamp, which drops trailing units, would always drop them.
+   *
+   * With `options.deadline`, collection resolves by that time with the units
+   * of the skills that finished: a skill still collecting then is abandoned
+   * (its page is closed later, which ends it), and later skills do not start.
    */
   async collectForPage(
     skills: AuditSkill[],
@@ -138,19 +170,38 @@ export class AgentAuditService {
       (skill) => skill.granularity !== 'page',
     );
 
+    const timeLeft = (): number =>
+      options.deadline === undefined ? Infinity : options.deadline - Date.now();
+
     const units: CollectedUnit[] = [];
     for (const skill of [...pageSkills, ...elementSkills]) {
       const budgetLeft = cap - units.length;
       if (budgetLeft <= 0) break;
+      if (timeLeft() <= 0) {
+        this.logger.warn(
+          `AI evidence collection on ${pageUrl} ran out of time before skill ${skill.id}`,
+        );
+        break;
+      }
       try {
-        const evidence = await skill.collect(page, {
-          pageUrl,
-          axeIssues,
-          remainingUnits: budgetLeft,
-          maxUnitsPerPage: budgetLeft,
-          maxImageBytes: this.config.maxImageBytes,
-          rootElement: options.rootElement,
-        });
+        const evidence = await withinTime(
+          skill.collect(page, {
+            pageUrl,
+            axeIssues,
+            remainingUnits: budgetLeft,
+            maxUnitsPerPage: budgetLeft,
+            maxImageBytes: this.config.maxImageBytes,
+            rootElement: options.rootElement,
+            deadline: options.deadline,
+          }),
+          timeLeft(),
+        );
+        if (evidence === undefined) {
+          this.logger.warn(
+            `Skill ${skill.id} did not finish collecting on ${pageUrl} within the AI evidence time budget`,
+          );
+          break;
+        }
         for (const item of evidence) {
           units.push({ skill, evidence: item });
           if (units.length >= cap) break;

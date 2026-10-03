@@ -39,6 +39,12 @@ export interface CollectContext {
    * page-wide. Absent: the whole page.
    */
   rootElement?: string;
+  /**
+   * Time (epoch ms) by which collection must be done. A skill with slow steps
+   * (screenshots) budgets them against it and returns what it has; the
+   * runner stops waiting for a skill at this time. Absent: no time limit.
+   */
+  deadline?: number;
 }
 
 /**

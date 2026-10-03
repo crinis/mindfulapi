@@ -9,6 +9,8 @@ import {
 import { IssueImpact } from '../../enums/issue-impact.enum';
 import type { ScannedIssue } from '../../services/axe-accessibility-scanner.service';
 import type { AgentHarnessService } from '../harness/agent-harness.service';
+import type { CollectContext } from './audit-skill.interface';
+import type { Page } from 'playwright';
 
 const baseEvidence = (
   overrides: Partial<ImageEvidence> = {},
@@ -118,6 +120,86 @@ describe('isCoveredByAxeAltRule', () => {
 
   it('returns false for missing src', () => {
     expect(isCoveredByAxeAltRule(undefined, issues)).toBe(false);
+  });
+});
+
+describe('ImageAltTextSkill.collect within a time budget', () => {
+  const skill = new ImageAltTextSkill();
+  const descriptor = (index: number) => ({
+    auditId: `mfa-${index}`,
+    selector: `main > img:nth-of-type(${index + 1})`,
+    alt: `Photo ${index}`,
+    width: 100,
+    height: 100,
+  });
+  const context = (deadline: number): CollectContext => ({
+    pageUrl: 'https://example.com',
+    axeIssues: [],
+    remainingUnits: 30,
+    maxUnitsPerPage: 30,
+    maxImageBytes: 1_500_000,
+    deadline,
+  });
+
+  let now: number;
+  beforeEach(() => {
+    now = 1_000_000;
+    jest.spyOn(Date, 'now').mockImplementation(() => now);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  /** A page with three candidate images whose screenshots run `shoot`. */
+  const pageShooting = (
+    shoot: (options: { timeout: number }) => Promise<Buffer>,
+  ): { page: Page; options: Array<Record<string, unknown>> } => {
+    const options: Array<Record<string, unknown>> = [];
+    const page = {
+      evaluate: jest.fn().mockResolvedValue([0, 1, 2].map(descriptor)),
+      locator: () => ({
+        screenshot: (screenshotOptions: { timeout: number }) => {
+          options.push(screenshotOptions);
+          return shoot(screenshotOptions);
+        },
+      }),
+    } as unknown as Page;
+    return { page, options };
+  };
+
+  it('stops taking screenshots once the evidence deadline is reached', async () => {
+    const { page, options } = pageShooting(() => {
+      now += 2000;
+      return Promise.resolve(Buffer.from('png'));
+    });
+
+    const evidence = await skill.collect(page, context(now + 3000));
+
+    expect(evidence.map((item) => item.alt)).toEqual(['Photo 0', 'Photo 1']);
+    // No screenshot may wait past the deadline.
+    expect(options.map((option) => option.timeout)).toEqual([2750, 750]);
+  });
+
+  it('drops an image whose screenshot ran out of time', async () => {
+    const { page } = pageShooting(({ timeout }) => {
+      now += timeout;
+      return now >= 1_000_000 + 1000
+        ? Promise.reject(new Error(`Timeout ${timeout}ms exceeded.`))
+        : Promise.resolve(Buffer.from('png'));
+    });
+
+    const evidence = await skill.collect(page, context(now + 3000));
+
+    // The first shot used up the budget and failed: nothing to judge.
+    expect(evidence).toEqual([]);
+  });
+
+  it('freezes CSS animations so an animated image can be captured', async () => {
+    const { page, options } = pageShooting(() =>
+      Promise.resolve(Buffer.from('png')),
+    );
+
+    await skill.collect(page, context(now + 60_000));
+
+    expect(options[0]).toMatchObject({ animations: 'disabled' });
   });
 });
 

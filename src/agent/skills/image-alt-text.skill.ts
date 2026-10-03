@@ -28,6 +28,11 @@ const SRC_MAX = 500;
 /** Confidence below which a problem verdict is downgraded to human review. */
 const MIN_CONFIDENCE = 0.5;
 
+/** Longest wait for one element screenshot (it waits for the element to settle). */
+const SCREENSHOT_TIMEOUT_MS = 5000;
+/** Time left free before the evidence deadline after the last screenshot. */
+const DEADLINE_MARGIN_MS = 250;
+
 /** WCAG success criterion this skill evaluates (Non-text Content). */
 const IMAGE_ALT_WCAG = '1.1.1';
 
@@ -163,16 +168,31 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
       ctx.rootElement,
     );
 
+    // Screenshots are budgeted against the evidence deadline: an image that
+    // never settles (script-driven motion) costs a full timeout, so the
+    // budget, not the number of images, bounds the time spent here.
+    const deadline = ctx.deadline ?? Infinity;
     const evidence: ImageEvidence[] = [];
     for (const descriptor of descriptors) {
       if (isCoveredByAxeAltRule(descriptor.src, ctx.axeIssues)) {
         continue;
       }
+      const timeout = Math.min(
+        SCREENSHOT_TIMEOUT_MS,
+        deadline - Date.now() - DEADLINE_MARGIN_MS,
+      );
+      if (timeout <= 0) {
+        this.logger.debug(
+          `AI evidence time budget used up on ${ctx.pageUrl}; ${evidence.length} images kept.`,
+        );
+        break;
+      }
       let screenshot: Buffer | undefined;
       try {
         screenshot = await page
           .locator(`[data-mfa-audit-id="${descriptor.auditId}"]`)
-          .screenshot({ type: 'png', timeout: 5000 });
+          // Frozen CSS animations let an animated image settle at once.
+          .screenshot({ type: 'png', timeout, animations: 'disabled' });
         if (screenshot.byteLength > ctx.maxImageBytes) {
           this.logger.warn(
             `Dropping oversized screenshot for ${descriptor.selector} on ${ctx.pageUrl}.`,
@@ -180,6 +200,10 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
           screenshot = undefined;
         }
       } catch (error) {
+        if (Date.now() >= deadline - DEADLINE_MARGIN_MS) {
+          // The budget ran out on this image: not judged, nothing more shot.
+          break;
+        }
         this.logger.debug(
           `Screenshot failed for ${descriptor.selector} on ${ctx.pageUrl}: ${String(error)}`,
         );
@@ -337,7 +361,10 @@ export class ImageAltTextSkill implements AuditSkill<ImageEvidence> {
             rect.width >= minPx &&
             rect.height >= minPx &&
             style.visibility !== 'hidden' &&
-            style.display !== 'none';
+            style.display !== 'none' &&
+            // Also not rendered: inside content-visibility: hidden (a
+            // screenshot would wait for it until its timeout).
+            el.checkVisibility({ visibilityProperty: true });
           if (!visible) continue;
 
           const altAttr = el.getAttribute('alt');

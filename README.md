@@ -404,6 +404,8 @@ Axe-core is deterministic: it can tell that an image _has_ an `alt` attribute, b
 
 On each page, the one-per-page skills get their request first; `image_alt_text` uses the rest of `AGENT_MAX_UNITS_PER_PAGE`. When `AGENT_MAX_UNITS_PER_SCAN` runs out, images are dropped before page-level requests.
 
+Evidence collection ends 15 seconds before the two-minute page limit. Images that never stand still (for example script-driven motion) can take seconds per screenshot; when the time runs out, only the evidence collected so far is judged, and the page keeps its axe results. Images that are not rendered (such as inside `content-visibility: hidden`) are skipped, and CSS animations are frozen for the screenshot.
+
 > **Privacy.** When the AI audit runs, the evidence above is sent to the configured LLM provider. Only enable it with a provider you trust, and consider a self-hosted/local model for sensitive sites.
 
 ### Requesting an audit
