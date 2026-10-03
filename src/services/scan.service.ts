@@ -153,8 +153,10 @@ export class ScanService {
           `Failed to delete unqueued scan ${savedScan.id}: ${String(deleteError)}`,
         );
       });
+      // Normally the row is gone by now, so the message does not claim that a
+      // scan exists.
       throw new ServiceUnavailableException(
-        'Scan was created but could not be queued for processing. Please retry.',
+        'The scan could not be queued for processing. Please retry.',
       );
     }
 

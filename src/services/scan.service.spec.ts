@@ -884,7 +884,7 @@ describe('ScanService', () => {
         }),
       ).rejects.toThrow(
         new ServiceUnavailableException(
-          'Scan was created but could not be queued for processing. Please retry.',
+          'The scan could not be queued for processing. Please retry.',
         ),
       );
 
