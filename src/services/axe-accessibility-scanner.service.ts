@@ -179,8 +179,13 @@ export class AxeAccessibilityScanner {
    *   them itself — so they cannot be stopped in flight. A request listener
    *   checks every hop instead; a hop to a blocked host marks its page as
    *   violating and closes it. {@link assertPageAllowed} then rejects the page,
-   *   so nothing it loaded is analysed, stored, or sent to the AI audit. The
-   *   hop request itself has already been sent by then.
+   *   so the scanner never analyses, stores or sends to the AI audit anything
+   *   it loaded. The hop's request has already been sent and its response
+   *   reaches the browser, though: a malicious page's own script can read a
+   *   CORS-readable response from the blocked host and exfiltrate it before
+   *   the close completes. The host is generally not yet in the decision cache
+   *   when the hop fires (the hop is the first contact with it), so the close
+   *   cannot be made synchronous; fully closing this needs an egress proxy.
    * - WebSockets opened by pages are checked before they connect. This is
    *   Playwright's page-level `WebSocket` shim: it does not reach dedicated
    *   workers, and page script can get past it, so it is defence in depth,
