@@ -276,7 +276,7 @@ New: `DELETE /v1/scans/:id`, `POST /v1/scans/:id/cancel`, `GET /health`, respons
 
 ## Configuration
 
-All configuration uses environment variables; [`.env.example`](.env.example) lists them all. Values are validated at startup: an out-of-range or malformed value (e.g. `SCAN_CONCURRENCY=12`) stops the server with an error instead of being clamped.
+All configuration uses environment variables; [`.env.example`](.env.example) lists them all. An empty value (`VAR=`) means the same as leaving the variable unset, so the default applies. Values are validated at startup: an out-of-range or malformed value (e.g. `SCAN_CONCURRENCY=12`) stops the server with an error instead of being clamped.
 
 **With Docker Compose,** every variable in `.env` reaches the API container, except the service wiring: `NODE_ENV`, `DATABASE_PATH`, `PLAYWRIGHT_WS_URL`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` and `PORT` are pinned by `docker-compose.yml` to the bundled containers. `PORT` in `.env` only changes the published host port.
 

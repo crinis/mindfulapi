@@ -219,11 +219,20 @@ export class EnvironmentVariables {
 /**
  * Validation hook for `ConfigModule.forRoot` — throws a readable error at
  * bootstrap when any environment variable has an invalid value.
+ *
+ * An empty value (`VAR=` in `.env`, or a `${VAR:-}` default in compose) means
+ * "unset" for every variable: the config namespaces read each one as
+ * `process.env.VAR || default` (an empty `REDIS_PASSWORD` is no password, an
+ * empty `AGENT_SKILLS` allows every skill), so validation must not reject what
+ * the application treats as unset.
  */
 export function validate(
   config: Record<string, unknown>,
 ): EnvironmentVariables {
-  const validated = plainToInstance(EnvironmentVariables, config, {
+  const setValues = Object.fromEntries(
+    Object.entries(config).filter(([, value]) => value !== ''),
+  );
+  const validated = plainToInstance(EnvironmentVariables, setValues, {
     enableImplicitConversion: true,
   });
   const errors = validateSync(validated, { skipMissingProperties: true });

@@ -41,7 +41,9 @@ services:
     # THROTTLE_*, AGENT_*, ...). The `environment:` entries below take precedence
     # over env_file, so the service wiring (NODE_ENV, DATABASE_PATH,
     # PLAYWRIGHT_WS_URL, REDIS_*, PORT) stays pinned even when .env holds
-    # local-development values.
+    # local-development values. The entries with a `${VAR:-default}` repeat the
+    # application default; for those, a variable set in the shell that runs
+    # docker compose overrides .env.
     env_file:
       - path: .env
         required: false
@@ -59,7 +61,6 @@ services:
       # authentication (not recommended), set AUTH_TOKEN= (empty) together with
       # AUTH_DISABLED=true in .env.
       - AUTH_TOKEN=${AUTH_TOKEN?AUTH_TOKEN must be set in .env (or AUTH_TOKEN= with AUTH_DISABLED=true)}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
       - IGNORE_HTTPS_ERRORS=${IGNORE_HTTPS_ERRORS:-false}
       - CLEANUP_ENABLED=${CLEANUP_ENABLED:-true}
       - CLEANUP_RETENTION_DAYS=${CLEANUP_RETENTION_DAYS:-30}
@@ -67,14 +68,9 @@ services:
       - CRAWL_CONCURRENCY=${CRAWL_CONCURRENCY:-4}
       # Optional AI accessibility audit (disabled by default). See README.
       # Element screenshots and page text (headings, links, form labels, title)
-      # are sent to the configured provider.
+      # are sent to the configured provider. AGENT_PROVIDER, AGENT_MODEL,
+      # AGENT_API_KEY, AGENT_SKILLS etc. come from .env through env_file.
       - AGENT_ENABLED=${AGENT_ENABLED:-false}
-      - AGENT_PROVIDER=${AGENT_PROVIDER:-}
-      - AGENT_MODEL=${AGENT_MODEL:-}
-      - AGENT_API_KEY=${AGENT_API_KEY:-}
-      - AGENT_BASE_URL=${AGENT_BASE_URL:-}
-      # Empty = the application default (all built-in skills).
-      - AGENT_SKILLS=${AGENT_SKILLS:-}
       - AGENT_ALLOWED_SCAN_MODES=${AGENT_ALLOWED_SCAN_MODES:-single_url}
     volumes:
       - mindfulapi_data:/data

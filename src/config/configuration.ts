@@ -162,7 +162,7 @@ function clampFloat(
 /** HTTP server and general application settings. */
 export const appConfig = registerAs('app', () => ({
   port: clampInt(process.env.PORT, 3000, 1, 65535),
-  nodeEnv: process.env.NODE_ENV ?? 'development',
+  nodeEnv: process.env.NODE_ENV || 'development',
   /** Allowed CORS origins; empty list means CORS stays disabled. */
   corsOrigins: splitList(process.env.CORS_ORIGINS),
 }));
@@ -185,7 +185,7 @@ export const redisConfig = registerAs('redis', () => ({
 /** SQLite database location and logging. */
 export const databaseConfig = registerAs('database', () => ({
   path: process.env.DATABASE_PATH || './data/database.sqlite',
-  logging: (process.env.NODE_ENV ?? 'development') !== 'production',
+  logging: (process.env.NODE_ENV || 'development') !== 'production',
 }));
 
 /** Scan execution settings shared by the processor and browser services. */
