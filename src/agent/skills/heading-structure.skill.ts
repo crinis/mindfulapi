@@ -306,8 +306,90 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
           return parts.join(' > ');
         };
 
+        const HEADING_SELECTOR = 'h1,h2,h3,h4,h5,h6,[role="heading"]';
+        /** Elements whose text is not page content. */
+        const NON_CONTENT = new Set([
+          'SCRIPT',
+          'STYLE',
+          'NOSCRIPT',
+          'TEMPLATE',
+        ]);
+        /** Elements that run inside a line: no word break around them. */
+        const INLINE = new Set([
+          'A',
+          'ABBR',
+          'B',
+          'BDI',
+          'BDO',
+          'CITE',
+          'CODE',
+          'DATA',
+          'DFN',
+          'EM',
+          'I',
+          'KBD',
+          'MARK',
+          'Q',
+          'S',
+          'SAMP',
+          'SMALL',
+          'SPAN',
+          'STRONG',
+          'SUB',
+          'SUP',
+          'TIME',
+          'U',
+          'VAR',
+        ]);
+
+        // The page is read as its flat tree: an open shadow root renders in
+        // place of its host's children, and a slot renders the host children
+        // assigned to it. So headings inside web components are found, in
+        // reading order, and count for the sections around them.
+        const flatChildren = (node: Node): Node[] => {
+          if (node instanceof Element && node.shadowRoot) {
+            return Array.from(node.shadowRoot.childNodes);
+          }
+          if (node instanceof HTMLSlotElement) {
+            const assigned = node.assignedNodes();
+            if (assigned.length > 0) return assigned;
+          }
+          return Array.from(node.childNodes);
+        };
+        const root: Node = document.body ?? document.documentElement;
+        const flatElements: Element[] = [];
+        const listElements = (node: Node): void => {
+          for (const child of flatChildren(node)) {
+            if (!(child instanceof Element)) continue;
+            flatElements.push(child);
+            listElements(child);
+          }
+        };
+        listElements(root);
+
+        /** The flat-tree parent: the slot, the parent, or the shadow host. */
+        const flatParent = (el: Element): Element | null => {
+          if (el.assignedSlot) return el.assignedSlot;
+          if (el.parentElement) return el.parentElement;
+          const owner = el.getRootNode();
+          return owner instanceof ShadowRoot ? owner.host : null;
+        };
+        const flatClosest = (el: Element, selector: string): Element | null => {
+          for (let n: Element | null = el; n; n = flatParent(n)) {
+            if (n.matches(selector)) return n;
+          }
+          return null;
+        };
+        const containsHeading = (node: Node): boolean =>
+          flatChildren(node).some(
+            (child) =>
+              child instanceof Element &&
+              (child.matches(HEADING_SELECTOR) || containsHeading(child)),
+          );
+
         const nearestLandmark = (el: Element): string | undefined => {
-          const landmark = el.closest(
+          const landmark = flatClosest(
+            el,
             'header,nav,main,aside,footer,section,article,[role="banner"],[role="navigation"],[role="main"],[role="complementary"],[role="contentinfo"],[role="region"]',
           );
           if (!landmark) return undefined;
@@ -316,30 +398,58 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
         };
 
         // --- Heading outline ---------------------------------------------
-        const headingEls = Array.from(
-          document.querySelectorAll<HTMLElement>(
-            'h1,h2,h3,h4,h5,h6,[role="heading"]',
-          ),
-        ).filter((el) => !el.closest('[aria-hidden="true"]') && isVisible(el));
+        const headingEls = flatElements.filter(
+          (el) =>
+            el.matches(HEADING_SELECTOR) &&
+            !flatClosest(el, '[aria-hidden="true"]') &&
+            isVisible(el),
+        );
+
+        // Content between each heading and the next: the text met after it in
+        // the flat tree, outside any heading.
+        const headingIndex = new Map(headingEls.map((el, i) => [el, i]));
+        const snippets = headingEls.map(() => '');
+        let current = -1;
+        // Whitespace is squashed as it is appended, so a snippet never grows
+        // much beyond its cap however much markup whitespace follows.
+        const append = (text: string, inHeading: boolean): void => {
+          if (
+            !inHeading &&
+            current >= 0 &&
+            snippets[current].trimStart().length < headingSnippet
+          ) {
+            snippets[current] = `${snippets[current]}${text}`.replace(
+              /\s+/g,
+              ' ',
+            );
+          }
+        };
+        const gatherText = (node: Node, inHeading: boolean): void => {
+          for (const child of flatChildren(node)) {
+            if (child.nodeType === Node.TEXT_NODE) {
+              append(child.textContent ?? '', inHeading);
+            } else if (
+              child instanceof Element &&
+              !NON_CONTENT.has(child.tagName)
+            ) {
+              const index = headingIndex.get(child);
+              if (index !== undefined) current = index;
+              // Blocks separate words; inline elements run within a line.
+              const separator = INLINE.has(child.tagName) ? '' : ' ';
+              append(separator, inHeading);
+              gatherText(child, inHeading || index !== undefined);
+              append(separator, inHeading);
+            }
+          }
+        };
+        gatherText(root, false);
 
         const headings = headingEls.slice(0, maxHeadings).map((el, i) => {
           const tag = el.tagName.toLowerCase();
           const level = /^h[1-6]$/.test(tag)
             ? Number(tag[1])
             : Number.parseInt(el.getAttribute('aria-level') ?? '', 10) || 2;
-
-          // Content between this heading and the next, via a DOM Range.
-          let snippet = '';
-          try {
-            const range = document.createRange();
-            range.setStartAfter(el);
-            const next = headingEls[i + 1];
-            if (next) range.setEndBefore(next);
-            else range.setEndAfter(document.body);
-            snippet = collapse(range.toString()).slice(0, headingSnippet);
-          } catch {
-            snippet = '';
-          }
+          const snippet = collapse(snippets[i]).slice(0, headingSnippet);
 
           return {
             id: `H${i + 1}`,
@@ -353,22 +463,25 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
         });
 
         // --- Fake-heading candidates (styled text acting as a heading) ----
-        const fakeHeadingCandidates: Array<{
-          id: string;
-          selector: string;
-          text: string;
-          fontSizePx: number;
-          fontWeight: number;
+        const styledBlocks: Array<{
+          el: Element;
+          candidate: {
+            id: string;
+            selector: string;
+            text: string;
+            fontSizePx: number;
+            fontWeight: number;
+          };
         }> = [];
         const bodyFontSize =
           Number.parseFloat(window.getComputedStyle(document.body).fontSize) ||
           16;
-        for (const el of Array.from(
-          document.querySelectorAll<HTMLElement>('p,div,span,b,strong'),
-        )) {
+        for (const el of flatElements) {
+          if (!el.matches('p,div,span,b,strong')) continue;
           if (
-            el.closest(
-              'h1,h2,h3,h4,h5,h6,[role="heading"],a,button,label,[aria-hidden="true"]',
+            flatClosest(
+              el,
+              `${HEADING_SELECTOR},a,button,label,[aria-hidden="true"]`,
             )
           ) {
             continue;
@@ -407,14 +520,29 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
           const following = collapse(el.nextElementSibling?.textContent);
           if (following.length < fakeFollowingMin) continue;
 
-          fakeHeadingCandidates.push({
-            id: '',
-            selector: cssPath(el),
-            text,
-            fontSizePx: Math.round(fontSizePx),
-            fontWeight,
+          // A styled wrapper around a real heading is that heading.
+          if (containsHeading(el)) continue;
+
+          styledBlocks.push({
+            el,
+            candidate: {
+              id: '',
+              selector: cssPath(el),
+              text,
+              fontSizePx: Math.round(fontSizePx),
+              fontWeight,
+            },
           });
         }
+        // Nested styled blocks present the same text once: keep the innermost.
+        const fakeHeadingCandidates = styledBlocks
+          .filter(
+            ({ el }) =>
+              !styledBlocks.some(
+                (other) => other.el !== el && el.contains(other.el),
+              ),
+          )
+          .map(({ candidate }) => candidate);
         fakeHeadingCandidates.sort((a, b) => b.fontSizePx - a.fontSizePx);
         fakeHeadingCandidates.length = Math.min(
           fakeHeadingCandidates.length,
@@ -433,13 +561,12 @@ export class HeadingStructureSkill implements AuditSkill<HeadingEvidence> {
           snippet: string;
           textLength: number;
         }> = [];
-        for (const el of Array.from(
-          document.querySelectorAll<HTMLElement>(
-            'section,article,[role="region"]',
-          ),
-        )) {
-          if (el.closest('[aria-hidden="true"]') || !isVisible(el)) continue;
-          if (el.querySelector('h1,h2,h3,h4,h5,h6,[role="heading"]')) continue;
+        for (const el of flatElements) {
+          if (!el.matches('section,article,[role="region"]')) continue;
+          if (flatClosest(el, '[aria-hidden="true"]') || !isVisible(el)) {
+            continue;
+          }
+          if (containsHeading(el)) continue;
           const text = collapse(el.textContent);
           if (text.length < sectionMinText) continue;
           unheadedSections.push({

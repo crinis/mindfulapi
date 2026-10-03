@@ -397,7 +397,7 @@ Axe-core is deterministic: it can tell that an image _has_ an `alt` attribute, b
 | Skill | Requests | Evidence (sent to the LLM provider) |
 | --- | --- | --- |
 | `image_alt_text` | one per image (vision) | Cropped element screenshot + accessible-name attributes |
-| `heading_structure` | one per page (text-only) | Heading outline (level, text, short content snippet each), plus styled-block and unheaded-section candidates |
+| `heading_structure` | one per page (text-only) | Heading outline (level, text, short content snippet each; headings in open shadow roots of web components included), plus styled-block and unheaded-section candidates |
 | `link_purpose` | one per page (text-only) | Deduplicated inventory of named links: accessible name, compact destination, surrounding context. Repeated nav/footer links collapse to one line |
 | `form_labels` | one per page (text-only) | Form controls: accessible name and its source, control type, placeholder, existing described-by instructions, constraint hints |
 | `page_title` | one per page (text-only) | The `<title>` plus top headings and meta description as topic context |
