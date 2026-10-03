@@ -378,7 +378,7 @@ export class LinkPurposeSkill implements AuditSkill<LinkEvidence> {
           const text = name.text.slice(0, textMax);
           // Collapse links repeated across nav/footer (same name + target) so a
           // duplicated menu costs one line, not dozens, of prompt tokens.
-          const key = `${name.source === 'text' ? '' : name.source} ${text.toLowerCase()} ${destination ?? ''}`;
+          const key = `${name.source === 'text' ? '' : name.source}\0${text.toLowerCase()}\0${destination ?? ''}`;
           const existing = byKey.get(key);
           if (existing) {
             existing.count += 1;

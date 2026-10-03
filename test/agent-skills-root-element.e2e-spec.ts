@@ -96,6 +96,31 @@ describe('AI skills and scanOptions.rootElement (real browser)', () => {
     expect(evidence.links.map((link) => link.text)).toEqual(['main link']);
   });
 
+  it('collapses repeated links (same name and target) into one entry', async () => {
+    const links = await context.newPage();
+    try {
+      await links.setContent(`<!doctype html><html><head><title>Links</title></head><body>
+        <nav><a href="/a">Docs</a> <a href="/b">Docs</a></nav>
+        <footer><a href="/a">Docs</a> <a href="/a" aria-label="Docs">x</a></footer>
+      </body></html>`);
+      const [evidence] = await new LinkPurposeSkill().collect(links, ctx());
+      expect(
+        evidence.links.map(({ text, nameSource, destination, count }) => [
+          text,
+          nameSource,
+          destination?.replace(/^[^/]*/, ''),
+          count,
+        ]),
+      ).toEqual([
+        ['Docs', 'text', '/a', 2],
+        ['Docs', 'text', '/b', 1],
+        ['Docs', 'aria-label', '/a', 1],
+      ]);
+    } finally {
+      await links.close();
+    }
+  });
+
   it('lists form fields only inside the root element', async () => {
     const [evidence] = await new FormLabelsSkill().collect(page, ctx('main'));
     expect(evidence.fields.map((field) => field.name)).toEqual(['main field']);
