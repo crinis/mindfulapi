@@ -163,6 +163,11 @@ export class AgentAuditService {
    * when cancellation is observed. Token usage is summed only for
    * the log line — the unit caps and per-request output-token cap already bound
    * total spend.
+   *
+   * An error outside a unit (the cancellation check's database read) fails
+   * the audit: the other workers start no further unit, and the method
+   * rejects only once they have finished the units they had started, so no
+   * request or write of this run outlives it into a retry.
    */
   async evaluate(
     scan: Scan,
@@ -183,43 +188,58 @@ export class AgentAuditService {
     let completed = 0;
     let failed = 0;
     let tokensSpent = 0;
-    let canceled = false;
+    /** Set on cancellation, or when a worker failed outside a unit. */
+    let stopped = false;
+
+    const evaluateUnit = async (unit: CollectedUnit): Promise<void> => {
+      try {
+        const drafts = await unit.skill.evaluate(unit.evidence, this.harness);
+        for (const draft of drafts) {
+          // Usage is attributed to one draft per request (see AuditSkill),
+          // so summing across the array counts each request's tokens once.
+          tokensSpent += draft.usage.inputTokens + draft.usage.outputTokens;
+          if (draft.category !== 'appropriate') {
+            await this.persist(scan.id, draft);
+          }
+        }
+        completed++;
+      } catch (error) {
+        // Nothing is stored for the unit: it was not checked.
+        failed++;
+        this.logger.warn(
+          `Skill ${unit.skill.id} could not evaluate a unit on ${unit.evidence.pageUrl}: ${String(error)}`,
+        );
+      }
+    };
 
     const worker = async (): Promise<void> => {
-      while (true) {
-        if (canceled) return;
-        const i = index++;
-        if (i >= units.length) return;
-
-        if (await isCanceled()) {
-          canceled = true;
-          return;
-        }
-
-        const unit = units[i];
-        try {
-          const drafts = await unit.skill.evaluate(unit.evidence, this.harness);
-          for (const draft of drafts) {
-            // Usage is attributed to one draft per request (see AuditSkill),
-            // so summing across the array counts each request's tokens once.
-            tokensSpent += draft.usage.inputTokens + draft.usage.outputTokens;
-            if (draft.category !== 'appropriate') {
-              await this.persist(scan.id, draft);
-            }
+      try {
+        while (!stopped) {
+          const i = index++;
+          if (i >= units.length) return;
+          if (await isCanceled()) {
+            stopped = true;
+            return;
           }
-          completed++;
-        } catch (error) {
-          // Nothing is stored for the unit: it was not checked.
-          failed++;
-          this.logger.warn(
-            `Skill ${unit.skill.id} could not evaluate a unit on ${unit.evidence.pageUrl}: ${String(error)}`,
-          );
+          await evaluateUnit(units[i]);
         }
+      } catch (error) {
+        stopped = true;
+        throw error;
       }
     };
 
     const poolSize = Math.min(this.config.concurrency, units.length);
-    await Promise.all(Array.from({ length: poolSize }, () => worker()));
+    const outcomes = await Promise.allSettled(
+      Array.from({ length: poolSize }, () => worker()),
+    );
+    const failure = outcomes.find(
+      (outcome): outcome is PromiseRejectedResult =>
+        outcome.status === 'rejected',
+    );
+    if (failure) {
+      throw failure.reason;
+    }
 
     await this.scanRepository.update(scan.id, {
       aiTasksCompleted: completed,

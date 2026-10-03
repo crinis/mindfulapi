@@ -282,6 +282,42 @@ describe('AgentAuditService.evaluate', () => {
     expect(scanRepository.update).not.toHaveBeenCalled();
   });
 
+  it('stops every worker when one of them fails', async () => {
+    const { service } = makeService({ concurrency: 4 });
+    let evaluated = 0;
+    let evaluatedAfterRejection = 0;
+    let rejected = false;
+    const skill = {
+      id: AgentSkill.IMAGE_ALT_TEXT,
+      evaluate: jest.fn(async () => {
+        evaluated++;
+        if (rejected) evaluatedAfterRejection++;
+        // A model request: other workers run meanwhile.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return [{ ...problemDraft(), category: 'appropriate' }];
+      }),
+    } as unknown as AuditSkill;
+    const units = Array.from({ length: 20 }, () => ({ skill, evidence }));
+    // The cancellation check hits a transient database error on its 6th call.
+    let checks = 0;
+    const isCanceled = (): Promise<boolean> =>
+      ++checks === 6
+        ? Promise.reject(new Error('SQLITE_BUSY: database is locked'))
+        : Promise.resolve(false);
+
+    await expect(
+      service.evaluate({ id: 1 } as Scan, units, isCanceled),
+    ).rejects.toThrow('SQLITE_BUSY');
+    rejected = true;
+    // Let any worker that was still running reach its next unit.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Five units passed their check before the failing one; each of the
+    // three other workers finishes at most the unit it had started.
+    expect(evaluated).toBeLessThanOrEqual(5 + 3);
+    expect(evaluatedAfterRejection).toBe(0);
+  });
+
   it('stops evaluating once cancellation is observed', async () => {
     const { service, findingRepository } = makeService({ concurrency: 1 });
     const evaluate = jest.fn().mockResolvedValue([problemDraft()]);
