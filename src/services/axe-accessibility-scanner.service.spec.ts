@@ -18,6 +18,7 @@ import {
   TargetPolicyViolationError,
 } from './axe-accessibility-scanner.service';
 import type { UrlPolicyService } from './url-policy.service';
+import { installInertConnectionApis } from './inert-connection-apis';
 
 /** Minimal Playwright Route stub capturing continue/abort outcomes. */
 function makeRoute(url: string) {
@@ -155,22 +156,13 @@ describe('AxeAccessibilityScanner target-policy guard', () => {
     );
   });
 
-  it('removes page APIs whose connections Playwright never routes', async () => {
+  it('replaces page APIs whose connections Playwright never routes with inert ones', async () => {
     await build(false).createContext(browser as any);
-    expect(context.addInitScript).toHaveBeenCalledTimes(1);
 
-    const names = [
-      'SharedWorker',
-      'WebSocketStream',
-      'WebTransport',
-      'RTCPeerConnection',
-      'webkitRTCPeerConnection',
-    ];
-    const [script] = context.addInitScript.mock.calls[0] as [() => void];
-    const scope = globalThis as Record<string, unknown>;
-    for (const name of names) scope[name] = class {};
-    script();
-    expect(names.filter((name) => name in scope)).toEqual([]);
+    expect(context.addInitScript).toHaveBeenCalledTimes(1);
+    expect(context.addInitScript).toHaveBeenCalledWith(
+      installInertConnectionApis,
+    );
   });
 
   it('scopes Basic Auth credentials to their origin', async () => {

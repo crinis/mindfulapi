@@ -8,8 +8,10 @@
  *   npx jest --config ./test/jest-e2e.json test/scan-target-security.e2e-spec.ts
  */
 import { randomBytes } from 'node:crypto';
+import { createSocket, Socket as UdpSocket } from 'node:dgram';
 import { join } from 'node:path';
 import { ServerResponse } from 'node:http';
+import { AddressInfo, createServer as createTcpServer, Server } from 'node:net';
 import { DataSource, Repository } from 'typeorm';
 import { Job } from 'bullmq';
 import { Browser, chromium } from 'playwright';
@@ -108,6 +110,11 @@ describe('Scan target security (real browser)', () => {
   /** The site under its loopback name instead of its address. */
   const loopbackNameUrl = (path: string): string =>
     `http://localhost:${site.port}${path}`;
+  /**
+   * Port of a TCP and UDP sink that the connection-API page points every
+   * socket at (see 'page APIs Playwright cannot route').
+   */
+  let sinkPort = 0;
   /** Policy of a deployment that only allowlists the site's host. */
   const guarded = {
     allowPrivateTargets: false,
@@ -289,6 +296,36 @@ describe('Scan target security (real browser)', () => {
             });
           </script>`,
         ),
+        // Uses every API Playwright cannot route, without feature detection,
+        // then renders two axe violations.
+        '/uses-connection-apis': (req, res) =>
+          htmlPage(
+            'Uses connection APIs',
+            `<script>
+              const sink = '127.0.0.1:${sinkPort}';
+              window.outcomes = [];
+              const worker = new SharedWorker('/shared-worker.js');
+              worker.onerror = () => outcomes.push('SharedWorker error');
+              const stream = new WebSocketStream('ws://' + sink + '/live');
+              stream.opened.catch(() => outcomes.push('WebSocketStream refused'));
+              const transport = new WebTransport('https://' + sink + '/wt');
+              transport.ready.catch(() => outcomes.push('WebTransport refused'));
+              const peer = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:' + sink }, { urls: 'turn:' + sink + '?transport=tcp', username: 'u', credential: 'p' }],
+              });
+              peer.onicegatheringstatechange = () => {
+                if (peer.iceGatheringState === 'complete') outcomes.push('ICE gathering complete');
+              };
+              peer.createDataChannel('chat');
+              peer.createOffer().then((offer) => peer.setLocalDescription(offer));
+              document.querySelector('main').insertAdjacentHTML(
+                'beforeend', '<img src="/pixel.png"><button></button>');
+            </script>`,
+          )(req, res),
+        '/shared-worker.js': (_req, res) => {
+          res.setHeader('content-type', 'application/javascript');
+          res.end('onconnect = () => {};');
+        },
         '/sw.js': (_req, res) => {
           res.setHeader('content-type', 'application/javascript');
           res.end(
@@ -557,42 +594,141 @@ describe('Scan target security (real browser)', () => {
       }
     });
 
-    it('removes page APIs whose connections Playwright cannot route', async () => {
-      const { scanner } = buildProcessor(guarded);
-      const context = await scanner.createContext(
-        await browserService.getBrowser(),
-      );
-      try {
-        const page = await context.newPage();
-        await page.goto(siteUrl('/index.html'));
+    describe('page APIs Playwright cannot route', () => {
+      let tcpSink: Server;
+      let udpSink: UdpSocket;
+      /** Connections and datagrams the sink received. */
+      const sinkTraffic: string[] = [];
 
-        const available = await page.evaluate(() => {
-          const names = [
-            'SharedWorker',
-            'WebSocketStream',
-            'WebTransport',
-            'RTCPeerConnection',
-            'webkitRTCPeerConnection',
-          ];
-          const frame = document.createElement('iframe');
-          document.body.append(frame);
-          const scopes = {
-            page: globalThis as unknown as Record<string, unknown>,
-            frame: frame.contentWindow as unknown as Record<string, unknown>,
-          };
-          return Object.fromEntries(
-            Object.entries(scopes).map(([where, scope]) => [
-              where,
-              names.filter((name) => typeof scope[name] !== 'undefined'),
-            ]),
+      beforeAll(async () => {
+        tcpSink = createTcpServer((socket) => {
+          sinkTraffic.push('tcp connection');
+          socket.destroy();
+        });
+        await new Promise<void>((resolve) =>
+          tcpSink.listen(0, '127.0.0.1', resolve),
+        );
+        sinkPort = (tcpSink.address() as AddressInfo).port;
+        udpSink = createSocket('udp4');
+        udpSink.on('message', () => sinkTraffic.push('udp datagram'));
+        await new Promise<void>((resolve) =>
+          udpSink.bind(sinkPort, '127.0.0.1', resolve),
+        );
+      });
+
+      afterAll(async () => {
+        await new Promise<void>((resolve) => udpSink.close(() => resolve()));
+        await new Promise<void>((resolve) => tcpSink.close(() => resolve()));
+      });
+
+      beforeEach(() => {
+        sinkTraffic.length = 0;
+      });
+
+      /** Opens the page and waits for what its script reported. */
+      async function pageOutcomes(
+        overrides: Partial<ReturnType<typeof scanConfig>>,
+        expected: number,
+      ): Promise<{ outcomes: string[]; replaced: Record<string, string[]> }> {
+        const { scanner } = buildProcessor(overrides);
+        const context = await scanner.createContext(
+          await browserService.getBrowser(),
+        );
+        try {
+          const page = await context.newPage();
+          await page.goto(siteUrl('/uses-connection-apis'));
+          await page.waitForFunction(
+            (count) =>
+              (window as unknown as { outcomes: string[] }).outcomes.length >=
+              count,
+            expected,
           );
+          // Room for a connection attempt that is still on its way.
+          await page.waitForTimeout(500);
+          return await page.evaluate(() => {
+            const names = [
+              'SharedWorker',
+              'WebSocketStream',
+              'WebTransport',
+              'RTCPeerConnection',
+            ];
+            const frame = document.createElement('iframe');
+            document.body.append(frame);
+            const scopes = {
+              page: globalThis as unknown as Record<string, unknown>,
+              frame: frame.contentWindow as unknown as Record<string, unknown>,
+            };
+            return {
+              outcomes: [
+                ...(window as unknown as { outcomes: string[] }).outcomes,
+              ].sort(),
+              // Stand-ins are not native code.
+              replaced: Object.fromEntries(
+                Object.entries(scopes).map(([where, scope]) => [
+                  where,
+                  names.filter(
+                    (name) =>
+                      typeof scope[name] === 'function' &&
+                      !Function.prototype.toString
+                        .call(scope[name])
+                        .includes('[native code]'),
+                  ),
+                ]),
+              ),
+            };
+          });
+        } finally {
+          await context.close();
+        }
+      }
+
+      it('lets the native APIs connect without the guard (control)', async () => {
+        await pageOutcomes({ allowPrivateTargets: true }, 1);
+
+        expect(sinkTraffic).toContain('tcp connection');
+        expect(sinkTraffic).toContain('udp datagram');
+      });
+
+      it('replaces them with stand-ins that fail like a refused connection and never connect', async () => {
+        const { outcomes, replaced } = await pageOutcomes(guarded, 4);
+
+        expect(outcomes).toEqual([
+          'ICE gathering complete',
+          'SharedWorker error',
+          'WebSocketStream refused',
+          'WebTransport refused',
+        ]);
+        const all = [
+          'SharedWorker',
+          'WebSocketStream',
+          'WebTransport',
+          'RTCPeerConnection',
+        ];
+        expect(replaced).toEqual({ page: all, frame: all });
+        expect(sinkTraffic).toEqual([]);
+        expect(
+          site.requests.filter((request) =>
+            request.url.startsWith('/shared-worker.js'),
+          ),
+        ).toEqual([]);
+        expect(internal.requests).toEqual([]);
+      });
+
+      it('scans a page that uses them without feature detection', async () => {
+        const { processor } = buildProcessor(guarded);
+
+        const scan = await runScan(processor, {
+          mode: ScanMode.SINGLE_URL,
+          targets: [siteUrl('/uses-connection-apis')],
         });
 
-        expect(available).toEqual({ page: [], frame: [] });
-        expect(internal.requests).toEqual([]);
-      } finally {
-        await context.close();
-      }
+        expect(scan.pagesScanned).toBe(1);
+        expect(scan.issues.map((issue) => issue.ruleId).sort()).toEqual([
+          'button-name',
+          'image-alt',
+        ]);
+        expect(sinkTraffic).toEqual([]);
+      });
     });
   });
 
