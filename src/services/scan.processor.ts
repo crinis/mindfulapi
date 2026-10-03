@@ -406,6 +406,9 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
   /**
    * Collects trigger-filtered agent evidence from a live page. Never throws —
    * agent collection must not fail a page scan.
+   *
+   * The evidence (and so every finding) carries the normalized page URL, the
+   * form issues are stored under and page-URL filters match against.
    */
   private async collectAgentEvidence(
     agent: AgentRun | undefined,
@@ -420,7 +423,7 @@ export class ScanProcessor extends WorkerHost implements OnModuleDestroy {
       return await this.agentAudit.collectForPage(
         agent.skills,
         page,
-        pageUrl,
+        normalizeHttpUrl(pageUrl) ?? pageUrl,
         issues,
         agent.buffer.length,
       );

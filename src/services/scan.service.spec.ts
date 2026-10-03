@@ -611,6 +611,39 @@ describe('ScanService', () => {
       expect(result.aiAudit?.status).toBe(AiAuditStatus.SKIPPED);
     });
 
+    it('returns AI findings of a page asked for with a trailing slash', async () => {
+      mockRepo.findOne.mockResolvedValue(
+        makeScan({
+          status: ScanStatus.COMPLETED,
+          aiAuditSkills: [AgentSkill.PAGE_TITLE],
+          aiTasksTotal: 1,
+        }),
+      );
+      // Collected at https://example.com/de/ and stored, like issues, under
+      // the normalized page URL.
+      const finding = {
+        id: 3,
+        skill: AgentSkill.PAGE_TITLE,
+        pageUrl: 'https://example.com/de',
+        category: 'inaccurate',
+        severity: IssueImpact.MODERATE,
+        confidence: 0.9,
+        message: 'Title does not describe the page',
+      } as AgentFinding;
+      mockAgentFindingRepo.find.mockImplementation(
+        ({ where }: { where: { pageUrl?: { _value: string[] } } }) =>
+          Promise.resolve(
+            where.pageUrl?._value.includes(finding.pageUrl!) ? [finding] : [],
+          ),
+      );
+
+      const result = await service.findOne(1, ['https://example.com/de/']);
+
+      expect(result.agentFindings).toEqual([
+        expect.objectContaining({ pageUrl: 'https://example.com/de' }),
+      ]);
+    });
+
     it('filters issues in SQL using a normalized pageUrl IN clause', async () => {
       mockRepo.findOne.mockResolvedValue(
         makeScan({ status: ScanStatus.COMPLETED }),

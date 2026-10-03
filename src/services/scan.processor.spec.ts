@@ -1247,6 +1247,54 @@ describe('ScanProcessor', () => {
     });
   });
 
+  it('collects AI evidence under the normalized page URL its issues are stored under', async () => {
+    mockScanQb.getOne.mockResolvedValue(
+      makeScan({ targets: ['https://example.com/de/'] }),
+    );
+    mockAgentAudit.resolveSkills.mockReturnValue([{ id: 'page_title' }]);
+    (mockAgentAudit as any).remainingScanUnits = jest.fn().mockReturnValue(10);
+    // The browser lands on the trailing-slash URL.
+    mockScanner.scanPage.mockResolvedValue({
+      finalUrl: 'https://example.com/de/',
+      issues: [
+        {
+          ruleId: 'image-alt',
+          description: 'Images must have alternative text',
+          impact: IssueImpact.CRITICAL,
+          pageUrl: 'https://example.com/de/',
+        },
+      ],
+    });
+
+    await processor.process({ data: { scanId: 1 } } as any);
+
+    expect(mockAgentAudit.collectForPage.mock.calls[0][2]).toBe(
+      'https://example.com/de',
+    );
+    expect((mockIssueRepo.save as jest.Mock).mock.calls[0][0][0].pageUrl).toBe(
+      'https://example.com/de',
+    );
+  });
+
+  it('collects crawl-page evidence under the normalized page URL', async () => {
+    mockScanQb.getOne.mockResolvedValue(
+      makeScan({ mode: ScanMode.CRAWL, targets: ['https://example.com/de/'] }),
+    );
+    mockAgentAudit.resolveSkills.mockReturnValue([{ id: 'page_title' }]);
+    (mockAgentAudit as any).remainingScanUnits = jest.fn().mockReturnValue(10);
+    mockScanner.openPage.mockResolvedValue({
+      finalUrl: 'https://example.com/de/',
+      status: 200,
+    });
+    mockCrawlerRunHandler = simulateCrawl(['https://example.com/de']).run;
+
+    await processor.process({ data: { scanId: 1 } } as any);
+
+    expect(mockAgentAudit.collectForPage.mock.calls[0][2]).toBe(
+      'https://example.com/de',
+    );
+  });
+
   it('buffers collected evidence only after the page passed the final policy check', async () => {
     mockScanQb.getOne.mockResolvedValue(
       makeScan({ targets: ['https://example.com'] }),
