@@ -685,12 +685,37 @@ describe('ScanService', () => {
   });
 
   describe('create() enqueue failure', () => {
-    it('leaves the scan PENDING and throws 503 when the queue is unavailable', async () => {
-      const saved = makeScan();
+    beforeEach(() => {
+      const saved = makeScan({ id: 42 });
       mockRepo.create.mockReturnValue(saved);
       mockRepo.save.mockResolvedValue(saved);
-      mockRepo.update = jest.fn().mockResolvedValue(undefined);
+      mockRepo.update = jest.fn().mockResolvedValue({ affected: 1 });
       mockQueue.addScanJob.mockRejectedValue(new Error('redis down'));
+    });
+
+    it('deletes the scan it could not queue and throws 503', async () => {
+      mockRepo.delete = jest.fn().mockResolvedValue({ affected: 1 });
+
+      await expect(
+        service.create({
+          mode: ScanMode.SINGLE_URL,
+          url: 'https://example.com',
+        }),
+      ).rejects.toThrow(
+        new ServiceUnavailableException(
+          'Scan was created but could not be queued for processing. Please retry.',
+        ),
+      );
+
+      // A retrying client must not end up with a second scan: the reconciliation
+      // sweep would otherwise enqueue this row later, running both (double
+      // browser and AI spend) while the client never learns the first id.
+      expect(mockRepo.delete).toHaveBeenCalledWith(42);
+      expect(mockRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('still answers 503 when the row cannot be deleted either', async () => {
+      mockRepo.delete = jest.fn().mockRejectedValue(new Error('db locked'));
 
       await expect(
         service.create({
@@ -698,11 +723,6 @@ describe('ScanService', () => {
           url: 'https://example.com',
         }),
       ).rejects.toThrow(ServiceUnavailableException);
-
-      // The row must stay PENDING (not moved to a terminal FAILED) so the
-      // reconciliation sweep, which only re-enqueues stale PENDING/RUNNING
-      // scans, can recover it. So the failure path performs no status update.
-      expect(mockRepo.update).not.toHaveBeenCalled();
     });
   });
 

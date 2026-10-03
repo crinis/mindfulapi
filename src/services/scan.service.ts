@@ -135,13 +135,19 @@ export class ScanService {
     try {
       await this.scanQueueService.addScanJob(savedScan.id);
     } catch (error) {
-      // The row exists but could not be queued (e.g. Redis down). Leave it
-      // PENDING — the reconciliation sweep only re-enqueues stale PENDING/
-      // RUNNING scans, so marking it FAILED would strand it in a terminal
-      // state forever. The 503 tells the caller the create did not fully take.
+      // The row exists but could not be queued (e.g. Redis down). The 503
+      // asks the client to retry, so drop the row: left PENDING, the
+      // reconciliation sweep would enqueue it later and the retrying client
+      // would get two scans — without ever learning this one's id.
       this.logger.error(
         `Failed to enqueue scan ${savedScan.id}: ${String(error)}`,
       );
+      await this.scanRepository.delete(savedScan.id).catch((deleteError) => {
+        // Left for reconciliation, which enqueues it once Redis is back.
+        this.logger.error(
+          `Failed to delete unqueued scan ${savedScan.id}: ${String(deleteError)}`,
+        );
+      });
       throw new ServiceUnavailableException(
         'Scan was created but could not be queued for processing. Please retry.',
       );
